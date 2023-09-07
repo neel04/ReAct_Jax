@@ -5,7 +5,7 @@ import jax.numpy as jnp
 from functools import partial
 from jaxtyping import Array, Float16, PRNGKeyArray
 from typing import Optional
-from blocks import MLP, LinearProj, LiteAttention, NewGELU
+from .blocks import MLP, LinearProj, LiteAttention, NewGELU
 
 # ruff: noqa: F722
 
@@ -123,13 +123,13 @@ class React(eqx.Module):
 
         return pe
 
-    @partial(jax.jit, static_argnums=2)
+    @partial(jax.jit, static_argnums=1)
     def iterate_for_steps(self, interim_thought: Array, iters_to_do: int, x: Array) -> Array:
         def main(i: int, carry: Array) -> Array:
             return jax.lax.cond(i <= iters_to_do, iterate, Identity, i, carry)
 
         def iterate(i: int, carry: Array) -> Array:
-            interim_thought = jnp.concatenate([carry, x], 2)
+            interim_thought = jnp.concatenate([carry, x], 1)
             return self.main_block(interim_thought)
 
         def Identity(i: int, carry: Array) -> Array:
@@ -139,11 +139,11 @@ class React(eqx.Module):
         return final_interim_thought
 
     @partial(jax.jit, static_argnums=2)
-    def __call__(self, input: Array, iters_to_do: int, prev_thought: Optional[Array] = None) -> Array:
+    def __call__(self, input: Array, iters_to_do: int, prev_thought: Optional[Array] = 0) -> Array:
         x = self.embed_layer(input) + self.pos_enc # (batch, seqlen, embed_dim)
         interim_thought = self.input_act(self.input_proj(x)) # (batch, seqlen, bottleneck)
 
-        if interim_thought is not None:
+        if isinstance(prev_thought, Array):
             interim_thought = interim_thought
 
         interim_thought = self.iterate_for_steps(interim_thought, iters_to_do, x) # (batch, seqlen, bottleneck)

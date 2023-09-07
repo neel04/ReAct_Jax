@@ -1,5 +1,6 @@
 import logging
 import wandb
+import os
 
 class UnifiedLogger:
     '''
@@ -7,14 +8,12 @@ class UnifiedLogger:
     '''
     def __init__(self, args, level: str = 'DEBUG', mode: str = 'disabled') -> None:
         self.mode = mode
-        
-        self.logger = self.my_logger(level)
-        self.wandb_logger = self.wandb_logger(args)
+        self.level = level
 
-    def my_logger(self, level: str) -> logging.Logger:
+    def my_logger(self) -> logging.Logger:
         # Create logger
         logger = logging.getLogger('ReAct')
-        logger.setLevel(level)
+        logger.setLevel(self.level)
 
         # Create console handler and set level to debug
         ch = logging.StreamHandler()
@@ -32,12 +31,13 @@ class UnifiedLogger:
         return logger
     
     def wandb_logger(self, args):
-        wandb.login(key="78c7285b02548bf0c06dca38776c08bb6018593f")
+        key = os.environ.get('WANDB_API_KEY')
+        wandb.login(key=key)
         
         wandb.init(project='ReAct_Jax', magic=True, anonymous='allow',
                    mode=self.mode, config=args)
         
-        self.wandb.run.log_code( # type: ignore
+        wandb.run.log_code( # type: ignore
             "/workspace/", 
             include_fn=lambda path: path.endswith(".py") or path.endswith(".ipynb") or path.endswith(".sh"))
         

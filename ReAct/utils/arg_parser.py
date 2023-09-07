@@ -28,7 +28,7 @@ def parse_args():
     parser.add_argument('--batch_size', type=int, default=4,
                         help='Batch size. Default: 4')
 
-    parser.add_argument('--lr', type=float, default=1e-3,
+    parser.add_argument('--lr', type=float, default=3e-3,
                         help='Learning rate. Default: 1e-3')
 
     parser.add_argument('--weight_decay', type=float, default=1e-4,
@@ -46,11 +46,11 @@ def parse_args():
     parser.add_argument('--save_interval', type=int, default=10,
                         help='Save interval. Default: 10')
 
-    parser.add_argument('--save_dir', type=str, default='./outputs/',
+    parser.add_argument('--save_dir', type=str, default='/Users/neel/Documents/research/ReAct_Jax/ReAct/outputs/',
                         help='Save directory for checkpoints. Default: ./outputs/. Keep the slash at the end')
 
-    parser.add_argument('--dataset_length', type=int, default=50_000,
-                        help='Length of the dataset. Default: 50_000')
+    parser.add_argument('--dataset_length', type=int, default=500,
+                        help='Length of the dataset. Default: 500')
 
     args = parser.parse_args()
     return args

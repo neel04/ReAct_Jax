@@ -1,20 +1,16 @@
 import jax
-import equinox as eqx
-import torch.utils.data.dataloader as DataLoader
+from torch.utils.data import DataLoader
 
 from jaxtyping import PRNGKeyArray
-from tqdm import tqdm
 
-from ReAct.utils.helpers import convert_to_jax
 from ReAct.utils.logger import UnifiedLogger
 from ReAct.utils.arg_parser import parse_args
-from ReAct.utils.dataset import RevDataset
+from ReAct.data.reverse_string import RevDataset
 from ReAct.utils.trainer import Trainer
 
-def main(key: PRNGKeyArray, model: eqx.Module):
+def main(key: PRNGKeyArray):
     args = parse_args()
-    logger = UnifiedLogger(level='DEBUG', mode='disabled')
-    logger.log_hyperparams(args)
+    logger = UnifiedLogger(args, level='DEBUG', mode='disabled')
     
     _, model_key = jax.random.split(key)
 
@@ -41,10 +37,8 @@ def main(key: PRNGKeyArray, model: eqx.Module):
 
 
     trainer = Trainer(args, model_key, logger)
+    trainer.train(args.num_epochs, trainloader, truncloader, valloader)
 
-    for epoch in range(args.num_epochs):
-
-    return model
-     
 if __name__ == '__main__':
-    main()
+    key = jax.random.PRNGKey(0)
+    main(key)
