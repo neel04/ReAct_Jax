@@ -8,7 +8,7 @@ import jax.numpy as jnp
 import optax
 from jaxtyping import Array, Float16, PRNGKeyArray
 from torch.utils.data import DataLoader
-from tqdm import tqdm
+from tqdm.auto import tqdm
 
 from ReAct.model.react import React
 from ReAct.utils.helpers import convert_to_jax, count_params
@@ -57,8 +57,9 @@ class Trainer:
     def compute_loss(self, model: eqx.Module, x: Float16[Array, '...'],
                      y: Float16[Array, '...'], n: int, k: int):
         
-        react_forward = n_k_loop(model)
-        pred_y = jax.vmap(react_forward)(x, n, k)
+        #react_forward = n_k_loop(model)
+        #pred_y = jax.vmap(react_forward)(x, n, k)
+        pred_y = jax.vmap(model)(x, n+k)
         
         y_one_hot = jax.nn.one_hot(y, num_classes=self.num_classes)
         pred_probs = jax.nn.softmax(pred_y, axis=-1)
@@ -144,7 +145,7 @@ class Trainer:
             train_acc = self.evaluate_acc(model, truncloader, self.max_iters)
             
             # Visualize one sample and model prediction
-            sample_x = jnp.array([1] * self.seqlen)
+            sample_x = x[0]
             model_prediction = model(sample_x, self.max_iters)  # Get model prediction for the sample
             
             self.wandb_logger.log(

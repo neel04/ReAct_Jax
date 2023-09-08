@@ -49,8 +49,8 @@ def parse_args():
     parser.add_argument('--save_dir', type=str, default='/Users/neel/Documents/research/ReAct_Jax/ReAct/outputs/',
                         help='Save directory for checkpoints. Default: ./outputs/. Keep the slash at the end')
 
-    parser.add_argument('--dataset_length', type=int, default=500,
-                        help='Length of the dataset. Default: 500')
+    parser.add_argument('--dataset_length', type=int, default=50_000,
+                        help='Length of the dataset. Default: 50_000')
 
     args = parser.parse_args()
     return args

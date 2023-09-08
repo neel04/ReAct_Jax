@@ -139,7 +139,7 @@ class React(eqx.Module):
         return final_interim_thought
 
     @partial(jax.jit, static_argnums=2)
-    def __call__(self, input: Array, iters_to_do: int, prev_thought: Optional[Array] = 0) -> Array:
+    def __call__(self, input: Array, iters_to_do: int, prev_thought: Optional[Array] = None) -> Array:
         x = self.embed_layer(input) + self.pos_enc # (batch, seqlen, embed_dim)
         interim_thought = self.input_act(self.input_proj(x)) # (batch, seqlen, bottleneck)
 
