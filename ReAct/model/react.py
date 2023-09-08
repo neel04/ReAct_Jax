@@ -8,7 +8,6 @@ from typing import Optional
 from .blocks import MLP, LinearProj, LiteAttention, NewGELU
 
 # ruff: noqa: F722
-
 class AttentionBlock(eqx.Module):
     """Basic Block for LiteAttention"""
 

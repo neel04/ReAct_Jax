@@ -2,6 +2,7 @@ import jax
 from torch.utils.data import DataLoader
 
 from jaxtyping import PRNGKeyArray
+from jax import config
 
 from ReAct.utils.logger import UnifiedLogger
 from ReAct.utils.arg_parser import parse_args
@@ -10,6 +11,15 @@ from ReAct.utils.trainer import Trainer
 
 def main(key: PRNGKeyArray):
     args = parse_args()
+    
+    # Enter debugging mode, disabling JIT
+    if args.debug:
+        config.update("jax_debug_nans", True)
+        config.update("jax_debug_infs", True)
+        config.update("jax_disable_jit", True)
+    
+    # ========= Logging =========
+        
     logger = UnifiedLogger(args, level='DEBUG', mode='disabled')
     
     _, model_key = jax.random.split(key)
@@ -40,5 +50,5 @@ def main(key: PRNGKeyArray):
     trainer.train(args.num_epochs, trainloader, truncloader, valloader)
 
 if __name__ == '__main__':
-    key = jax.random.PRNGKey(0)
+    key = jax.random.PRNGKey(69)
     main(key)

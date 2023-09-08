@@ -25,8 +25,8 @@ def parse_args():
     parser.add_argument('--seqlen', type=int, default=16,
                         help='Sequence length. Default: 16')
 
-    parser.add_argument('--batch_size', type=int, default=4,
-                        help='Batch size. Default: 4')
+    parser.add_argument('--batch_size', type=int, default=64,
+                        help='Batch size. Default: 64')
 
     parser.add_argument('--lr', type=float, default=3e-3,
                         help='Learning rate. Default: 1e-3')
@@ -51,6 +51,9 @@ def parse_args():
 
     parser.add_argument('--dataset_length', type=int, default=50_000,
                         help='Length of the dataset. Default: 50_000')
+    
+    parser.add_argument('--debug', action='store_true', default=False,
+                        help='Debug mode - disables JIT. Default: False')
 
     args = parser.parse_args()
     return args
