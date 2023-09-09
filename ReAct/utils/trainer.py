@@ -25,9 +25,12 @@ class n_k_loop(eqx.Module):
     @jax.jit
     def __call__(self, input_arr: Array, n: int, k: int) -> Array:
         # forward pass the model without tracking grads
-        intermediate_array = self.my_model(jax.lax.stop_gradient(input_arr), iters_to_do=n, prev_thought=None)
+        output, intermediate_array = self.my_model(jax.lax.stop_gradient(input_arr),
+                                                   iters_to_do=n, prev_thought=None)
         # n-k passes, but track the gradient this time
-        return self.my_model(input_arr, k, prev_thought=intermediate_array)
+        output, _ = self.my_model(input_arr, k, prev_thought=intermediate_array)
+        
+        return output
 
 class Trainer:
     def __init__(self, args: dict, key: PRNGKeyArray, logger=None):
@@ -56,8 +59,7 @@ class Trainer:
                      y: Float16[Array, '...'], n: int, k: int):
         
         class_weights = jnp.array([0.35, 0.65])
-        react_forward = n_k_loop(model)
-        pred_y = jax.vmap(react_forward)(x, n, k)
+        pred_y = jax.vmap(model)(x, n, k)
         
         y_one_hot = jax.nn.one_hot(y, num_classes=self.num_classes)
         loss = -jnp.sum(jax.nn.log_softmax(pred_y) * y_one_hot * class_weights, axis=-1)
@@ -120,10 +122,11 @@ class Trainer:
         with open(filename, "wb") as f:
             eqx.tree_serialise_leaves(f, model)
         
-    def train(self, epochs: int,
-                        trainloader: DataLoader, truncloader: DataLoader, valloader: DataLoader):
+    def train(self, epochs: int, trainloader: DataLoader,
+              truncloader: DataLoader, valloader: DataLoader):
         
         model, optim, opt_state = self.init_model(self.key)
+        model = n_k_loop(model)
         
         for epoch in range(epochs):
             rndm_n, rndm_k = self.get_n_k()

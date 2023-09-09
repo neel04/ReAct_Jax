@@ -1,12 +1,12 @@
 import jax
+
+from jax import config
+from jaxtyping import PRNGKeyArray
 from torch.utils.data import DataLoader
 
-from jaxtyping import PRNGKeyArray
-from jax import config
-
-from ReAct.utils.logger import UnifiedLogger
-from ReAct.utils.arg_parser import parse_args
 from ReAct.data.reverse_string import RevDataset
+from ReAct.utils.arg_parser import parse_args
+from ReAct.utils.logger import UnifiedLogger
 from ReAct.utils.trainer import Trainer
 
 def main(key: PRNGKeyArray):
@@ -24,10 +24,10 @@ def main(key: PRNGKeyArray):
     
     _, model_key = jax.random.split(key)
 
-    dataset = RevDataset(args.seqlen, 7, args.dataset_length)
+    dataset = RevDataset(args.seqlen, 16, args.dataset_length)
 
     # Truncated dataset for calculating training accuracy
-    trunc_dataset = RevDataset(args.seqlen, 7, args.dataset_length // 20)
+    trunc_dataset = RevDataset(args.seqlen, 16, args.dataset_length // 20)
     val_dataset = RevDataset(args.seqlen, args.seqlen, args.dataset_length // 20)
 
     trainloader = DataLoader(dataset,

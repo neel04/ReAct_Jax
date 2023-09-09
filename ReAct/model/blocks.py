@@ -3,7 +3,6 @@ import equinox as eqx
 import jax.numpy as jnp
 import math
 
-from functools import partial
 from jaxtyping import Array, Float16, PRNGKeyArray
 from typing import Optional
 

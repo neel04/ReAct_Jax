@@ -143,11 +143,11 @@ class React(eqx.Module):
         interim_thought = self.input_act(self.input_proj(x)) # (batch, seqlen, bottleneck)
 
         if isinstance(prev_thought, Array):
-            interim_thought = interim_thought
+            interim_thought = prev_thought
 
         interim_thought = self.iterate_for_steps(interim_thought, iters_to_do, x) # (batch, seqlen, bottleneck)
 
-        return self.out_head(interim_thought)
+        return self.out_head(interim_thought), interim_thought
 
 if __name__ == "__main__":
     # Testing ReAct
