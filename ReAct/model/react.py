@@ -134,11 +134,13 @@ class React(eqx.Module):
         def Identity(i: int, carry: Array) -> Array:
             return self.id(carry)
 
-        final_interim_thought = jax.lax.fori_loop(1, self.max_iters, main, interim_thought)
+        final_interim_thought = jax.lax.fori_loop(1, self.max_iters, main, interim_thought)  # noqa: E501
         return final_interim_thought
 
-    @partial(jax.jit, static_argnums=2)
-    def __call__(self, input: Array, iters_to_do: int, prev_thought: Optional[Array] = None) -> Array:
+    @partial(jax.jit, static_argnames=['prev_thought', 'training'])
+    def __call__(self, input: Array, iters_to_do: int, 
+                 prev_thought: Optional[Array] = None, training: bool = True) -> Array:
+        
         x = self.embed_layer(input) + self.pos_enc # (batch, seqlen, embed_dim)
         interim_thought = self.input_act(self.input_proj(x)) # (batch, seqlen, bottleneck)
 
@@ -146,8 +148,11 @@ class React(eqx.Module):
             interim_thought = prev_thought
 
         interim_thought = self.iterate_for_steps(interim_thought, iters_to_do, x) # (batch, seqlen, bottleneck)
-
-        return self.out_head(interim_thought), interim_thought
+        
+        if training:
+            return self.out_head(interim_thought), interim_thought
+        else:
+            return self.out_head(interim_thought)
 
 if __name__ == "__main__":
     # Testing ReAct

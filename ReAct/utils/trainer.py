@@ -80,7 +80,9 @@ class Trainer:
 
         for step, (x, y) in enumerate(loader):
             x, y = convert_to_jax(x), convert_to_jax(y)
-            pred_y = jax.vmap(model, in_axes=(0, None))(x, eval_iters)
+            pred_y = jax.vmap(model.my_model, in_axes=(0, None, None, None))(
+                x, eval_iters, None, False)
+            
             val_pred_y = jax.nn.softmax(pred_y, axis=-1).argmax(-1)
             accuracy = jnp.mean(val_pred_y == y)
             metric.append(accuracy)
@@ -146,7 +148,7 @@ class Trainer:
             
             # Visualize one sample and model prediction
             sample_x = x[0]
-            model_prediction = model(sample_x, self.max_iters)  # Get model prediction for the sample
+            model_prediction = model.my_model(sample_x, self.max_iters, None, False)
             
             self.wandb_logger.log(
                 {
