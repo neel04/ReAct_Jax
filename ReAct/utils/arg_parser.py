@@ -30,7 +30,7 @@ def parse_args():
 
     parser.add_argument('--lr', type=float, default=3e-3,
                         help='Learning rate. Default: 1e-3')
-
+    
     parser.add_argument('--weight_decay', type=float, default=1e-4,
                         help='Weight decay. Default: 1e-4')
 

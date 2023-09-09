@@ -55,15 +55,14 @@ class Trainer:
     def compute_loss(self, model: eqx.Module, x: Float16[Array, '...'],
                      y: Float16[Array, '...'], n: int, k: int):
         
-        #react_forward = n_k_loop(model)
-        #pred_y = jax.vmap(react_forward)(x, n, k)
-        pred_y = jax.vmap(model)(x, n+k)
+        class_weights = jnp.array([0.35, 0.65])
+        react_forward = n_k_loop(model)
+        pred_y = jax.vmap(react_forward)(x, n, k)
         
         y_one_hot = jax.nn.one_hot(y, num_classes=self.num_classes)
-        pred_probs = jax.nn.softmax(pred_y, axis=-1)
-        loss = -jnp.mean(jnp.sum(y_one_hot * jnp.log(pred_probs), axis=-1))
+        loss = -jnp.sum(jax.nn.log_softmax(pred_y) * y_one_hot * class_weights, axis=-1)
         
-        return loss
+        return loss.mean()
     
     @eqx.filter_jit
     def make_step(self, model: eqx.Module, x: Float16[Array, '...'],
