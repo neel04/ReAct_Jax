@@ -33,7 +33,10 @@ def main(key: PRNGKeyArray):
     trainloader = DataLoader(dataset,
                              batch_size=args.batch_size,
                              drop_last=True,
-                             shuffle=False)
+                             shuffle=False,
+                             num_workers=4,
+                             pin_memory=True,
+                             prefetch_factor=4)
 
     truncloader = DataLoader(trunc_dataset,
                              batch_size=args.batch_size,

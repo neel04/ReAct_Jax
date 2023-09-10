@@ -6,8 +6,7 @@ class UnifiedLogger:
     '''
     Holds both WandB and python logger objects
     '''
-    def __init__(self, args, level: str = 'DEBUG', mode: str = 'disabled') -> None:
-        self.mode = mode
+    def __init__(self, args, level: str = 'DEBUG') -> None:
         self.level = level
 
     def my_logger(self) -> logging.Logger:
@@ -35,10 +34,10 @@ class UnifiedLogger:
         wandb.login(key=key)
         
         wandb.init(project='ReAct_Jax', magic=True, anonymous='allow',
-                   mode=self.mode, config=args)
+                   mode=args.wandb, config=args)
         
-        wandb.run.log_code( # type: ignore
-            "/workspace/", 
+        wandb.run.log_code(
+            "../",
             include_fn=lambda path: path.endswith(".py") or path.endswith(".ipynb") or path.endswith(".sh"))
         
         return wandb

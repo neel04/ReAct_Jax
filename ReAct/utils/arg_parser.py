@@ -54,6 +54,10 @@ def parse_args():
     
     parser.add_argument('--debug', action='store_true', default=False,
                         help='Debug mode - disables JIT. Default: False')
+    
+    parser.add_argument('--wandb', action='store_const', const='online', default='disabled',
+                    help='Enable wandb logging. Default: disabled')
+
 
     args = parser.parse_args()
     return args
