@@ -24,10 +24,10 @@ def main(key: PRNGKeyArray):
     
     _, model_key = jax.random.split(key)
 
-    dataset = RevDataset(args.seqlen, 16, args.dataset_length)
+    dataset = RevDataset(args.seqlen, 10, args.dataset_length)
 
     # Truncated dataset for calculating training accuracy
-    trunc_dataset = RevDataset(args.seqlen, 16, args.dataset_length // 20)
+    trunc_dataset = RevDataset(args.seqlen, 10, args.dataset_length // 20)
     val_dataset = RevDataset(args.seqlen, args.seqlen, args.dataset_length // 20)
 
     trainloader = DataLoader(dataset,

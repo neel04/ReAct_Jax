@@ -28,14 +28,14 @@ def parse_args():
     parser.add_argument('--batch_size', type=int, default=64,
                         help='Batch size. Default: 64')
 
-    parser.add_argument('--lr', type=float, default=3e-3,
+    parser.add_argument('--lr', type=float, default=1e-3,
                         help='Learning rate. Default: 1e-3')
     
-    parser.add_argument('--weight_decay', type=float, default=1e-4,
-                        help='Weight decay. Default: 1e-4')
+    parser.add_argument('--weight_decay', type=float, default=1e-5,
+                        help='Weight decay. Default: 1e-5')
 
-    parser.add_argument('--warmup_steps', type=int, default=1000,
-                        help='Number of warmup steps. Default: 1000')
+    parser.add_argument('--warmup_steps', type=int, default=100,
+                        help='Number of warmup steps. Default: 100')
 
     parser.add_argument('--grad_clip', type=float, default=1.0,
                         help='Gradient clipping. Default: 1.0')

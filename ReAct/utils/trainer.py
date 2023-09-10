@@ -1,3 +1,4 @@
+import os
 from typing import Tuple
 
 import equinox as eqx
@@ -16,21 +17,38 @@ from .helpers import get_rand_nums
 
 
 # A unified Trainer class for training and evaluation
-class n_k_loop(eqx.Module):
-    my_model: eqx.Module
+@jax.jit
+def n_k_loop(model: eqx.Module, input_arr: Array, n: int, k: int) -> Array:
+    # forward pass the model without tracking grads
+    output, intermediate_array = jax.lax.stop_gradient(
+        model(input_arr, iters_to_do=n, prev_thought=None))
+    
+    # n-k passes, but track the gradient this time
+    output, _ = model(input_arr, k, prev_thought=intermediate_array)
 
-    def __init__(self, model: eqx.Module):
-        self.my_model = model
+    return output
 
-    @jax.jit
-    def __call__(self, input_arr: Array, n: int, k: int) -> Array:
-        # forward pass the model without tracking grads
-        output, intermediate_array = self.my_model(jax.lax.stop_gradient(input_arr),
-                                                   iters_to_do=n, prev_thought=None)
-        # n-k passes, but track the gradient this time
-        output, _ = self.my_model(input_arr, k, prev_thought=intermediate_array)
-        
-        return output
+@eqx.filter_value_and_grad
+def compute_loss(model: eqx.Module, x: Array, y: Array,
+                 n: int, k: int, num_classes: int = 2):
+    
+    class_weights = jnp.array([0.35, 0.65])
+    #pred_y = jax.vmap(model)(x, n, k)
+    pred_y = jax.vmap(n_k_loop, in_axes=(None, 0, 0, 0))(model, x, n, k)
+    
+    y_one_hot = jax.nn.one_hot(y, num_classes=num_classes)
+    loss = -jnp.sum(jax.nn.log_softmax(pred_y) * y_one_hot * class_weights, axis=-1)
+    
+    return loss.mean()
+    
+@eqx.filter_jit
+def make_step(model: eqx.Module, x: Array, y: Array, 
+              n: int, k: int, optim, opt_state, num_classes: int = 2):
+    
+    loss, grads = compute_loss(model, x, y, n, k, num_classes)
+    updates, opt_state = optim.update(grads, opt_state, model)
+    model = eqx.apply_updates(model, updates)
+    return loss, model, opt_state
 
 class Trainer:
     def __init__(self, args: dict, key: PRNGKeyArray, logger=None):
@@ -54,33 +72,12 @@ class Trainer:
         
         return rndm_n, rndm_k
 
-    @eqx.filter_value_and_grad
-    def compute_loss(self, model: eqx.Module, x: Float16[Array, '...'],
-                     y: Float16[Array, '...'], n: int, k: int):
-        
-        class_weights = jnp.array([0.35, 0.65])
-        pred_y = jax.vmap(model)(x, n, k)
-        
-        y_one_hot = jax.nn.one_hot(y, num_classes=self.num_classes)
-        loss = -jnp.sum(jax.nn.log_softmax(pred_y) * y_one_hot * class_weights, axis=-1)
-        
-        return loss.mean()
-    
-    @eqx.filter_jit
-    def make_step(self, model: eqx.Module, x: Float16[Array, '...'],
-                    y: Float16[Array, '...'], n: int, k: int, optim, opt_state):
-        
-        loss, grads = self.compute_loss(model, x, y, n, k)
-        updates, opt_state = optim.update(grads, opt_state, model)
-        model = eqx.apply_updates(model, updates)
-        return loss, model, opt_state
-    
     def evaluate_acc(self, model: eqx.Module, loader: DataLoader, eval_iters: int):
         metric = []
 
         for step, (x, y) in enumerate(loader):
             x, y = convert_to_jax(x), convert_to_jax(y)
-            pred_y = jax.vmap(model.my_model, in_axes=(0, None, None, None))(
+            pred_y = jax.vmap(model, in_axes=(0, None, None, None))(
                 x, eval_iters, None, False)
             
             val_pred_y = jax.nn.softmax(pred_y, axis=-1).argmax(-1)
@@ -105,9 +102,6 @@ class Trainer:
         
         opt_state = optim.init(eqx.filter(model, eqx.is_array))
         
-        self.optim = optim
-        self.opt_state = optim.init(eqx.filter(model, eqx.is_array))
-        
         return optim, opt_state, model
     
     def init_model(self, key: PRNGKeyArray):
@@ -121,6 +115,9 @@ class Trainer:
         return model, optim, opt_state
     
     def save_model(self, filename: str, model: eqx.Module):
+        if not os.path.exists(self.save_dir):
+            os.makedirs(self.save_dir)
+            
         with open(filename, "wb") as f:
             eqx.tree_serialise_leaves(f, model)
         
@@ -128,7 +125,6 @@ class Trainer:
               truncloader: DataLoader, valloader: DataLoader):
         
         model, optim, opt_state = self.init_model(self.key)
-        model = n_k_loop(model)
         
         for epoch in range(epochs):
             rndm_n, rndm_k = self.get_n_k()
@@ -136,8 +132,8 @@ class Trainer:
             for step, (x, y) in tqdm(enumerate(trainloader), total=self.dataset_length // self.batch_size):
                 x, y = convert_to_jax(x), convert_to_jax(y)
                 
-                loss, model, opt_state = self.make_step(model, x, y, rndm_n, rndm_k,
-                                                        self.optim, self.opt_state)
+                loss, model, opt_state = make_step(model, x, y, rndm_n, rndm_k,
+                                                   optim, opt_state, self.num_classes)
                 
                 loss = loss.item()
             
@@ -148,7 +144,7 @@ class Trainer:
             
             # Visualize one sample and model prediction
             sample_x = x[0]
-            model_prediction = model.my_model(sample_x, self.max_iters, None, False)
+            model_prediction = model(sample_x, self.max_iters, None, False)
             
             self.wandb_logger.log(
                 {
@@ -179,3 +175,21 @@ class Trainer:
                 self.wandb_logger.save(f'{self.save_dir}model_{epoch}.eqx')
                 
         return loss, model, opt_state
+
+if __name__ == '__main__':
+    x = jnp.ones((32)).astype(int)
+    y = jnp.ones((32)).astype(int)
+    y_one_hot = jax.nn.one_hot(y, num_classes=2)
+    
+    key = jax.random.PRNGKey(0)
+    
+    model = React(32, 15, 3, 128, 0.1, 2, key=key)
+    model = n_k_loop(model)
+    
+    @eqx.filter_value_and_grad
+    def loss(model, x, y, n, k):
+        pred_y = jax.vmap(model)(x, n, k)
+        return -jnp.sum(jax.nn.log_softmax(pred_y) * y_one_hot, axis=-1).mean()
+    
+    output, grads = loss(model, x, y, 10, 5)
+    print(output, grads)
