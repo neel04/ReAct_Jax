@@ -20,7 +20,7 @@ def main(key: PRNGKeyArray):
     
     # ========= Logging =========
         
-    logger = UnifiedLogger(args, level='DEBUG', mode='disabled')
+    logger = UnifiedLogger(args, level='DEBUG')
     
     _, model_key = jax.random.split(key)
 

@@ -20,8 +20,9 @@ from .helpers import get_rand_nums
 @jax.jit
 def n_k_loop(model: eqx.Module, input_arr: Array, n: int, k: int) -> Array:
     # forward pass the model without tracking grads
-    output, intermediate_array = jax.lax.stop_gradient(
-        model(input_arr, iters_to_do=n, prev_thought=None))
+    output, intermediate_array = model(
+        jax.lax.stop_gradient(input_arr), 
+        iters_to_do=n, prev_thought=None)
     
     # n-k passes, but track the gradient this time
     output, _ = model(input_arr, k, prev_thought=intermediate_array)
@@ -32,12 +33,10 @@ def n_k_loop(model: eqx.Module, input_arr: Array, n: int, k: int) -> Array:
 def compute_loss(model: eqx.Module, x: Array, y: Array,
                  n: int, k: int, num_classes: int = 2):
     
-    class_weights = jnp.array([0.35, 0.65])
-    #pred_y = jax.vmap(model)(x, n, k)
     pred_y = jax.vmap(n_k_loop, in_axes=(None, 0, 0, 0))(model, x, n, k)
     
     y_one_hot = jax.nn.one_hot(y, num_classes=num_classes)
-    loss = -jnp.sum(jax.nn.log_softmax(pred_y) * y_one_hot * class_weights, axis=-1)
+    loss = optax.sigmoid_binary_cross_entropy(pred_y, y_one_hot).sum(-1)
     
     return loss.mean()
     
@@ -54,7 +53,7 @@ class Trainer:
     def __init__(self, args: dict, key: PRNGKeyArray, logger=None):
         self.key = key
         
-        logger = UnifiedLogger(args, level='DEBUG', mode='disabled')
+        logger = UnifiedLogger(args, level='DEBUG')
         self.my_logger = logger.my_logger()
         self.wandb_logger = logger.wandb_logger(args)
         
@@ -149,9 +148,9 @@ class Trainer:
             self.wandb_logger.log(
                 {
                     'loss': loss,
-                    f'val_acc_{self.max_iters}': val_acc,
-                    f'val_acc_{self.max_iters + 5}': val_acc_5,
-                    'train_acc': train_acc
+                    f'Val/acc_{self.max_iters}': val_acc,
+                    f'Val/acc_{self.max_iters + 5}': val_acc_5,
+                    'Train/acc': train_acc
                 },
                 
                 step=epoch
