@@ -33,12 +33,12 @@ def n_k_loop(model: eqx.Module, input_arr: Array, n: int, k: int) -> Array:
 def compute_loss(model: eqx.Module, x: Array, y: Array,
                  n: int, k: int, num_classes: int = 2):
     
-    pred_y = jax.vmap(n_k_loop, in_axes=(None, 0, 0, 0))(model, x, n, k)
+    pred_y = jax.vmap(n_k_loop, in_axes=(None, 0, 0, 0))(model, x, n, k) # (batch_size, seqlen, num_classes)
     
-    y_one_hot = jax.nn.one_hot(y, num_classes=num_classes)
-    loss = optax.sigmoid_binary_cross_entropy(pred_y, y_one_hot).sum(-1)
+    y_one_hot = jax.nn.one_hot(y, num_classes=num_classes) # (batch_size, seqlen, num_classes)
+    loss = optax.sigmoid_binary_cross_entropy(pred_y, y_one_hot)
     
-    return loss.mean()
+    return jnp.mean(loss)
     
 @eqx.filter_jit
 def make_step(model: eqx.Module, x: Array, y: Array, 
