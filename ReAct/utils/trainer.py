@@ -167,9 +167,9 @@ class Trainer:
             self.my_logger.info(f'Training accuracy: {train_acc}\n')
             
             self.my_logger.info(f'Sample val x: {val_sample}')
-            self.my_logger.info(f'Val prediction: {val_pred.argmax(-1)}')
+            self.my_logger.info(f'Val prediction:\t\t\t{val_pred.argmax(-1)}')
             self.my_logger.info(f'Val prediction @ +5 iters: {val_pred_5.argmax(-1)}')
-            self.my_logger.info(f'Correct answer: {val_sample[::-1]}')
+            self.my_logger.info(f'Correct answer:\t\t\t{val_sample[::-1]}')
             
             complexity = trainloader.dataset.complexity
             
