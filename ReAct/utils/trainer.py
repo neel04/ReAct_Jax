@@ -163,10 +163,12 @@ class Trainer:
             self.my_logger.info(f'Validation accuracy: {val_acc_5} | using {self.max_iters + 5} iterations')
             self.my_logger.info(f'Training accuracy: {train_acc}')
             
+            complexity = trainloader.dataset.complexity
             
-            if epoch > 1 and train_acc >= 0.98 and self.dataset_length <= self.cl_seqlen:
-                self.dataset_length += 1
-                print(f'\n~~~ New CL dataset complexity: {self.dataset_length} ~~~')
+            # Curriculum learning: increase complexity if training accuracy is high
+            if epoch > 1 and train_acc >= 0.98 and complexity <= self.cl_seqlen:
+                trainloader.dataset.complexity += 1
+                print(f'\n~~~ New CL dataset complexity: {trainloader.dataset.complexity} ~~~')
             
             if epoch % self.save_interval == 0:
                 # Save the model 
