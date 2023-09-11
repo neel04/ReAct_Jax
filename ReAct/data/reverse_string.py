@@ -22,25 +22,34 @@ class RevDataset(Dataset):
         return self.dataset_size
 
     def __getitem__(self, idx) -> Tuple[torch.Tensor, torch.Tensor]:
+        assert self.complexity <= self.seqlen, 'Complexity cannot be greater than seqlen'
+        
+        current_complexity = randint(1, self.complexity)
+        
         src = torch.randint(
             0, 2,
-            (randint(1, self.complexity),)
+            (current_complexity,)
             ).long()
         
-        padding = self.seqlen - self.complexity
+        padding = self.seqlen - current_complexity
         pad_src = torch.cat([src, torch.zeros(padding).long()])
 
         return pad_src, torch.flip(pad_src, (0,))
 
 if __name__ == '__main__':
-    seqlen = 8
-    length = 4
+    seqlen = 16
+    length = 3
     bsz = 1
 
     dataset = RevDataset(seqlen, length)
     dataloader = DataLoader(dataset, batch_size=bsz, shuffle=True)
 
     # Example usage
-    for batch in tqdm(dataloader):
+    for i, batch in tqdm(enumerate(dataloader)):
         print(batch)
+        print(
+            batch[0].shape,
+            batch[1].shape
+        )
+        
         break
