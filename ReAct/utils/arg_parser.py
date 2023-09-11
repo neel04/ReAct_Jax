@@ -43,7 +43,7 @@ def parse_args():
     parser.add_argument('--grad_clip', type=float, default=1.0,
                         help='Gradient clipping. Default: 1.0')
 
-    parser.add_argument('--num_epochs', type=int, default=100,
+    parser.add_argument('--epochs', type=int, default=100,
                         help='Number of epochs. Default: 100')
 
     parser.add_argument('--save_interval', type=int, default=10,

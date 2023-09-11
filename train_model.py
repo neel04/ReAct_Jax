@@ -50,7 +50,7 @@ def main(key: PRNGKeyArray):
 
 
     trainer = Trainer(args, model_key, logger)
-    trainer.train(args.num_epochs, trainloader, truncloader, valloader)
+    trainer.train(args.epochs, trainloader, truncloader, valloader)
 
 if __name__ == '__main__':
     key = jax.random.PRNGKey(69)

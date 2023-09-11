@@ -1,12 +1,11 @@
 import os
-import time
 from typing import Tuple
 
 import equinox as eqx
 import jax
 import jax.numpy as jnp
 import optax
-from jaxtyping import Array, Float16, PRNGKeyArray
+from jaxtyping import Array, PRNGKeyArray
 from torch.utils.data import DataLoader
 from tqdm.auto import tqdm
 
@@ -89,7 +88,7 @@ class Trainer:
     def set_optim_and_scheduler(self, model: eqx.Module):
         assert isinstance(model, eqx.Module), 'Model is not initialized'
         
-        total_steps = self.num_epochs * self.dataset_length // self.batch_size
+        total_steps = self.epochs * self.dataset_length // self.batch_size
         
         schedule_fn = optax.warmup_cosine_decay_schedule(self.lr, self.lr * 2, self.warmup_steps,
                                                          total_steps, self.lr // 20)
@@ -120,10 +119,7 @@ class Trainer:
             
         with open(filename, "wb") as f:
             eqx.tree_serialise_leaves(f, model)
-        
-        # sleep for 1 second to ensure that the file is written
-        time.sleep(2)
-                
+            
     def train(self, epochs: int, trainloader: DataLoader,
               truncloader: DataLoader, valloader: DataLoader):
         
