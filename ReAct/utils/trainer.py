@@ -1,4 +1,5 @@
 import os
+import time
 from typing import Tuple
 
 import equinox as eqx
@@ -120,6 +121,9 @@ class Trainer:
         with open(filename, "wb") as f:
             eqx.tree_serialise_leaves(f, model)
         
+        # sleep for 1 second to ensure that the file is written
+        time.sleep(2)
+                
     def train(self, epochs: int, trainloader: DataLoader,
               truncloader: DataLoader, valloader: DataLoader):
         
@@ -164,14 +168,15 @@ class Trainer:
             self.my_logger.info(f'Training accuracy: {train_acc}')
             
             
-            if epoch > 1 and train_acc >= 0.98 and self.dataset_length <= (self.seqlen - 6):
+            if epoch > 1 and train_acc >= 0.98 and self.dataset_length <= self.cl_seqlen:
                 self.dataset_length += 1
                 print(f'\n~~~ New CL dataset complexity: {self.dataset_length} ~~~')
             
             if epoch % self.save_interval == 0:
                 # Save the model 
-                self.save_model(f'{self.save_dir}model_{epoch}.eqx', model)
-                self.wandb_logger.save(f'{self.save_dir}model_{epoch}.eqx')
+                filepath = f"{self.save_dir}model_{epoch}.eqx"
+                self.save_model(filepath, model)
+                self.wandb_logger.save(filepath)
                 
         return loss, model, opt_state
 

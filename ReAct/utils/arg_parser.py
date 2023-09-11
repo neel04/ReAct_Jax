@@ -25,11 +25,14 @@ def parse_args():
     parser.add_argument('--seqlen', type=int, default=16,
                         help='Sequence length. Default: 16')
 
+    parser.add_argument('--cl_seqlen', type=int, default=10,
+                        help='Upper bound for seqlen for curriculum learning. Default: 10')
+
     parser.add_argument('--batch_size', type=int, default=64,
                         help='Batch size. Default: 64')
 
-    parser.add_argument('--lr', type=float, default=1e-3,
-                        help='Learning rate. Default: 1e-3')
+    parser.add_argument('--lr', type=float, default=3e-5,
+                        help='Learning rate. Default: 3e-5')
     
     parser.add_argument('--weight_decay', type=float, default=1e-5,
                         help='Weight decay. Default: 1e-5')
