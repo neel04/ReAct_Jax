@@ -7,11 +7,11 @@ def parse_args():
     parser = argparse.ArgumentParser(description=description, epilog=epilog)
 
     # Model
-    parser.add_argument('--num_blocks', type=int, default=2,
-                        help='Number of attention blocks. Default: 2')
+    parser.add_argument('--num_blocks', type=int, default=1,
+                        help='Number of attention blocks. Default: 1')
 
-    parser.add_argument('--width', type=int, default=512,
-                        help='Width dimension. Default: 512')
+    parser.add_argument('--width', type=int, default=384,
+                        help='Width dimension. Default: 384')
 
     parser.add_argument('--drop_rate', type=float, default=0.1,
                         help='Dropout rate. Default: 0.1')
@@ -28,8 +28,8 @@ def parse_args():
     parser.add_argument('--cl_seqlen', type=int, default=10,
                         help='Upper bound for seqlen for curriculum learning. Default: 10')
 
-    parser.add_argument('--batch_size', type=int, default=64,
-                        help='Batch size. Default: 64')
+    parser.add_argument('--batch_size', type=int, default=208,
+                        help='Batch size. Default: 208')
 
     parser.add_argument('--lr', type=float, default=3e-5,
                         help='Learning rate. Default: 3e-5')
@@ -60,7 +60,12 @@ def parse_args():
     
     parser.add_argument('--wandb', action='store_const', const='online', default='disabled',
                     help='Enable wandb logging. Default: disabled')
-
+    
+    parser.add_argument('--checkpoint_path', type=str, default=None,
+                        help='Path to checkpoint. Default: None')
+    
+    parser.add_argument('--prompt', type=str, default=None,
+                        help='input for inference. Default: None')
 
     args = parser.parse_args()
     return args

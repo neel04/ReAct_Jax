@@ -25,18 +25,19 @@ def main(key: PRNGKeyArray):
     _, model_key = jax.random.split(key)
 
     dataset = RevDataset(args.seqlen, 3, args.dataset_length)
-
     # Truncated dataset for calculating training accuracy
     trunc_dataset = RevDataset(args.seqlen, 3, args.dataset_length // 20)
+    
     val_dataset = RevDataset(args.seqlen, args.cl_seqlen + 3, args.dataset_length // 20)
+    test_dataset = RevDataset(args.seqlen, args.seq_len, args.dataset_length // 20)
 
     trainloader = DataLoader(dataset,
                              batch_size=args.batch_size,
                              drop_last=True,
                              shuffle=False,
-                             num_workers=4,
+                             num_workers=2,
                              pin_memory=True,
-                             prefetch_factor=2)
+                             prefetch_factor=4)
 
     truncloader = DataLoader(trunc_dataset,
                              batch_size=args.batch_size,
@@ -47,10 +48,14 @@ def main(key: PRNGKeyArray):
                            batch_size=args.batch_size,
                            drop_last=True,
                            shuffle=False)
-
+    
+    testloader = DataLoader(test_dataset,
+                            batch_size=args.batch_size,
+                            drop_last=True,
+                            shuffle=False)
 
     trainer = Trainer(args, model_key, logger)
-    trainer.train(args.epochs, trainloader, truncloader, valloader)
+    trainer.train(args.epochs, trainloader, truncloader, valloader, testloader)
 
 if __name__ == '__main__':
     key = jax.random.PRNGKey(69)

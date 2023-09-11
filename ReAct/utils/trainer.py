@@ -120,8 +120,8 @@ class Trainer:
         with open(filename, "wb") as f:
             eqx.tree_serialise_leaves(f, model)
             
-    def train(self, epochs: int, trainloader: DataLoader,
-              truncloader: DataLoader, valloader: DataLoader):
+    def train(self, epochs: int, trainloader: DataLoader, truncloader: DataLoader,
+              valloader: DataLoader, testloader: DataLoader):
         
         model, optim, opt_state = self.init_model(self.key)
         
@@ -140,6 +140,7 @@ class Trainer:
             val_acc, val_sample = self.evaluate_acc(model, valloader, self.max_iters)
             val_acc_5, _ = self.evaluate_acc(model, valloader, self.max_iters + 5)
             train_acc, _ = self.evaluate_acc(model, truncloader, self.max_iters)
+            test_acc, _ = self.evaluate_acc(model, testloader, self.max_iters + 5)
             
             # Visualize one sample and model prediction
             sample_x = x[0] # Trainng sample
@@ -153,7 +154,8 @@ class Trainer:
                     'loss': loss,
                     f'Val/acc_{self.max_iters}': val_acc,
                     f'Val/acc_{self.max_iters + 5}': val_acc_5,
-                    'Train/acc': train_acc
+                    'Train/acc': train_acc,
+                    'Test/acc': test_acc
                 },
                 
                 step=epoch
@@ -165,6 +167,7 @@ class Trainer:
             self.my_logger.info(f'Validation accuracy: {val_acc} | using {self.max_iters} iterations')
             self.my_logger.info(f'Validation accuracy: {val_acc_5} | using {self.max_iters + 5} iterations')
             self.my_logger.info(f'Training accuracy: {train_acc}\n')
+            self.my_logger.info(f'Test accuracy: {test_acc}\n')
             
             self.my_logger.info(f'Sample val x: {val_sample}')
             self.my_logger.info(f'Val prediction:\t\t\t{val_pred.argmax(-1)}')
