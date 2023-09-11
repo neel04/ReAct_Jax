@@ -36,7 +36,7 @@ def main(key: PRNGKeyArray):
                              shuffle=False,
                              num_workers=4,
                              pin_memory=True,
-                             prefetch_factor=4)
+                             prefetch_factor=2)
 
     truncloader = DataLoader(trunc_dataset,
                              batch_size=args.batch_size,

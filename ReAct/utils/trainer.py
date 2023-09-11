@@ -164,9 +164,9 @@ class Trainer:
             self.my_logger.info(f"Model prediction:: {model_prediction.argmax(-1)}")
             self.my_logger.info(f'Validation accuracy: {val_acc} | using {self.max_iters} iterations')
             self.my_logger.info(f'Validation accuracy: {val_acc_5} | using {self.max_iters + 5} iterations')
-            self.my_logger.info(f'Training accuracy: {train_acc}')
+            self.my_logger.info(f'Training accuracy: {train_acc}\n')
             
-            self.my_logger.info(f'\nSample val x: {val_sample}')
+            self.my_logger.info(f'Sample val x: {val_sample}')
             self.my_logger.info(f'Val prediction: {val_pred.argmax(-1)}')
             self.my_logger.info(f'Val prediction @ +5 iters: {val_pred_5.argmax(-1)}')
             self.my_logger.info(f'Correct answer: {val_sample[::-1]}')

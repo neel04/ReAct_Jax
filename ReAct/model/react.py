@@ -92,7 +92,7 @@ class React(eqx.Module):
         self.embed_dim = self.bottleneck
         self.SEQLEN = seqlen
 
-        src_vocab_size: int = 9
+        src_vocab_size: int = 8
         tgt_vocab_size: int = tgt_vocab_size
         drop_rate: float = drop_rate
 
