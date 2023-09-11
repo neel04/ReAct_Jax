@@ -29,7 +29,7 @@ def main(key: PRNGKeyArray):
     trunc_dataset = RevDataset(args.seqlen, 3, args.dataset_length // 20)
     
     val_dataset = RevDataset(args.seqlen, args.cl_seqlen + 3, args.dataset_length // 20)
-    test_dataset = RevDataset(args.seqlen, args.seq_len, args.dataset_length // 20)
+    test_dataset = RevDataset(args.seqlen, args.seqlen, args.dataset_length // 20)
 
     trainloader = DataLoader(dataset,
                              batch_size=args.batch_size,
