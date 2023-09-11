@@ -82,8 +82,8 @@ class Trainer:
             val_pred_y = jax.nn.softmax(pred_y, axis=-1).argmax(-1)
             accuracy = jnp.mean(val_pred_y == y)
             metric.append(accuracy)
-
-        return sum(metric) / len(metric)
+        
+        return sum(metric) / len(metric), x[0] # return one sample for viz
     
     def set_optim_and_scheduler(self, model: eqx.Module):
         assert isinstance(model, eqx.Module), 'Model is not initialized'
@@ -137,13 +137,16 @@ class Trainer:
                 loss = loss.item()
             
             # Validation
-            val_acc = self.evaluate_acc(model, valloader, self.max_iters)
-            val_acc_5 = self.evaluate_acc(model, valloader, self.max_iters + 5)
-            train_acc = self.evaluate_acc(model, truncloader, self.max_iters)
+            val_acc, val_sample = self.evaluate_acc(model, valloader, self.max_iters)
+            val_acc_5, _ = self.evaluate_acc(model, valloader, self.max_iters + 5)
+            train_acc, _ = self.evaluate_acc(model, truncloader, self.max_iters)
             
             # Visualize one sample and model prediction
-            sample_x = x[0]
+            sample_x = x[0] # Trainng sample
             model_prediction = model(sample_x, self.max_iters, None, False)
+            
+            val_pred = model(val_sample, self.max_iters, None, False)
+            val_pred_5 = model(val_sample, self.max_iters + 5, None, False)
             
             self.wandb_logger.log(
                 {
@@ -163,12 +166,17 @@ class Trainer:
             self.my_logger.info(f'Validation accuracy: {val_acc_5} | using {self.max_iters + 5} iterations')
             self.my_logger.info(f'Training accuracy: {train_acc}')
             
+            self.my_logger.info(f'\nSample val x: {val_sample}')
+            self.my_logger.info(f'Val prediction: {val_pred.argmax(-1)}')
+            self.my_logger.info(f'Val prediction @ +5 iters: {val_pred_5.argmax(-1)}')
+            self.my_logger.info(f'Correct answer: {val_sample[::-1]}')
+            
             complexity = trainloader.dataset.complexity
             
             # Curriculum learning: increase complexity if training accuracy is high
             if epoch > 1 and train_acc >= 0.98 and complexity <= self.cl_seqlen:
                 trainloader.dataset.complexity += 1
-                print(f'\n~~~ New CL dataset complexity: {trainloader.dataset.complexity} ~~~')
+                print(f'\n\n~~~ New CL dataset complexity: {trainloader.dataset.complexity} ~~~\n\n')
             
             if epoch % self.save_interval == 0:
                 # Save the model 

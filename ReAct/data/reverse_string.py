@@ -1,8 +1,10 @@
-import torch
-
-from torch.utils.data import Dataset, DataLoader
-from tqdm import tqdm
+from random import randint
 from typing import Tuple
+
+import torch
+from torch.utils.data import DataLoader, Dataset
+from tqdm import tqdm
+
 
 class RevDataset(Dataset):
     complexity: int
@@ -20,7 +22,11 @@ class RevDataset(Dataset):
         return self.dataset_size
 
     def __getitem__(self, idx) -> Tuple[torch.Tensor, torch.Tensor]:
-        src = torch.randint(0, 2, (self.complexity,)).long()
+        src = torch.randint(
+            0, 2,
+            (randint(1, self.complexity),)
+            ).long()
+        
         padding = self.seqlen - self.complexity
         pad_src = torch.cat([src, torch.zeros(padding).long()])
 

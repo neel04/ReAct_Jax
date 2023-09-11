@@ -28,7 +28,7 @@ def main(key: PRNGKeyArray):
 
     # Truncated dataset for calculating training accuracy
     trunc_dataset = RevDataset(args.seqlen, 3, args.dataset_length // 20)
-    val_dataset = RevDataset(args.seqlen, args.seqlen, args.dataset_length // 20)
+    val_dataset = RevDataset(args.seqlen, args.cl_seqlen + 3, args.dataset_length // 20)
 
     trainloader = DataLoader(dataset,
                              batch_size=args.batch_size,
