@@ -122,7 +122,7 @@ class Trainer:
         with open(filename, "wb") as f:
             eqx.tree_serialise_leaves(f, obj)
     
-    def resume_training(self, args: dict, model: eqx.Module, opt_state: eqx.Module, epoch: int):
+    def resume_training(self, args: dict, model: eqx.Module, opt_state: eqx.Module):
         # extracting out the paths
         run_path, epoch = args.resume.split('+')
         run_path, epoch = run_path.strip(), int(epoch.strip())
