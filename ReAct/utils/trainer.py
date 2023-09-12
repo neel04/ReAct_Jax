@@ -224,8 +224,8 @@ class Trainer:
                 # Save the optimizer states
                 for i, state in enumerate(opt_state):
                     opt_filepath = f"{self.save_dir}opt_state_{i}_{epoch}.eqx"
-                    self.save_eqx_obj(opt_filepath, opt_state[i])
-                    self.wandb_logger.save(opt_filepath)
+                    self.save_eqx_obj(opt_filepath, state)
+                    self.wandb_logger.save(opt_filepath, base_path=self.save_dir)
                 
                 self.wandb_logger.save(filepath)
                 
