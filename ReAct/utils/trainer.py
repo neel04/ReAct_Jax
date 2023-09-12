@@ -205,6 +205,8 @@ class Trainer:
                 save_eqx_obj(self.save_dir, filepath, (model, opt_state))
                 
                 self.wandb_logger.save(filepath)
+                print('LET SEE')
+                model, opt_state = load_eqx_obj(f'{self.save_dir}model_{epoch}.eqx', (model, opt_state))
                 
         return loss, model, opt_state
 
