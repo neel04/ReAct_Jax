@@ -212,10 +212,11 @@ class Trainer:
                 filepath = f"{self.save_dir}model_{epoch}.eqx"
                 self.save_eqx_obj(filepath, model)
                 # save optimizer state
-                filepath = f"{self.save_dir}opt_state_{epoch}.eqx"
-                self.save_eqx_obj(filepath, opt_state)
+                opt_filepath = f"{self.save_dir}opt_state_{epoch}.eqx"
+                self.save_eqx_obj(opt_filepath, opt_state)
                 
                 self.wandb_logger.save(filepath)
+                self.wandb_logger.save(opt_filepath)
                 
         return loss, model, opt_state
 
