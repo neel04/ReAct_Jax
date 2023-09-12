@@ -59,8 +59,10 @@ class Trainer:
         
         # Setup hyperparams. args is Namespace object
         # set each attribute as a class attribute
+        self.my_logger.info(f'Using Args: {args}\n')
+        
         for k, v in vars(args).items():
-            setattr(self, k, v)        
+                setattr(self, k, v)        
     
     def get_n_k(self) -> Tuple[Array, Array]:
         n_key, k_key = jax.random.split(self.key, 2)
