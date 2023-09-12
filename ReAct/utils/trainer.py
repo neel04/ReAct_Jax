@@ -139,6 +139,8 @@ class Trainer:
         model = load_eqx_obj(model, f'{self.save_dir}model_{epoch}.eqx')
         opt_state = load_eqx_obj(opt_state, f'{self.save_dir}opt_state_{epoch}.eqx')
         
+        self.my_logger.info(f'-------- Resuming training from epoch {epoch} ---------\n')
+        
         return model, opt_state, epoch
     
     def train(self, epochs: int, trainloader: DataLoader, truncloader: DataLoader,
