@@ -39,7 +39,7 @@ class UnifiedLogger:
             id = None
             
         wandb.init(project='ReAct_Jax', config=args, anonymous='allow',
-                   mode=args.wandb, magic=True, resume=args.resume, id=id)
+                   mode=args.wandb, magic=True, resume='allow', id=id)
         
         wandb.run.log_code(
             "../",
