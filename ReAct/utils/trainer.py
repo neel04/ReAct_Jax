@@ -122,9 +122,9 @@ class Trainer:
         with open(filename, "wb") as f:
             eqx.tree_serialise_leaves(f, obj)
     
-    def resume_training(self, args: dict, model: eqx.Module, opt_state: eqx.Module):
+    def resume_training(self, model: eqx.Module, opt_state: eqx.Module):
         # extracting out the paths
-        run_path, epoch = args.resume.split('+')
+        run_path, epoch = self.resume.split('+')
         run_path, epoch = run_path.strip(), int(epoch.strip())
         
         base_path = "https://api.wandb.ai/files/"
@@ -149,7 +149,7 @@ class Trainer:
         model, optim, opt_state = self.init_model(self.key)
         
         if self.resume:
-            model, opt_state, epochs_done = self.resume_training(self.resume, model, opt_state)
+            model, opt_state, epochs_done = self.resume_training(model, opt_state)
         else:
             epoch_done = 0
         
