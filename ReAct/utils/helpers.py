@@ -7,17 +7,14 @@ import torch
 from jaxtyping import Array, PRNGKeyArray
 
 
-def save_eqx_obj(save_dir, filename: str, obj: eqx.Module):
+def save_eqx_obj(save_dir: str, filename: str, obj: tuple):
     if not os.path.exists(save_dir):
         os.makedirs(save_dir)
         
-    with open(filename, "wb") as f:
-        eqx.tree_serialise_leaves(f, obj)
+    return eqx.tree_serialise_leaves(filename, obj)
         
-def load_eqx_obj(obj, filepath):
-    with open(filepath, 'rb') as f:
-        print(f"Loading {filepath}")
-        return eqx.tree_deserialise_leaves(f, obj)
+def load_eqx_obj(obj: tuple, filepath: str) -> tuple:
+    return eqx.tree_deserialise_leaves(filepath, obj)
 
 def count_params(model: eqx.Module):
     num_params = sum(x.size for x in jax.tree_util.tree_leaves(eqx.filter(model, eqx.is_array)))
