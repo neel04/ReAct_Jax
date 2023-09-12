@@ -1,9 +1,19 @@
+import os
+
 import equinox as eqx
 import jax
 import jax.numpy as jnp
 import torch
 from jaxtyping import Array, PRNGKeyArray
 
+
+def save_eqx_obj(save_dir, filename: str, obj: eqx.Module):
+    if not os.path.exists(save_dir):
+        os.makedirs(save_dir)
+        
+    with open(filename, "wb") as f:
+        eqx.tree_serialise_leaves(f, obj)
+        
 def load_eqx_obj(obj, filepath):
     with open(filepath, 'rb') as f:
         print(f"Loading {filepath}")
