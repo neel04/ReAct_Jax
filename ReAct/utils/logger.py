@@ -33,8 +33,13 @@ class UnifiedLogger:
         key = os.environ.get('WANDB_API_KEY')
         wandb.login(key=key)
         
-        wandb.init(project='ReAct_Jax', magic=True, anonymous='allow',
-                   mode=args.wandb, config=args)
+        if args.resume:
+            id = args.resume.split('/')[2]
+        else:
+            id = None
+            
+        wandb.init(project='ReAct_Jax', config=args, anonymous='allow',
+                   mode=args.wandb, magic=True, resume=args.resume, id=id)
         
         wandb.run.log_code(
             "../",

@@ -10,7 +10,7 @@ from torch.utils.data import DataLoader
 from tqdm.auto import tqdm
 
 from ReAct.model.react import React
-from ReAct.utils.helpers import convert_to_jax, count_params
+from ReAct.utils.helpers import convert_to_jax, count_params, load_eqx_obj
 from ReAct.utils.logger import UnifiedLogger
 
 from .helpers import get_rand_nums
@@ -115,19 +115,43 @@ class Trainer:
         
         return model, optim, opt_state
     
-    def save_model(self, filename: str, model: eqx.Module):
+    def save_eqx_obj(self, filename: str, obj: eqx.Module):
         if not os.path.exists(self.save_dir):
             os.makedirs(self.save_dir)
             
         with open(filename, "wb") as f:
-            eqx.tree_serialise_leaves(f, model)
-            
+            eqx.tree_serialise_leaves(f, obj)
+    
+    def resume_training(self, args: dict, model: eqx.Module, opt_state: eqx.Module, epoch: int):
+        # extracting out the paths
+        run_path, epoch = args.resume.split('+')
+        run_path, epoch = run_path.strip(), int(epoch.strip())
+        
+        base_path = "https://api.wandb.ai/files/"
+        model_path = f'{base_path}{run_path}/model_{epoch}.eqx'
+        opt_state_path = f'{base_path}{run_path}/opt_state_{epoch}.eqx'
+        
+        # wget both files to ReAct/outputs/
+        os.system(f'wget -O {self.save_dir}model_{epoch}.eqx {model_path}')
+        os.system(f'wget -O {self.save_dir}opt_state_{epoch}.eqx {opt_state_path}')
+        
+        # load the model and opt_state
+        model = load_eqx_obj(model, f'{self.save_dir}model_{epoch}.eqx')
+        opt_state = load_eqx_obj(opt_state, f'{self.save_dir}opt_state_{epoch}.eqx')
+        
+        return model, opt_state, epoch
+    
     def train(self, epochs: int, trainloader: DataLoader, truncloader: DataLoader,
               valloader: DataLoader, testloader: DataLoader):
         
         model, optim, opt_state = self.init_model(self.key)
         
-        for epoch in range(epochs):
+        if self.resume:
+            model, opt_state, epochs_done = self.resume_training(self.resume, model, opt_state)
+        else:
+            epoch_done = 0
+        
+        for epoch in range(epoch_done, epochs):
             rndm_n, rndm_k = self.get_n_k()
             
             for step, (x, y) in tqdm(enumerate(trainloader), total=self.dataset_length // self.batch_size):
@@ -186,7 +210,11 @@ class Trainer:
             if epoch % self.save_interval == 0:
                 # Save the model 
                 filepath = f"{self.save_dir}model_{epoch}.eqx"
-                self.save_model(filepath, model)
+                self.save_eqx_obj(filepath, model)
+                # save optimizer state
+                filepath = f"{self.save_dir}opt_state_{epoch}.eqx"
+                self.save_eqx_obj(filepath, opt_state)
+                
                 self.wandb_logger.save(filepath)
                 
         return loss, model, opt_state

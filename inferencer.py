@@ -6,7 +6,7 @@ from jaxtyping import PRNGKeyArray
 
 from ReAct.model.react import React
 from ReAct.utils.arg_parser import parse_args
-from ReAct.utils.helpers import convert_to_jax, count_params
+from ReAct.utils.helpers import convert_to_jax, count_params, load_eqx_obj
 from ReAct.utils.logger import UnifiedLogger
 
 
@@ -26,11 +26,6 @@ class Inferencer:
         
         return model
     
-    def load_eqx_model(self, filepath, key: PRNGKeyArray):
-        with open(filepath, 'rb') as f:
-            model = self.skeleton_model(key)
-            return eqx.tree_deserialise_leaves(f, model)
-    
     def encode_input(self, my_input: str):
         encoded = [int(i) for i in my_input]
         
@@ -45,7 +40,9 @@ class Inferencer:
         
     
     def inference(self, my_input: str):
-        model = self.load_eqx_model(self.checkpoint_path, self.key)
+        model = self.skeleton_model(self.key)
+        model = load_eqx_obj(self.checkpoint_path)
+        
         count_params(model)
         
         # Convert to JAX

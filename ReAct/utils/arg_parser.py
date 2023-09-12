@@ -66,6 +66,10 @@ def parse_args():
     
     parser.add_argument('--prompt', type=str, default=None,
                         help='input for inference. Default: None')
+    
+    parser.add_argument('--resume', type=str, default=None,
+                        help='Obtain WandB run_path from Overview tab and append the'
+                             'epoch number. \nExample arg: "neel/ReAct_Jax/6ktmhalt/ + 200"')
 
     args = parser.parse_args()
     return args

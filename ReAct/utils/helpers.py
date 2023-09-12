@@ -2,8 +2,11 @@ import equinox as eqx
 import jax
 import jax.numpy as jnp
 import torch
-
 from jaxtyping import Array, PRNGKeyArray
+
+def load_eqx_obj(self, obj, filepath):
+    with open(filepath, 'rb') as f:
+        return eqx.tree_deserialise_leaves(f, obj)
 
 def count_params(model: eqx.Module):
   num_params = sum(x.size for x in jax.tree_util.tree_leaves(eqx.filter(model, eqx.is_array)))
