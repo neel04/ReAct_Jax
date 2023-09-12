@@ -131,13 +131,20 @@ class Trainer:
         model_path = f'{base_path}{run_path}/model_{epoch}.eqx'
         opt_state_path = f'{base_path}{run_path}/opt_state_{epoch}.eqx'
         
-        # wget both files to ReAct/outputs/
-        os.system(f'wget -O {self.save_dir}model_{epoch}.eqx {model_path}')
-        os.system(f'wget -O {self.save_dir}opt_state_{epoch}.eqx {opt_state_path}')
+        # wget both files to ReAct/outputs/, if they those files don't exist
+        if not os.path.exists(f'{self.save_dir}model_{epoch}.eqx'):
+            os.system(f'wget -O {self.save_dir}model_{epoch}.eqx {model_path}')
+            os.system(f'wget -O {self.save_dir}opt_state_0_{epoch}.eqx {opt_state_path}')
+            os.system(f'wget -O {self.save_dir}opt_state_1_{epoch}.eqx {opt_state_path}')
         
         # load the model and opt_state
+        state_0, state_1 = opt_state
+        
         model = load_eqx_obj(model, f'{self.save_dir}model_{epoch}.eqx')
-        opt_state = load_eqx_obj(opt_state, f'{self.save_dir}opt_state_{epoch}.eqx')
+        state_0 = load_eqx_obj(state_0, f'{self.save_dir}opt_state_0_{epoch}.eqx')
+        state_1 = load_eqx_obj(state_1, f'{self.save_dir}opt_state_1_{epoch}.eqx')
+        
+        opt_state = (state_0, state_1)
         
         self.my_logger.info(f'-------- Resuming training from epoch {epoch} ---------\n')
         
@@ -149,7 +156,7 @@ class Trainer:
         model, optim, opt_state = self.init_model(self.key)
         
         if self.resume:
-            model, opt_state, epochs_done = self.resume_training(model, opt_state)
+            model, opt_state, epoch_done = self.resume_training(model, opt_state)
         else:
             epoch_done = 0
         
@@ -213,12 +220,14 @@ class Trainer:
                 # Save the model 
                 filepath = f"{self.save_dir}model_{epoch}.eqx"
                 self.save_eqx_obj(filepath, model)
-                # save optimizer state
-                opt_filepath = f"{self.save_dir}opt_state_{epoch}.eqx"
-                self.save_eqx_obj(opt_filepath, opt_state)
+                
+                # Save the optimizer states
+                for i, state in enumerate(opt_state):
+                    opt_filepath = f"{self.save_dir}opt_state_{i}_{epoch}.eqx"
+                    self.save_eqx_obj(opt_filepath, opt_state[i])
+                    self.wandb_logger.save(opt_filepath)
                 
                 self.wandb_logger.save(filepath)
-                self.wandb_logger.save(opt_filepath)
                 
         return loss, model, opt_state
 

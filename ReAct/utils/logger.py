@@ -34,7 +34,9 @@ class UnifiedLogger:
         wandb.login(key=key)
         
         if args.resume:
-            id = args.resume.split('/')[2]
+            # args.resume is of the form: "neel/ReAct_Jax/lxxn0x54 + 20"
+            # we want to extract the run id, i.e "lxxn0x54"
+            id = args.resume.split("+")[0].split("/")[-1].strip()
         else:
             id = None
             
