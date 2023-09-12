@@ -202,7 +202,7 @@ class Trainer:
             if epoch % self.save_interval == 0:
                 # Save the model 
                 filepath = f"{self.save_dir}model_{epoch}.eqx"
-                model, opt_state = save_eqx_obj(self.save_dir, filepath, (model, opt_state))
+                save_eqx_obj(self.save_dir, filepath, (model, opt_state))
                 
                 self.wandb_logger.save(filepath)
                 

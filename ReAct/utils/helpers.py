@@ -11,7 +11,7 @@ def save_eqx_obj(save_dir: str, filename: str, obj: tuple):
     if not os.path.exists(save_dir):
         os.makedirs(save_dir)
         
-    return eqx.tree_serialise_leaves(filename, obj)
+    eqx.tree_serialise_leaves(filename, obj)
         
 def load_eqx_obj(obj: tuple, filepath: str) -> tuple:
     return eqx.tree_deserialise_leaves(filepath, obj)
