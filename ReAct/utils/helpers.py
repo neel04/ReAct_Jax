@@ -13,8 +13,9 @@ def save_eqx_obj(save_dir: str, filename: str, obj: tuple):
         
     eqx.tree_serialise_leaves(filename, obj)
         
-def load_eqx_obj(obj: tuple, filepath: str) -> tuple:
-    return eqx.tree_deserialise_leaves(obj, filepath)
+def load_eqx_obj(filepath: str, obj: tuple) -> tuple:
+    return eqx.tree_deserialise_leaves(path_or_file=filepath,
+                                       like=obj)
 
 def count_params(model: eqx.Module):
     num_params = sum(x.size for x in jax.tree_util.tree_leaves(eqx.filter(model, eqx.is_array)))

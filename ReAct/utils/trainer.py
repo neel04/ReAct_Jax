@@ -113,7 +113,7 @@ class Trainer:
         optim, opt_state, model = self.set_optim_and_scheduler(model)
         count_params(model)
         
-        return model, optim, opt_state
+        return optim, opt_state, model
     
     def resume_training(self, model: eqx.Module, opt_state: eqx.Module):
         # extracting out the paths
@@ -127,7 +127,7 @@ class Trainer:
         if not os.path.exists(f'{self.save_dir}model_{epoch}.eqx'):
             os.system(f'wget -O {self.save_dir}model_{epoch}.eqx {model_path}')
         
-        model, opt_state = load_eqx_obj((model, opt_state), f'{self.save_dir}model_{epoch}.eqx')
+        model, opt_state = load_eqx_obj(f'{self.save_dir}model_{epoch}.eqx', (model, opt_state))
         
         self.my_logger.info(f'-------- Resuming training from epoch {epoch} ---------\n')
         
@@ -136,7 +136,7 @@ class Trainer:
     def train(self, epochs: int, trainloader: DataLoader, truncloader: DataLoader,
               valloader: DataLoader, testloader: DataLoader):
         
-        model, optim, opt_state = self.init_model(self.key)
+        optim, opt_state, model = self.init_model(self.key)
         
         if self.resume:
             model, opt_state, epoch_done = self.resume_training(model, opt_state)
