@@ -137,6 +137,7 @@ class Trainer:
               valloader: DataLoader, testloader: DataLoader):
         
         optim, opt_state, model = self.init_model(self.key)
+        self.my_logger.info(f'DEBUG: {opt_state}')
         
         if self.resume:
             model, opt_state, epoch_done = self.resume_training(model, opt_state)
@@ -151,6 +152,8 @@ class Trainer:
                 
                 loss, model, opt_state = make_step(model, x, y, rndm_n, rndm_k,
                                                    optim, opt_state, self.num_classes)
+                
+                self.my_logger.info(f'DEBUG: {opt_state}')
                 
                 loss = loss.item()
             
@@ -202,11 +205,12 @@ class Trainer:
             if epoch % self.save_interval == 0:
                 # Save the model 
                 filepath = f"{self.save_dir}model_{epoch}.eqx"
+                
+                self.my_logger.info(f'DEBUG: {opt_state}')
+                
                 save_eqx_obj(self.save_dir, filepath, (model, opt_state))
                 
                 self.wandb_logger.save(filepath)
-                print('LET SEE')
-                model, opt_state = load_eqx_obj(f'{self.save_dir}model_{epoch}.eqx', (model, opt_state))
                 
         return loss, model, opt_state
 
