@@ -137,12 +137,14 @@ class Trainer:
               valloader: DataLoader, testloader: DataLoader):
         
         optim, opt_state, model = self.init_model(self.key)
-        self.my_logger.info(f'DEBUG: {opt_state}')
+        self.my_logger.info(f'INIT DEBUG: {opt_state}')
         
         if self.resume:
             model, opt_state, epoch_done = self.resume_training(model, opt_state)
         else:
             epoch_done = 0
+        
+        self.my_logger.info(f'DEBUG AFTER RESUME: {opt_state}')         
         
         for epoch in range(epoch_done, epochs):
             rndm_n, rndm_k = self.get_n_k()
