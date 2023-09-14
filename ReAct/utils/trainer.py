@@ -100,7 +100,7 @@ class Trainer:
             #optax.clip(self.grad_clip),
             #optax.adamw(learning_rate=schedule_fn, weight_decay=self.weight_decay)
         #)
-        optim = optax.adamw(weight_decay=self.weight_decay)
+        optim = optax.adamw(learning_rate=schedule_fn, weight_decay=self.weight_decay)
         
         opt_state = optim.init(eqx.filter(model, eqx.is_array))
         
