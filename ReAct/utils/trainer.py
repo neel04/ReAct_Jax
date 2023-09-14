@@ -140,14 +140,11 @@ class Trainer:
               valloader: DataLoader, testloader: DataLoader):
         
         optim, opt_state, model = self.init_model(self.key)
-        self.my_logger.info(f'INIT DEBUG: {opt_state}')
         
         if self.resume:
             model, opt_state, epoch_done = self.resume_training(model, opt_state)
         else:
             epoch_done = 0
-        
-        self.my_logger.info(f'DEBUG AFTER RESUME: {opt_state}')         
         
         for epoch in range(epoch_done, epochs):
             rndm_n, rndm_k = self.get_n_k()
@@ -207,18 +204,15 @@ class Trainer:
             
             if epoch % self.save_interval == 0:
                 # Save the model 
-                filepath = f"{self.save_dir}model_{epoch}.eqx"
-                filepath = f"{self.save_dir}opt_{epoch}.eqx"
-                
-                self.my_logger.info(f'DEBUG B4 SAVE: {opt_state}')
+                filepath_model = f"{self.save_dir}model_{epoch}.eqx"
+                filepath_opt = f"{self.save_dir}opt_{epoch}.eqx"
                 
                 #save_eqx_obj(self.save_dir, filepath, (model, opt_state))
-                eqx.tree_serialise_leaves(filepath, model)
-                eqx.tree_serialise_leaves(filepath, opt_state)
+                eqx.tree_serialise_leaves(filepath_model, model)
+                eqx.tree_serialise_leaves(filepath_opt, opt_state)
                 
-                self.my_logger.info(f'DEBUG AFTER SAVE: {opt_state}')
-                
-                self.wandb_logger.save(filepath)
+                self.wandb_logger.save(filepath_model)
+                self.wandb_logger.save(filepath_opt)
                 
         return loss, model, opt_state
 
