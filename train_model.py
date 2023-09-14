@@ -57,6 +57,8 @@ def main(key: PRNGKeyArray):
                             shuffle=False)
 
     num_devices = jax.local_device_count()
+    print(f'Number of devices: {num_devices}')
+    
     devices = mesh_utils.create_device_mesh((num_devices, 1))
     shard = sharding.PositionalSharding(devices)
     
@@ -64,5 +66,6 @@ def main(key: PRNGKeyArray):
     trainer.train(args.epochs, trainloader, truncloader, valloader, testloader)
 
 if __name__ == '__main__':
+    jax.distributed.initialize()
     key = jax.random.PRNGKey(69)
     main(key)
