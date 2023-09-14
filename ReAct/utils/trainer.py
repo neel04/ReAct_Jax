@@ -96,13 +96,12 @@ class Trainer:
                                                          total_steps, self.lr // 20)
 
         # AdamW optimizer with weight decay
-        #optim = optax.chain(
-            #optax.clip(self.grad_clip),
-            #optax.adamw(learning_rate=schedule_fn, weight_decay=self.weight_decay)
-        #)
-        optim = optax.adamw(learning_rate=schedule_fn, weight_decay=self.weight_decay)
+        optim = optax.chain(
+            optax.clip(self.grad_clip),
+            optax.adamw(learning_rate=schedule_fn, weight_decay=self.weight_decay)
+        )
         
-        opt_state = optim.init(eqx.filter(model, eqx.is_array))
+        opt_state = optim.init(eqx.filter(model, eqx.is_inexact_array))
         
         return optim, opt_state, model
     
