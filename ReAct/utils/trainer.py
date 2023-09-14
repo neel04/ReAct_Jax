@@ -127,7 +127,8 @@ class Trainer:
         if not os.path.exists(f'{self.save_dir}model_{epoch}.eqx'):
             os.system(f'wget -O {self.save_dir}model_{epoch}.eqx {model_path}')
         
-        model, opt_state = load_eqx_obj(f'{self.save_dir}model_{epoch}.eqx', (model, opt_state))
+        model = load_eqx_obj(f'{self.save_dir}model_{epoch}.eqx', model)
+        opt_state = load_eqx_obj(f'{self.save_dir}opt_{epoch}.eqx', opt_state)
         
         self.my_logger.info(f'-------- Resuming training from epoch {epoch} ---------\n')
         
@@ -205,11 +206,13 @@ class Trainer:
             if epoch % self.save_interval == 0:
                 # Save the model 
                 filepath = f"{self.save_dir}model_{epoch}.eqx"
+                filepath = f"{self.save_dir}opt_{epoch}.eqx"
                 
                 self.my_logger.info(f'DEBUG B4 SAVE: {opt_state}')
                 
                 #save_eqx_obj(self.save_dir, filepath, (model, opt_state))
-                eqx.tree_serialise_leaves(filepath, (model, opt_state))
+                eqx.tree_serialise_leaves(filepath, model)
+                eqx.tree_serialise_leaves(filepath, opt_state)
                 
                 self.my_logger.info(f'DEBUG AFTER SAVE: {opt_state}')
                 
