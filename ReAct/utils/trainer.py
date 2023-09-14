@@ -208,7 +208,8 @@ class Trainer:
                 
                 self.my_logger.info(f'DEBUG B4 SAVE: {opt_state}')
                 
-                save_eqx_obj(self.save_dir, filepath, (model, opt_state))
+                #save_eqx_obj(self.save_dir, filepath, (model, opt_state))
+                eqx.tree_serialise_leaves(filepath, (model, opt_state))
                 
                 self.my_logger.info(f'DEBUG AFTER SAVE: {opt_state}')
                 
