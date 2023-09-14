@@ -66,6 +66,5 @@ def main(key: PRNGKeyArray):
     trainer.train(args.epochs, trainloader, truncloader, valloader, testloader)
 
 if __name__ == '__main__':
-    jax.distributed.initialize()
     key = jax.random.PRNGKey(69)
     main(key)
