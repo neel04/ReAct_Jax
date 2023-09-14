@@ -155,8 +155,6 @@ class Trainer:
                 loss, model, opt_state = make_step(model, x, y, rndm_n, rndm_k,
                                                    optim, opt_state, self.num_classes)
                 
-                self.my_logger.info(f'DEBUG: {opt_state}')
-                
                 loss = loss.item()
             
             # Validation
@@ -208,9 +206,11 @@ class Trainer:
                 # Save the model 
                 filepath = f"{self.save_dir}model_{epoch}.eqx"
                 
-                self.my_logger.info(f'DEBUG: {opt_state}')
+                self.my_logger.info(f'DEBUG B4 SAVE: {opt_state}')
                 
                 save_eqx_obj(self.save_dir, filepath, (model, opt_state))
+                
+                self.my_logger.info(f'DEBUG AFTER SAVE: {opt_state}')
                 
                 self.wandb_logger.save(filepath)
                 
