@@ -122,10 +122,12 @@ class Trainer:
         
         base_path = "https://api.wandb.ai/files/"
         model_path = f'{base_path}{run_path}/model_{epoch}.eqx'
+        opt_path = f'{base_path}{run_path}/opt_{epoch}.eqx'
         
         # wget both files to ReAct/outputs/, if they those files don't exist
         if not os.path.exists(f'{self.save_dir}model_{epoch}.eqx'):
             os.system(f'wget -O {self.save_dir}model_{epoch}.eqx {model_path}')
+            os.system(f'wget -O {self.save_dir}opt_{epoch}.eqx {opt_path}')
         
         model = load_eqx_obj(f'{self.save_dir}model_{epoch}.eqx', model)
         opt_state = load_eqx_obj(f'{self.save_dir}opt_{epoch}.eqx', opt_state)
