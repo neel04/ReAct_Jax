@@ -1,5 +1,5 @@
 import os
-from typing import Tuple
+from typing import Any, Tuple
 
 import equinox as eqx
 import jax
@@ -50,8 +50,9 @@ def make_step(model: eqx.Module, x: Array, y: Array,
     return loss, model, opt_state
 
 class Trainer:
-    def __init__(self, args: dict, key: PRNGKeyArray, logger=None):
+    def __init__(self, args: dict, key: PRNGKeyArray, logger=None, shard: Any = None):
         self.key = key
+        self.shard = shard if shard is not None else None
         
         logger = UnifiedLogger(args, level='DEBUG')
         self.my_logger = logger.my_logger()
@@ -122,15 +123,12 @@ class Trainer:
         
         base_path = "https://api.wandb.ai/files/"
         model_path = f'{base_path}{run_path}/model_{epoch}.eqx'
-        opt_path = f'{base_path}{run_path}/opt_{epoch}.eqx'
         
         # wget both files to ReAct/outputs/, if they those files don't exist
         if not os.path.exists(f'{self.save_dir}model_{epoch}.eqx'):
             os.system(f'wget -O {self.save_dir}model_{epoch}.eqx {model_path}')
-            os.system(f'wget -O {self.save_dir}opt_{epoch}.eqx {opt_path}')
         
-        model = load_eqx_obj(f'{self.save_dir}model_{epoch}.eqx', model)
-        opt_state = load_eqx_obj(f'{self.save_dir}opt_{epoch}.eqx', opt_state)
+        model, opt_state = load_eqx_obj(f'{self.save_dir}model_{epoch}.eqx', (model, opt_state))
         
         self.my_logger.info(f'-------- Resuming training from epoch {epoch} ---------\n')
         
@@ -151,6 +149,7 @@ class Trainer:
             
             for step, (x, y) in tqdm(enumerate(trainloader), total=self.dataset_length // self.batch_size):
                 x, y = convert_to_jax(x), convert_to_jax(y)
+                x, y = jax.device_put((x, y), self.shard)
                 
                 loss, model, opt_state = make_step(model, x, y, rndm_n, rndm_k,
                                                    optim, opt_state, self.num_classes)
@@ -204,15 +203,11 @@ class Trainer:
             
             if epoch % self.save_interval == 0:
                 # Save the model 
-                filepath_model = f"{self.save_dir}model_{epoch}.eqx"
-                filepath_opt = f"{self.save_dir}opt_{epoch}.eqx"
+                filepath = f"{self.save_dir}model_{epoch}.eqx"
                 
-                #save_eqx_obj(self.save_dir, filepath, (model, opt_state))
-                eqx.tree_serialise_leaves(filepath_model, model)
-                eqx.tree_serialise_leaves(filepath_opt, opt_state)
+                save_eqx_obj(self.save_dir, filepath, (model, opt_state))
                 
-                self.wandb_logger.save(filepath_model)
-                self.wandb_logger.save(filepath_opt)
+                self.wandb_logger.save(filepath)
                 
         return loss, model, opt_state
 

@@ -1,5 +1,6 @@
 import jax
-
+import jax.experimental.mesh_utils as mesh_utils
+import jax.sharding as sharding
 from jax import config
 from jaxtyping import PRNGKeyArray
 from torch.utils.data import DataLoader
@@ -11,6 +12,7 @@ from ReAct.utils.trainer import Trainer
 
 def main(key: PRNGKeyArray):
     args = parse_args()
+    jax.config.update('jax_threefry_partitionable', True) # for parallelization
     
     # Enter debugging mode, disabling JIT
     if args.debug:
@@ -54,7 +56,11 @@ def main(key: PRNGKeyArray):
                             drop_last=True,
                             shuffle=False)
 
-    trainer = Trainer(args, model_key, logger)
+    num_devices = jax.local_device_count()
+    devices = mesh_utils.create_device_mesh((num_devices, 1))
+    shard = sharding.PositionalSharding(devices)
+    
+    trainer = Trainer(args, model_key, logger, shard)
     trainer.train(args.epochs, trainloader, truncloader, valloader, testloader)
 
 if __name__ == '__main__':
