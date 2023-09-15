@@ -1,5 +1,5 @@
 import os
-from typing import Any, Tuple
+from typing import Any, Tuple, List
 
 import equinox as eqx
 import jax
@@ -18,22 +18,22 @@ from .helpers import get_rand_nums
 
 # A unified Trainer class for training and evaluation
 @jax.jit
-def n_k_loop(model: eqx.Module, input_arr: Array, n: int, k: int) -> Array:
+def n_k_loop(model: eqx.Module, input_arr: Array, n: int, k: int, key: PRNGKeyArray) -> Array:
     # forward pass the model without tracking grads
     output, intermediate_array = model(
         jax.lax.stop_gradient(input_arr), 
-        iters_to_do=n, prev_thought=None)
+        iters_to_do=n, prev_thought=None, key=key)
     
     # n-k passes, but track the gradient this time
-    output, _ = model(input_arr, k, prev_thought=intermediate_array)
+    output, _ = model(input_arr, k, prev_thought=intermediate_array, key=key)
 
     return output
 
 @eqx.filter_value_and_grad
 def compute_loss(model: eqx.Module, x: Array, y: Array,
-                 n: int, k: int, num_classes: int = 2):
+                 n: int, k: int, num_classes: int = 2, keys: List[PRNGKeyArray] = None):
     
-    pred_y = jax.vmap(n_k_loop, in_axes=(None, 0, 0, 0))(model, x, n, k) # (batch_size, seqlen, num_classes)
+    pred_y = jax.vmap(n_k_loop, in_axes=(None, 0, 0, 0, 0))(model, x, n, k, keys) # (batch_size, seqlen, num_classes)
     
     y_one_hot = jax.nn.one_hot(y, num_classes=num_classes) # (batch_size, seqlen, num_classes)
     loss = optax.sigmoid_binary_cross_entropy(pred_y, y_one_hot)
@@ -41,17 +41,16 @@ def compute_loss(model: eqx.Module, x: Array, y: Array,
     return jnp.mean(loss)
     
 @eqx.filter_jit
-def make_step(model: eqx.Module, x: Array, y: Array, 
-              n: int, k: int, optim, opt_state, num_classes: int = 2):
+def make_step(model: eqx.Module, x: Array, y: Array,  n: int, k: int,
+              optim, opt_state, num_classes: int, keys: List[PRNGKeyArray]):  # noqa: F821
     
-    loss, grads = compute_loss(model, x, y, n, k, num_classes)
+    loss, grads = compute_loss(model, x, y, n, k, num_classes, keys)
     updates, opt_state = optim.update(grads, opt_state, model)
     model = eqx.apply_updates(model, updates)
     return loss, model, opt_state
 
 class Trainer:
-    def __init__(self, args: dict, key: PRNGKeyArray, logger=None, shard: Any = None):
-        self.key = key
+    def __init__(self, args: dict, logger=None, shard: Any = None):
         self.shard = shard if shard is not None else None
         
         logger = UnifiedLogger(args, level='DEBUG')
@@ -65,8 +64,8 @@ class Trainer:
         for k, v in vars(args).items():
                 setattr(self, k, v)        
     
-    def get_n_k(self) -> Tuple[Array, Array]:
-        n_key, k_key = jax.random.split(self.key, 2)
+    def get_n_k(self, key: PRNGKeyArray) -> Tuple[Array, Array]:
+        n_key, k_key = jax.random.split(key, 2)
         
         rndm_n = get_rand_nums(n_key, 0, self.max_iters, self.batch_size)
         rndm_k = get_rand_nums(k_key, jnp.ones(self.batch_size), 
@@ -74,13 +73,15 @@ class Trainer:
         
         return rndm_n, rndm_k
 
-    def evaluate_acc(self, model: eqx.Module, loader: DataLoader, eval_iters: int):
+    def evaluate_acc(self, model: eqx.Module, loader: DataLoader, eval_iters: int,
+                     keys: List[PRNGKeyArray]):
+        
         metric = []
 
         for step, (x, y) in enumerate(loader):
             x, y = convert_to_jax(x), convert_to_jax(y)
-            pred_y = jax.vmap(model, in_axes=(0, None, None, None))(
-                x, eval_iters, None, False)
+            pred_y = jax.vmap(model, in_axes=(0, None, None, None, 0))(
+                x, eval_iters, None, False, keys)
             
             val_pred_y = jax.nn.softmax(pred_y, axis=-1).argmax(-1)
             accuracy = jnp.mean(val_pred_y == y)
@@ -135,9 +136,9 @@ class Trainer:
         return model, opt_state, epoch
     
     def train(self, epochs: int, trainloader: DataLoader, truncloader: DataLoader,
-              valloader: DataLoader, testloader: DataLoader):
+              valloader: DataLoader, testloader: DataLoader, key: PRNGKeyArray):
         
-        optim, opt_state, model = self.init_model(self.key)
+        optim, opt_state, model = self.init_model(key)
         
         if self.resume:
             model, opt_state, epoch_done = self.resume_training(model, opt_state)
@@ -145,29 +146,35 @@ class Trainer:
             epoch_done = 0
         
         for epoch in range(epoch_done, epochs):
-            rndm_n, rndm_k = self.get_n_k()
+            keys = jax.random.split(
+                jnp.array([epoch, epoch + 1]).astype(jnp.uint32),
+                self.batch_size)
+            
+            rndm_n, rndm_k = self.get_n_k(
+                key=jnp.array([epoch, epoch + 1]).astype(jnp.uint32),
+                )
             
             for step, (x, y) in tqdm(enumerate(trainloader), total=self.dataset_length // self.batch_size):
                 x, y = convert_to_jax(x), convert_to_jax(y)
                 x, y = jax.device_put((x, y), self.shard)
                 
-                loss, model, opt_state = make_step(model, x, y, rndm_n, rndm_k,
-                                                   optim, opt_state, self.num_classes)
+                loss, model, opt_state = make_step(model, x, y, rndm_n, rndm_k, optim, opt_state,
+                                                   self.num_classes, keys)
                 
                 loss = loss.item()
             
             # Validation
-            val_acc, val_sample = self.evaluate_acc(model, valloader, self.max_iters)
-            val_acc_5, _ = self.evaluate_acc(model, valloader, self.max_iters + 5)
-            train_acc, _ = self.evaluate_acc(model, truncloader, self.max_iters)
-            test_acc, _ = self.evaluate_acc(model, testloader, self.max_iters + 5)
+            val_acc, val_sample = self.evaluate_acc(model, valloader, self.max_iters, keys)
+            val_acc_5, _ = self.evaluate_acc(model, valloader, self.max_iters + 5, keys)
+            train_acc, _ = self.evaluate_acc(model, truncloader, self.max_iters, keys)
+            test_acc, _ = self.evaluate_acc(model, testloader, self.max_iters + 5, keys)
             
             # Visualize one sample and model prediction
             sample_x = x[0] # Trainng sample
-            model_prediction = model(sample_x, self.max_iters, None, False)
+            model_prediction = model(sample_x, self.max_iters, None, False, keys[0])
             
-            val_pred = model(val_sample, self.max_iters, None, False)
-            val_pred_5 = model(val_sample, self.max_iters + 5, None, False)
+            val_pred = model(val_sample, self.max_iters, None, False, keys[0])
+            val_pred_5 = model(val_sample, self.max_iters + 5, None, False, keys[0])
             
             self.wandb_logger.log(
                 {

@@ -30,14 +30,11 @@ class MLP(eqx.Module):
 
         self.dropout = eqx.nn.Dropout(p=p)
 
-    def __call__(self, x: Array, key: Optional[PRNGKeyArray] = None):
+    def __call__(self, x: Array, key: PRNGKeyArray):
         for layer in self.layers:
             x = layer(x)
         
-        if key is None:
-            return self.dropout(x)
-        else:
-            return self.dropout(x, key=key, inference=False)
+        return self.dropout(x, key=key, inference=False)
 
 class LinearProj(eqx.Module):
 
