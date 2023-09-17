@@ -1,11 +1,11 @@
 import os
+from typing import List
 
 import equinox as eqx
 import jax
 import jax.numpy as jnp
 import torch
 from jaxtyping import Array, PRNGKeyArray
-
 
 def save_eqx_obj(save_dir: str, filename: str, obj: tuple):
     if not os.path.exists(save_dir):
@@ -22,9 +22,19 @@ def count_params(model: eqx.Module):
     num_millions = num_params / 1_000_000
     print(f"Model # of parameters: {num_millions:.2f}M")
 
+def process_seq(seq):
+    x, y = jnp.array(seq[0]), jnp.array(seq[1])
+    return x, y
+
 def convert_to_jax(x: torch.Tensor) -> Array:
     if isinstance(x, torch.Tensor):
         return jnp.array(x.detach().cpu().numpy())
+    elif isinstance(x, list):
+        # x is a list of tuples
+        output = list(map(process_seq, x))
+        output_x, output_y = zip(*output)
+        
+        return jnp.stack(output_x), jnp.stack(output_y)
     else:
         return jnp.array(x)
 

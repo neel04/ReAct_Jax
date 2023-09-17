@@ -1,12 +1,14 @@
 import os
+from random import randint
+from typing import List, Tuple
 
 import torch
 from datasets import load_dataset
-from tokenizer import Tok
+from .tokenizer import Tok
 from tqdm import tqdm
 
 
-class TinyStories:
+class TinyStoriesDataset:
     def __init__(self, split: str = 'train', max_length=32, bsz: int = 256, vocab_dir='./ReAct/data'):
         self.bsz = bsz
         
@@ -19,23 +21,56 @@ class TinyStories:
         encoded = self.tok.encode(text['text'])
         
         return {'text': [i.ids for i in encoded]}
+    
+    def _mask_seq(seq: List[int]) -> Tuple[List[int], int]:
+        pad_idx = seq.index(0) if 0 in seq else None
+        
+        if pad_idx is not None:
+            random_idx = randint(0, pad_idx)
+        else:
+            random_idx = randint(0, len(seq) - 1)
+        
+        label = seq[random_idx]
+        
+        seq[random_idx] = 3 # [MASK] token id
+        
+        return seq, [label]
+    
+    @staticmethod
+    def mask_tokens(text: List[List]) -> List[Tuple]:
+        text_seq = list(map(lambda x: TinyStoriesDataset._mask_seq(x), text))
+        
+        return text_seq
+
+    @staticmethod
+    def collate_fn(batch: List[dict]) -> List:
+        # batch is a list of dicts, each with a key 'text'
+        # collate them into a nested list
+        nested_list = list(map(lambda x: x['text'], batch))
+        
+        return nested_list        
 
     def create_dataloader(self):
         self.dataset = self.dataset.map(self.tokenize_and_pad, batched=True, batch_size=self.bsz)
-        self.dataset.with_format(type='torch')
         
         self.dataloader = torch.utils.data.DataLoader(
             self.dataset,
             batch_size=self.bsz,
             num_workers=os.cpu_count(),
             pin_memory=True,
-            drop_last=True)
+            drop_last=True,
+            collate_fn=self.collate_fn,
+            prefetch_factor=16)
         
         return self.dataloader
 
 if __name__ == '__main__':
-    dataset = TinyStories()
+    dataset = TinyStoriesDataset(bsz=256)
     dataloader = dataset.create_dataloader()
     
-    for batch in tqdm(dataloader):
-        pass
+    for idx, batch in tqdm(enumerate(dataloader)):
+        out = dataset.mask_tokens(batch)
+        #print(f'Input: {out[0][0]} | Label: {out[0][1]}')
+        #print(f'\nDecoded input: {dataset.tok.decode(out[0][0])} | Decoded label: {dataset.tok.decode(out[0][1])}')
+        #print(f'Input: {out[1][0]} | Label: {out[1][1]}')
+        #print(f'\nDecoded input: {dataset.tok.decode(out[1][0])} | Decoded label: {dataset.tok.decode(out[1][1])}')

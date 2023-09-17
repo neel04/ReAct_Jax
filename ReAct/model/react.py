@@ -1,6 +1,6 @@
 import equinox as eqx
 import jax
-import optax
+import math
 import jax.numpy as jnp
 
 from functools import partial
@@ -68,6 +68,30 @@ class RecurrentModule(eqx.Module):
 
         return x
 
+class output_head(eqx.Module):
+    '''
+    Output head for the model
+    '''
+    out_proj: eqx.Module
+    bias: Optional[jax.Array]
+    weight: jax.Array
+
+    def __init__(self, bottleneck: int, tgt_vocab_size: int, seq_len: int, key: PRNGKeyArray):
+        key1, key2 = jax.random.split(key, 2)
+        
+        lim = 1 / math.sqrt(seq_len)
+        self.weight = jax.random.uniform(key1, (1, seq_len), minval=-lim, maxval=lim)
+        self.bias = jax.random.uniform(key2, (1, tgt_vocab_size), minval=-lim, maxval=lim)
+        
+        self.out_proj = LinearProj(bottleneck, tgt_vocab_size, key=key2)
+
+    def __call__(self, x: Array) -> Array:
+        # (batch, seqlen, bottleneck) -> (batch, seqlen, tgt_vocab_size)
+        # -> (batch, 1, tgt_vocab_size)
+        x = self.weight @ self.out_proj(x) + self.bias
+        
+        return x
+
 class React(eqx.Module):
     max_iters: int = eqx.field(static=True)
     bottleneck: int = eqx.field(static=True)
@@ -92,7 +116,7 @@ class React(eqx.Module):
         self.embed_dim = self.bottleneck
         self.SEQLEN = seqlen
 
-        src_vocab_size: int = 8
+        src_vocab_size: int = 4096
         tgt_vocab_size: int = tgt_vocab_size
         drop_rate: float = drop_rate
 
@@ -105,8 +129,8 @@ class React(eqx.Module):
         self.main_block = RecurrentModule(num_blocks, drop_rate, self.bottleneck, key=key2)
         self.id = eqx.nn.Identity()
 
-        self.out_head = LinearProj(self.bottleneck, tgt_vocab_size, key=key4)
-
+        self.out_head = output_head(self.bottleneck, tgt_vocab_size, self.SEQLEN, key=key4)
+    
     @partial(jax.jit, static_argnums=[1,2])
     def positional_encoding(self, seq_len, d_model):
         '''

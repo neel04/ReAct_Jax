@@ -26,16 +26,15 @@ class Tok:
         self.tokenizer.enable_truncation(max_length=self.max_length)
     
     def encode(self, text: str):
-        if isinstance(text, dict):
-            text = text['text']
-            
         if len(text) > 1:
             return self.tokenizer.encode_batch(text)
-        
-        return self.tokenizer.encode(text)
+        elif isinstance(text, list):
+            return self.tokenizer.encode(text[0])
+        else:
+            return self.tokenizer.encode(text)
     
     def decode(self, ids: list):
-        return self.tokenizer.decode(ids)
+        return self.tokenizer.decode(ids, skip_special_tokens=False)
     
     def save(self):
         self.tokenizer.save(f'./ReAct/data/{self.dataset}tok.json')
@@ -49,6 +48,7 @@ class Tok:
             special_tokens=[
                 ("[SOS]", 1),
                 ("[EOS]", 2),
+                ("[MASK]", 3)
             ])
         
         self.tokenizer.normalizer = normalizers.Sequence([
@@ -74,5 +74,11 @@ class Tok:
 
 if __name__ == '__main__':
     tok = Tok('./ReAct/data/', 32)
-    out = tok(['Sam and alice', 'go and stab diana', 'for fun'])
-    print(out[1].tokens)
+    out = tok(['Sam and alice go and stab diana for [MASK]', '[MASK] off'])
+    print('Vocab size:', tok.tokenizer.get_vocab_size())
+    print(dict(zip(out[0].tokens, out[0].ids)))
+    
+    # decode [0, 1, 2, 614, 69, 420]
+    print(
+        tok.decode([0, 1, 2, 101, 69, 420])
+    )

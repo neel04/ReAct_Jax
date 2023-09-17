@@ -1,5 +1,5 @@
 import os
-from typing import Any, Tuple, List
+from typing import Any, Tuple, List, Callable
 
 import equinox as eqx
 import jax
@@ -31,12 +31,13 @@ def n_k_loop(model: eqx.Module, input_arr: Array, n: int, k: int, key: PRNGKeyAr
 
 @eqx.filter_value_and_grad
 def compute_loss(model: eqx.Module, x: Array, y: Array,
-                 n: int, k: int, num_classes: int = 2, keys: List[PRNGKeyArray] = None):
+                 n: int, k: int, num_classes: int = 2, keys: PRNGKeyArray = None):
     
     pred_y = jax.vmap(n_k_loop, in_axes=(None, 0, 0, 0, 0))(model, x, n, k, keys) # (batch_size, seqlen, num_classes)
+    pred_y = pred_y.squeeze(-2) # (batch_size, tgt_vocab_size)
     
     y_one_hot = jax.nn.one_hot(y, num_classes=num_classes) # (batch_size, seqlen, num_classes)
-    loss = optax.sigmoid_binary_cross_entropy(pred_y, y_one_hot)
+    loss = optax.softmax_cross_entropy(pred_y, y_one_hot)
     
     return jnp.mean(loss)
     
@@ -52,6 +53,7 @@ def make_step(model: eqx.Module, x: Array, y: Array,  n: int, k: int,
 class Trainer:
     def __init__(self, args: dict, logger=None, shard: Any = None):
         self.shard = shard if shard is not None else None
+        self.dataset_length = 2119719
         
         logger = UnifiedLogger(args, level='DEBUG')
         self.my_logger = logger.my_logger()
@@ -78,16 +80,20 @@ class Trainer:
         
         metric = []
 
-        for step, (x, y) in enumerate(loader):
-            x, y = convert_to_jax(x), convert_to_jax(y)
-            pred_y = jax.vmap(model, in_axes=(0, None, None, None, 0))(
-                x, eval_iters, None, False, keys)
+        for step, batch in enumerate(loader):
+            x, y = convert_to_jax(batch)
+            x, y = jax.device_put((x, y), self.shard)
             
-            val_pred_y = jax.nn.softmax(pred_y, axis=-1).argmax(-1)
-            accuracy = jnp.mean(val_pred_y == y)
-            metric.append(accuracy)
+            acc, loss, ppl = self.compute_metrics(model, (x, y), eval_iters, keys)
+            
+            metric.extend([acc, loss, ppl])
         
-        return sum(metric) / len(metric), x[0] # return one sample for viz
+        # Compute cumulatives
+        cum_acc = sum(metric[::3]) / len(metric[::3])
+        cum_loss = sum(metric[1::3]) / len(metric[1::3])
+        cum_ppl = sum(metric[2::3]) / len(metric[2::3])
+        
+        return (cum_acc, cum_loss, cum_ppl), x[0] # return one sample for viz
     
     def set_optim_and_scheduler(self, model: eqx.Module):
         assert isinstance(model, eqx.Module), 'Model is not initialized'
@@ -135,8 +141,29 @@ class Trainer:
         
         return model, opt_state, epoch
     
-    def train(self, epochs: int, trainloader: DataLoader, truncloader: DataLoader,
-              valloader: DataLoader, testloader: DataLoader, key: PRNGKeyArray):
+    def compute_metrics(self, model: eqx.Module, batch: Tuple, eval_iters: int, keys: List[PRNGKeyArray]):
+        '''
+        Computes the accuracy, perplexity, loss of the model w.r.t batch
+        '''
+        pred_y = jax.vmap(model, in_axes=(0, None, None, None, 0))(
+            batch[0], eval_iters, None, False, keys)
+        
+        # compute accuracy
+        pred_y = pred_y.squeeze(-2) # (batch_size, tgt_vocab_size)
+        y_hat = jax.nn.softmax(pred_y, axis=-1).argmax(-1)
+        accuracy = jnp.mean(y_hat == batch[1])
+        
+        # compute loss
+        y_one_hot = jax.nn.one_hot(batch[1], num_classes=self.num_classes) # (batch_size, seqlen, num_classes)
+        loss = optax.softmax_cross_entropy(pred_y, y_one_hot).mean()
+        
+        # compute perplexity
+        perplexity = 2 ** loss
+        
+        return accuracy, loss, perplexity     
+    
+    def train(self, epochs: int, trainloader: DataLoader, valloader: DataLoader, 
+              key: PRNGKeyArray, mask_fn: Callable):
         
         optim, opt_state, model = self.init_model(key)
         
@@ -146,6 +173,9 @@ class Trainer:
             epoch_done = 0
         
         for epoch in range(epoch_done, epochs):
+            # init empty metrics
+            train_acc, val_acc, test_acc = [], [], []
+            
             keys = jax.random.split(
                 jnp.array([epoch, epoch + 1]).astype(jnp.uint32),
                 self.batch_size)
@@ -154,67 +184,81 @@ class Trainer:
                 key=jnp.array([epoch, epoch + 1]).astype(jnp.uint32),
                 )
             
-            for step, (x, y) in tqdm(enumerate(trainloader), total=self.dataset_length // self.batch_size):
-                x, y = convert_to_jax(x), convert_to_jax(y)
+            for step, batch in tqdm(enumerate(trainloader), total=self.dataset_length // self.batch_size):
+                batch = mask_fn(batch)
+                x, y = convert_to_jax(batch)
                 x, y = jax.device_put((x, y), self.shard)
                 
                 loss, model, opt_state = make_step(model, x, y, rndm_n, rndm_k, optim, opt_state,
                                                    self.num_classes, keys)
                 
+                accuracy, loss, perplexity = self.compute_metrics(model, (x, y), self.max_iters, keys)
+                
+                train_acc.append(accuracy)
+                val_acc.append(loss)
+                test_acc.append(perplexity)
+                
                 loss = loss.item()
-            
-            # Validation
-            val_acc, val_sample = self.evaluate_acc(model, valloader, self.max_iters, keys)
-            val_acc_5, _ = self.evaluate_acc(model, valloader, self.max_iters + 5, keys)
-            train_acc, _ = self.evaluate_acc(model, truncloader, self.max_iters, keys)
-            test_acc, _ = self.evaluate_acc(model, testloader, self.max_iters + 5, keys)
-            
-            # Visualize one sample and model prediction
-            sample_x = x[0] # Trainng sample
-            model_prediction = model(sample_x, self.max_iters, None, False, keys[0])
-            
-            val_pred = model(val_sample, self.max_iters, None, False, keys[0])
-            val_pred_5 = model(val_sample, self.max_iters + 5, None, False, keys[0])
-            
-            self.wandb_logger.log(
-                {
-                    'loss': loss,
-                    f'Val/acc_{self.max_iters}': val_acc,
-                    f'Val/acc_{self.max_iters + 5}': val_acc_5,
-                    'Train/acc': train_acc,
-                    'Test/acc': test_acc
-                },
                 
-                step=epoch
-            )
-            
-            self.my_logger.info(f"epoch={epoch}, step={step}, loss={loss}")
-            self.my_logger.info(f"Sample x:, {sample_x}")
-            self.my_logger.info(f"Model prediction:: {model_prediction.argmax(-1)}")
-            self.my_logger.info(f'Validation accuracy: {val_acc} | using {self.max_iters} iterations')
-            self.my_logger.info(f'Validation accuracy: {val_acc_5} | using {self.max_iters + 5} iterations')
-            self.my_logger.info(f'Training accuracy: {train_acc}\n')
-            self.my_logger.info(f'Test accuracy: {test_acc}\n')
-            
-            self.my_logger.info(f'Sample val x: {val_sample}')
-            self.my_logger.info(f'Val prediction:\t\t\t{val_pred.argmax(-1)}')
-            self.my_logger.info(f'Val prediction @ +5 iters: {val_pred_5.argmax(-1)}')
-            self.my_logger.info(f'Correct answer:\t\t\t{val_sample[::-1]}')
-            
-            complexity = trainloader.dataset.complexity
-            
-            # Curriculum learning: increase complexity if training accuracy is high
-            if epoch > 1 and train_acc >= 0.98 and complexity <= self.cl_seqlen:
-                trainloader.dataset.complexity += 1
-                print(f'\n\n~~~ New CL dataset complexity: {trainloader.dataset.complexity} ~~~\n\n')
-            
-            if epoch % self.save_interval == 0:
-                # Save the model 
-                filepath = f"{self.save_dir}model_{epoch}.eqx"
-                
-                save_eqx_obj(self.save_dir, filepath, (model, opt_state))
-                
-                self.wandb_logger.save(filepath)
+                if step % self.log_interval == 0:
+                    # Comput cumulatives
+                    cum_train_acc = sum(train_acc) / len(train_acc)
+                    cum_val_acc = sum(val_acc) / len(val_acc)
+                    cum_test_acc = sum(test_acc) / len(test_acc)
+                    
+                    # clear the metrics
+                    train_acc, val_acc, test_acc = [], [], []
+                    
+                    # Validation
+                    val_metrics, val_sample = self.evaluate_acc(model, valloader, self.max_iters, keys)
+                    val_metrics_5, _ = self.evaluate_acc(model, valloader, self.max_iters + 5, keys)
+                    
+                    # Visualize one sample and model prediction
+                    viz_key = keys[0]
+                    sample_x = x[0] # Trainng sample
+                    
+                    model_prediction = model(sample_x, self.max_iters, None, False, viz_key)
+                    
+                    val_pred = model(val_sample, self.max_iters, None, False, viz_key)
+                    val_pred_5 = model(val_sample, self.max_iters + 5, None, False, viz_key)
+                    
+                    self.wandb_logger.log(
+                        {
+                            'loss': loss,
+                            f'Val/acc_{self.max_iters}': val_metrics[0],
+                            f'Val/loss_{self.max_iters}': val_metrics[1],
+                            f'Val/ppl_{self.max_iters}': val_metrics[2],
+                            f'Val/acc_{self.max_iters + 5}': val_metrics_5[0],
+                            f'Val/loss_{self.max_iters + 5}': val_metrics_5[1],
+                            f'Val/ppl_{self.max_iters + 5}': val_metrics_5[2],
+                            'train_acc': cum_train_acc,
+                            'val_acc': cum_val_acc,
+                            'test_acc': cum_test_acc,
+                        },
+                        
+                        step=step
+                    )
+                    
+                    self.my_logger.info(f"epoch={epoch}, step={step}, loss={loss}")
+                    self.my_logger.info(f"Sample x:, {sample_x}")
+                    self.my_logger.info(f"Model prediction:: {model_prediction.argmax(-1)}")
+                    self.my_logger.info(f'Validation accuracy: {val_metrics[0]} | using {self.max_iters} iterations')
+                    self.my_logger.info(f'Validation accuracy: {val_metrics_5[0]} | using {self.max_iters + 5} iterations')
+                    self.my_logger.info(f'Training accuracy: {train_acc} | Cumulative: {cum_train_acc}\n')
+                    self.my_logger.info(f'Test accuracy: {test_acc} | Cumulative: {cum_test_acc}\n')
+                    
+                    self.my_logger.info(f'Sample val x: {val_sample}')
+                    self.my_logger.info(f'Val prediction:\t\t\t{val_pred.argmax(-1)}')
+                    self.my_logger.info(f'Val prediction @ +5 iters: {val_pred_5.argmax(-1)}')
+                    self.my_logger.info(f'Correct answer:\t\t\t{val_sample[::-1]}')
+                    
+                    if step % self.save_interval == 0:
+                        # Save the model 
+                        filepath = f"{self.save_dir}model_{epoch}.eqx"
+                        
+                        save_eqx_obj(self.save_dir, filepath, (model, opt_state))
+                        
+                        self.wandb_logger.save(filepath)
                 
         return loss, model, opt_state
 
