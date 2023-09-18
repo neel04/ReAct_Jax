@@ -40,7 +40,7 @@ def main(key: PRNGKeyArray):
     shard = sharding.PositionalSharding(devices)
     
     trainer = Trainer(args, logger, shard)
-    trainer.train(args.epochs, trainloader, valloader, key, train_dataset.mask_tokens)
+    trainer.train(args.epochs, trainloader, valloader, key, train_dataset.mask_tokens, train_dataset.tok.decode)
 
 if __name__ == '__main__':
     key = jax.random.PRNGKey(69)

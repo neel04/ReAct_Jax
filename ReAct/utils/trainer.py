@@ -76,11 +76,12 @@ class Trainer:
         return rndm_n, rndm_k
 
     def evaluate_acc(self, model: eqx.Module, loader: DataLoader, eval_iters: int,
-                     keys: List[PRNGKeyArray]):
+                     keys: List[PRNGKeyArray], mask_fn: Callable):
         
         metric = []
 
         for step, batch in enumerate(loader):
+            batch = mask_fn(batch)
             x, y = convert_to_jax(batch)
             x, y = jax.device_put((x, y), self.shard)
             
@@ -109,7 +110,7 @@ class Trainer:
             optax.adamw(learning_rate=schedule_fn, weight_decay=self.weight_decay)
         )
         
-        opt_state = optim.init(eqx.filter(model, eqx.is_inexact_array))
+        opt_state = optim.init(eqx.filter(model, eqx.is_array))
         
         return optim, opt_state, model
     
@@ -163,7 +164,7 @@ class Trainer:
         return accuracy, loss, perplexity     
     
     def train(self, epochs: int, trainloader: DataLoader, valloader: DataLoader, 
-              key: PRNGKeyArray, mask_fn: Callable):
+              key: PRNGKeyArray, mask_fn: Callable, decode_fn: Callable):
         
         optim, opt_state, model = self.init_model(key)
         
@@ -174,7 +175,7 @@ class Trainer:
         
         for epoch in range(epoch_done, epochs):
             # init empty metrics
-            train_acc, val_acc, test_acc = [], [], []
+            train_acc, train_loss, train_ppl = [], [], []
             
             keys = jax.random.split(
                 jnp.array([epoch, epoch + 1]).astype(jnp.uint32),
@@ -195,23 +196,31 @@ class Trainer:
                 accuracy, loss, perplexity = self.compute_metrics(model, (x, y), self.max_iters, keys)
                 
                 train_acc.append(accuracy)
-                val_acc.append(loss)
-                test_acc.append(perplexity)
+                train_loss.append(loss)
+                train_ppl.append(perplexity)
                 
                 loss = loss.item()
                 
+                if step % 20 == 0:
+                    self.wandb_logger.log(
+                        {
+                            'Train/loss': loss,
+                        },
+                        step=step
+                    )
+                                
                 if step % self.log_interval == 0:
                     # Comput cumulatives
                     cum_train_acc = sum(train_acc) / len(train_acc)
-                    cum_val_acc = sum(val_acc) / len(val_acc)
-                    cum_test_acc = sum(test_acc) / len(test_acc)
+                    cum_train_loss = sum(train_loss) / len(train_loss)
+                    cum_train_ppl = sum(train_ppl) / len(train_ppl)
                     
                     # clear the metrics
-                    train_acc, val_acc, test_acc = [], [], []
+                    train_acc, train_loss, train_ppl = [], [], []
                     
                     # Validation
-                    val_metrics, val_sample = self.evaluate_acc(model, valloader, self.max_iters, keys)
-                    val_metrics_5, _ = self.evaluate_acc(model, valloader, self.max_iters + 5, keys)
+                    val_metrics, val_sample = self.evaluate_acc(model, valloader, self.max_iters, keys, mask_fn)
+                    val_metrics_5, _ = self.evaluate_acc(model, valloader, self.max_iters + 5, keys, mask_fn)
                     
                     # Visualize one sample and model prediction
                     viz_key = keys[0]
@@ -224,33 +233,30 @@ class Trainer:
                     
                     self.wandb_logger.log(
                         {
-                            'loss': loss,
-                            f'Val/acc_{self.max_iters}': val_metrics[0],
-                            f'Val/loss_{self.max_iters}': val_metrics[1],
-                            f'Val/ppl_{self.max_iters}': val_metrics[2],
+                            f'Train/acc_{self.max_iters}': cum_train_acc,
+                            f'Train/cum_loss_{self.max_iters}': cum_train_loss,
+                            f'Train/ppl_{self.max_iters}': cum_train_ppl,
                             f'Val/acc_{self.max_iters + 5}': val_metrics_5[0],
                             f'Val/loss_{self.max_iters + 5}': val_metrics_5[1],
                             f'Val/ppl_{self.max_iters + 5}': val_metrics_5[2],
-                            'train_acc': cum_train_acc,
-                            'val_acc': cum_val_acc,
-                            'test_acc': cum_test_acc,
+                            f'Val/acc_{self.max_iters}': val_metrics[0],
+                            f'Val/loss_{self.max_iters}': val_metrics[1],
+                            f'Val/ppl_{self.max_iters}': val_metrics[2],
                         },
                         
                         step=step
                     )
                     
                     self.my_logger.info(f"epoch={epoch}, step={step}, loss={loss}")
-                    self.my_logger.info(f"Sample x:, {sample_x}")
-                    self.my_logger.info(f"Model prediction:: {model_prediction.argmax(-1)}")
+                    self.my_logger.info(f"Sample x:, {decode_fn(sample_x)}")
+                    self.my_logger.info(f"Model prediction:: {decode_fn(model_prediction.argmax(-1))}")
                     self.my_logger.info(f'Validation accuracy: {val_metrics[0]} | using {self.max_iters} iterations')
                     self.my_logger.info(f'Validation accuracy: {val_metrics_5[0]} | using {self.max_iters + 5} iterations')
-                    self.my_logger.info(f'Training accuracy: {train_acc} | Cumulative: {cum_train_acc}\n')
-                    self.my_logger.info(f'Test accuracy: {test_acc} | Cumulative: {cum_test_acc}\n')
+                    self.my_logger.info(f'Cumulative Training accuracy: {cum_train_acc}\n')
                     
-                    self.my_logger.info(f'Sample val x: {val_sample}')
-                    self.my_logger.info(f'Val prediction:\t\t\t{val_pred.argmax(-1)}')
-                    self.my_logger.info(f'Val prediction @ +5 iters: {val_pred_5.argmax(-1)}')
-                    self.my_logger.info(f'Correct answer:\t\t\t{val_sample[::-1]}')
+                    self.my_logger.info(f'Sample val x: {decode_fn(val_sample)}')
+                    self.my_logger.info(f'Val prediction:\t\t\t{decode_fn(val_pred.argmax(-1))}')
+                    self.my_logger.info(f'Val prediction @ +5 iters: {decode_fn(val_pred_5.argmax(-1))}')
                     
                     if step % self.save_interval == 0:
                         # Save the model 

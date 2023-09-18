@@ -17,4 +17,4 @@ clear; python3 train_model.py \--save_dir /Users/neel/Documents/research/ReAct_J
 
 # Inference
 python3 inferencer.py --checkpoint_path './ReAct/outputs/model_200.eqx' --prompt '1010101010101
-'```
+```

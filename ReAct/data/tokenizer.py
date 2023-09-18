@@ -34,7 +34,8 @@ class Tok:
             return self.tokenizer.encode(text)
     
     def decode(self, ids: list):
-        return self.tokenizer.decode(ids, skip_special_tokens=False)
+        decoded = self.tokenizer.decode(ids, skip_special_tokens=False)
+        return decoded.replace('[UNK]', '').replace('[PAD]', '')
     
     def save(self):
         self.tokenizer.save(f'./ReAct/data/{self.dataset}tok.json')

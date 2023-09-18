@@ -46,8 +46,8 @@ def parse_args():
     parser.add_argument('--save_interval', type=int, default=1000,
                         help='Save interval. Default: 1000')
     
-    parser.add_argument('--log_interval', type=int, default=10,
-                        help='Log interval. Default: 10')
+    parser.add_argument('--log_interval', type=int, default=1000,
+                        help='Log interval. Default: 1000')
 
     parser.add_argument('--save_dir', type=str, default='/Users/neel/Documents/research/ReAct_Jax/ReAct/outputs/',
                         help='Save directory for checkpoints. Default: ./outputs/. Keep the slash at the end')
