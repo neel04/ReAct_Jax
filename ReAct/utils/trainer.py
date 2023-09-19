@@ -255,7 +255,7 @@ class Trainer:
                     self.my_logger.info(f'Cumulative Training accuracy: {cum_train_acc}\n')
                     
                     self.my_logger.info(f'Sample val x: {decode_fn(val_sample)}')
-                    self.my_logger.info(f'Val prediction:\t\t\t{decode_fn(val_pred.argmax(-1))}')
+                    self.my_logger.info(f'Val prediction:{decode_fn(val_pred.argmax(-1))}')
                     self.my_logger.info(f'Val prediction @ +5 iters: {decode_fn(val_pred_5.argmax(-1))}')
                     
                     if step % self.save_interval == 0:
