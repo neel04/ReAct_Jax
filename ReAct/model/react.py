@@ -24,10 +24,10 @@ class AttentionBlock(eqx.Module):
         self.activation = NewGELU()
         input_dim = bottleneck
 
-        #self.attn_gate = LiteAttention(input_dim, key1)
-        self.attn_gate = eqx.nn.MultiheadAttention(num_heads=2, query_size=input_dim,
-                                                   use_output_bias=True, key=key1,
-                                                   dropout_p=drop_rate)
+        self.attn_gate = LiteAttention(input_dim, key1)
+        #self.attn_gate = eqx.nn.MultiheadAttention(num_heads=2, query_size=input_dim,
+                                                   #use_output_bias=True, key=key1,
+                                                   #dropout_p=drop_rate)
 
         self.ln1 = eqx.nn.LayerNorm(input_dim)
         self.ln2 = eqx.nn.LayerNorm(input_dim)
@@ -36,8 +36,8 @@ class AttentionBlock(eqx.Module):
 
     def __call__(self, x: Array, key: PRNGKeyArray):
         x = self.ln1(x)
-        #x += self.attn_gate(x)
-        x += self.attn_gate(x, x, x, key=key, inference=False)[0]
+        x += self.attn_gate(x)
+        #x += self.attn_gate(x, x, x, key=key, inference=False)[0]
         x = self.ln2(x)
         x += self.mlp(x, key=key)
 
