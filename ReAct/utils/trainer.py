@@ -96,7 +96,7 @@ class Trainer:
         cum_loss = sum(metric[1::3]) / len(metric[1::3])
         cum_ppl = sum(metric[2::3]) / len(metric[2::3])
         
-        return (cum_acc, cum_loss, cum_ppl), x[0] # return one sample for viz
+        return (cum_acc, cum_loss, cum_ppl), seq[0] # return one sample for viz
     
     def set_optim_and_scheduler(self, model: eqx.Module):
         assert isinstance(model, eqx.Module), 'Model is not initialized'
@@ -152,7 +152,6 @@ class Trainer:
             batch[0], batch[2], eval_iters, None, False, keys)
         
         # compute accuracy
-        pred_y = pred_y.squeeze(-2) # (batch_size, tgt_vocab_size)
         y_hat = jax.nn.softmax(pred_y, axis=-1).argmax(-1)
         accuracy = jnp.mean(y_hat == batch[1])
         
@@ -228,11 +227,12 @@ class Trainer:
                     # Visualize one sample and model prediction
                     viz_key = keys[0]
                     sample_x = seq[0] # Trainng sample
+                    attn_mask = jnp.ones_like(sample_x)
                     
-                    model_prediction = model(sample_x, self.max_iters, None, False, viz_key)
+                    model_prediction = model(sample_x, attn_mask, self.max_iters, None, False, viz_key)
                     
-                    val_pred = model(val_sample, self.max_iters, None, False, viz_key)
-                    val_pred_5 = model(val_sample, self.max_iters + 5, None, False, viz_key)
+                    val_pred = model(val_sample, attn_mask, self.max_iters, None, False, viz_key)
+                    val_pred_5 = model(val_sample, attn_mask, self.max_iters + 5, None, False, viz_key)
                     
                     self.wandb_logger.log(
                         {

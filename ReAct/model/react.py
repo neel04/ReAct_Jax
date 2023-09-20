@@ -1,17 +1,19 @@
+from functools import partial
+from typing import Optional, Tuple
+
 import equinox as eqx
 import jax
-import math
 import jax.numpy as jnp
+from jaxtyping import Array, Float, Float16, Int, PRNGKeyArray
 
-from functools import partial
-from jaxtyping import Array, Float16, PRNGKeyArray
-from typing import Optional, Tuple
 from .blocks import MLP, LinearProj, LiteAttention, NewGELU
+
 
 # ruff: noqa: F722
 class AttentionBlock(eqx.Module):
     """Basic Block for LiteAttention"""
 
+    num_heads: int = eqx.field(static=True)
     activation: eqx.Module
     attn_gate: eqx.Module
     ln1: eqx.Module
@@ -22,10 +24,12 @@ class AttentionBlock(eqx.Module):
         key1, key2 = jax.random.split(key, 2)
 
         self.activation = NewGELU()
+        self.num_heads = 2
         input_dim = bottleneck
 
         #self.attn_gate = LiteAttention(input_dim, key1)
-        self.attn_gate = eqx.nn.MultiheadAttention(num_heads=2, query_size=input_dim,
+        self.attn_gate = eqx.nn.MultiheadAttention(num_heads=self.num_heads,
+                                                   query_size=input_dim,
                                                    use_output_bias=True, key=key1,
                                                    dropout_p=drop_rate)
 
@@ -34,10 +38,23 @@ class AttentionBlock(eqx.Module):
 
         self.mlp = MLP(input_dim, input_dim, drop_rate, key2)
 
+    def _make_self_attention_mask(self, mask: Int[Array, " seq_len"]) -> Float[Array, "num_heads seq_len seq_len"]:
+        """Create self-attention mask from sequence-level mask."""
+        
+        mask = jnp.multiply(
+            jnp.expand_dims(mask, axis=-1), jnp.expand_dims(mask, axis=-2)
+        )
+        mask = jnp.expand_dims(mask, axis=-3)
+        mask = jnp.repeat(mask, repeats=self.num_heads, axis=-3)
+        
+        return mask.astype(jnp.float32)
+
     def __call__(self, x: Array, mask: Array, key: PRNGKeyArray):
         x = self.ln1(x)
         #x += self.attn_gate(x)
-        x += self.attn_gate(x, x, x, mask=mask, key=key, inference=False)[0]
+        x += self.attn_gate(x, x, x,
+                            mask=self._make_self_attention_mask(mask),
+                            key=key, inference=False)[0]
         x = self.ln2(x)
         x += self.mlp(x, key=key)
 
@@ -82,12 +99,9 @@ class output_head(eqx.Module):
         key1, key2 = jax.random.split(key, 2)
         
         self.out_proj = LinearProj(bottleneck, tgt_vocab_size, key=key1)
-        self.down_proj = LinearProj(seq_len, 1, key=key2)
 
     def __call__(self, x: Array) -> Array:
         x = self.out_proj(x) # (batch, seqlen, bottleneck) -> (batch, seqlen, tgt_vocab_size)
-        x = jnp.transpose(x, (0, 2, 1)) # (batch, tgt_vocab_size, seqlen)
-        x = self.down_proj(x) # (batch, tgt_vocab_size, 1)
         
         return x
 
