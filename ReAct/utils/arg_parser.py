@@ -22,8 +22,8 @@ def parse_args():
     parser.add_argument('--max_iters', type=int, default=10,
                         help='Number of iterations. Default: 10')
 
-    parser.add_argument('--seqlen', type=int, default=384,
-                        help='Sequence length. Default: 384')
+    parser.add_argument('--seqlen', type=int, default=32,
+                        help='Sequence length. Default: 32')
 
     parser.add_argument('--batch_size', type=int, default=208,
                         help='Batch size. Default: 208')

@@ -5,7 +5,7 @@ import jax.numpy as jnp
 
 from functools import partial
 from jaxtyping import Array, Float16, PRNGKeyArray
-from typing import Optional
+from typing import Optional, Tuple
 from .blocks import MLP, LinearProj, LiteAttention, NewGELU
 
 # ruff: noqa: F722
@@ -24,20 +24,20 @@ class AttentionBlock(eqx.Module):
         self.activation = NewGELU()
         input_dim = bottleneck
 
-        self.attn_gate = LiteAttention(input_dim, key1)
-        #self.attn_gate = eqx.nn.MultiheadAttention(num_heads=2, query_size=input_dim,
-                                                   #use_output_bias=True, key=key1,
-                                                   #dropout_p=drop_rate)
+        #self.attn_gate = LiteAttention(input_dim, key1)
+        self.attn_gate = eqx.nn.MultiheadAttention(num_heads=2, query_size=input_dim,
+                                                   use_output_bias=True, key=key1,
+                                                   dropout_p=drop_rate)
 
         self.ln1 = eqx.nn.LayerNorm(input_dim)
         self.ln2 = eqx.nn.LayerNorm(input_dim)
 
         self.mlp = MLP(input_dim, input_dim, drop_rate, key2)
 
-    def __call__(self, x: Array, key: PRNGKeyArray):
+    def __call__(self, x: Array, mask: Array, key: PRNGKeyArray):
         x = self.ln1(x)
-        x += self.attn_gate(x)
-        #x += self.attn_gate(x, x, x, key=key, inference=False)[0]
+        #x += self.attn_gate(x)
+        x += self.attn_gate(x, x, x, mask=mask, key=key, inference=False)[0]
         x = self.ln2(x)
         x += self.mlp(x, key=key)
 
@@ -61,11 +61,11 @@ class RecurrentModule(eqx.Module):
             AttentionBlock(drop_rate, bottleneck * 2, key2)
         ] * num_blocks
 
-    def __call__(self, x: Float16[Array, 'batch seqlen in_dim'], 
+    def __call__(self, x: Float16[Array, 'batch seqlen in_dim'], mask: Array,
                  key: PRNGKeyArray) -> Float16[Array, 'batch seqlen out_dim']:
         
         for block in self.attention_blocks:
-            x = block(x, key)
+            x = block(x, mask, key)
 
         # handling recurrence
         x =  self.gelu(self.reshape_layer(x))
@@ -77,22 +77,17 @@ class output_head(eqx.Module):
     Output head for the model
     '''
     out_proj: eqx.Module
-    bias: Optional[jax.Array]
-    weight: jax.Array
 
     def __init__(self, bottleneck: int, tgt_vocab_size: int, seq_len: int, key: PRNGKeyArray):
         key1, key2 = jax.random.split(key, 2)
         
-        lim = 1 / math.sqrt(seq_len)
-        self.weight = jax.random.uniform(key1, (1, seq_len), minval=-lim, maxval=lim)
-        self.bias = jax.random.uniform(key2, (1, tgt_vocab_size), minval=-lim, maxval=lim)
-        
-        self.out_proj = LinearProj(bottleneck, tgt_vocab_size, key=key2)
+        self.out_proj = LinearProj(bottleneck, tgt_vocab_size, key=key1)
+        self.down_proj = LinearProj(seq_len, 1, key=key2)
 
     def __call__(self, x: Array) -> Array:
-        # (batch, seqlen, bottleneck) -> (batch, seqlen, tgt_vocab_size)
-        # -> (batch, 1, tgt_vocab_size)
-        x = self.weight @ self.out_proj(x) + self.bias
+        x = self.out_proj(x) # (batch, seqlen, bottleneck) -> (batch, seqlen, tgt_vocab_size)
+        x = jnp.transpose(x, (0, 2, 1)) # (batch, tgt_vocab_size, seqlen)
+        x = self.down_proj(x) # (batch, tgt_vocab_size, 1)
         
         return x
 
@@ -120,7 +115,7 @@ class React(eqx.Module):
         self.embed_dim = self.bottleneck
         self.SEQLEN = seqlen
 
-        src_vocab_size: int = 4096
+        src_vocab_size: int = tgt_vocab_size
         tgt_vocab_size: int = tgt_vocab_size
         drop_rate: float = drop_rate
 
@@ -152,25 +147,27 @@ class React(eqx.Module):
         return pe
 
     @partial(jax.jit, static_argnums=1)
-    def iterate_for_steps(self, interim_thought: Array, iters_to_do: int, x: Array,
+    def iterate_for_steps(self, interim_thought: Array, attn_mask: Array, iters_to_do: int, x: Array,
                           key: PRNGKeyArray) -> Array:
         
-        def main(i: int, carry: Array) -> Array:
+        def main(i: int, carry: Tuple[Array]) -> Array:
             return jax.lax.cond(i <= iters_to_do, iterate, Identity, i, carry)
 
-        def iterate(i: int, carry: Array) -> Array:
-            interim_thought = jnp.concatenate([carry, x], 1)
-            return self.main_block(interim_thought, key)
+        def iterate(i: int, carry: Tuple[Array]) -> Array:
+            # carry[0] -> interim_thought, carry[1] -> attn_mask
+            interim_thought = jnp.concatenate([carry[0], x], 1)
+            return self.main_block(interim_thought, carry[1], key), carry[1]
 
         def Identity(i: int, carry: Array) -> Array:
-            return self.id(carry)
+            return self.id(carry[0]), self.id(carry[1])
 
-        final_interim_thought = jax.lax.fori_loop(1, self.max_iters, main, interim_thought)  # noqa: E501
+        final_interim_thought = jax.lax.fori_loop(1, self.max_iters, main, (interim_thought, attn_mask))  # noqa: E501
         return final_interim_thought
 
     @partial(jax.jit, static_argnames=['prev_thought', 'training'])
-    def __call__(self, input: Array, iters_to_do: int, prev_thought: Optional[Array] = None,
-                 training: bool = True, key: Optional[PRNGKeyArray] = None) -> Array:
+    def __call__(self, input: Array, attn_mask: Array, iters_to_do: int, 
+                 prev_thought: Optional[Array] = None, training: bool = True,
+                 key: Optional[PRNGKeyArray] = None) -> Array:
         
         x = self.embed_layer(input) + self.pos_enc # (batch, seqlen, embed_dim)
         interim_thought = self.input_act(self.input_proj(x)) # (batch, seqlen, bottleneck)
@@ -178,7 +175,7 @@ class React(eqx.Module):
         if isinstance(prev_thought, Array):
             interim_thought = prev_thought
         
-        interim_thought = self.iterate_for_steps(interim_thought, iters_to_do, x, key) # (batch, seqlen, bottleneck)
+        interim_thought, _ = self.iterate_for_steps(interim_thought, attn_mask, iters_to_do, x, key) # (batch, seqlen, bottleneck)
         
         if training:
             return self.out_head(interim_thought), interim_thought

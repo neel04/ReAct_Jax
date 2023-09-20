@@ -18,34 +18,36 @@ from .helpers import get_rand_nums
 
 # A unified Trainer class for training and evaluation
 @jax.jit
-def n_k_loop(model: eqx.Module, input_arr: Array, n: int, k: int, key: PRNGKeyArray) -> Array:
+def n_k_loop(model: eqx.Module, input_arr: Array, attn_mask: Array, n: int, k: int, key: PRNGKeyArray) -> Array:
     # forward pass the model without tracking grads
     output, intermediate_array = model(
-        jax.lax.stop_gradient(input_arr), 
+        jax.lax.stop_gradient(input_arr), attn_mask,
         iters_to_do=n, prev_thought=None, key=key)
     
     # n-k passes, but track the gradient this time
-    output, _ = model(input_arr, k, prev_thought=intermediate_array, key=key)
+    output, _ = model(input_arr, attn_mask, k, prev_thought=intermediate_array, key=key)
 
     return output
 
 @eqx.filter_value_and_grad
-def compute_loss(model: eqx.Module, x: Array, y: Array,
+def compute_loss(model: eqx.Module, x: Array, y: Array, attn_mask: Array,
                  n: int, k: int, num_classes: int = 2, keys: PRNGKeyArray = None):
     
-    pred_y = jax.vmap(n_k_loop, in_axes=(None, 0, 0, 0, 0))(model, x, n, k, keys) # (batch_size, seqlen, num_classes)
-    pred_y = pred_y.squeeze(-2) # (batch_size, tgt_vocab_size)
+    pred_y = jax.vmap(n_k_loop, in_axes=(None, 0, 0, 0, 0, 0))(model, x, attn_mask, n, k, keys) # (batch_size, seqlen, num_classes)
+    pred_y = pred_y.squeeze() # (batch_size, tgt_vocab_size)
     
     y_one_hot = jax.nn.one_hot(y, num_classes=num_classes) # (batch_size, seqlen, num_classes)
+    
+    # Softmax cross entropy loss
     loss = optax.softmax_cross_entropy(pred_y, y_one_hot)
     
-    return jnp.mean(loss)
+    return jnp.mean(loss) # across all the baches
     
 @eqx.filter_jit
-def make_step(model: eqx.Module, x: Array, y: Array,  n: int, k: int,
+def make_step(model: eqx.Module, x: Array, y: Array, attn_mask: Array, n: int, k: int,
               optim, opt_state, num_classes: int, keys: List[PRNGKeyArray]):  # noqa: F821
     
-    loss, grads = compute_loss(model, x, y, n, k, num_classes, keys)
+    loss, grads = compute_loss(model, x, y, attn_mask, n, k, num_classes, keys)
     updates, opt_state = optim.update(grads, opt_state, model)
     model = eqx.apply_updates(model, updates)
     return loss, model, opt_state
@@ -82,10 +84,10 @@ class Trainer:
 
         for step, batch in enumerate(loader):
             batch = mask_fn(batch)
-            x, y = convert_to_jax(batch)
-            x, y = jax.device_put((x, y), self.shard)
+            seq, label, attn_mask = convert_to_jax(batch)
+            seq, label, attn_mask = jax.device_put((seq, label, attn_mask), self.shard)
             
-            acc, loss, ppl = self.compute_metrics(model, (x, y), eval_iters, keys)
+            acc, loss, ppl = self.compute_metrics(model, (seq, label, attn_mask), eval_iters, keys)
             
             metric.extend([acc, loss, ppl])
         
@@ -146,8 +148,8 @@ class Trainer:
         '''
         Computes the accuracy, perplexity, loss of the model w.r.t batch
         '''
-        pred_y = jax.vmap(model, in_axes=(0, None, None, None, 0))(
-            batch[0], eval_iters, None, False, keys)
+        pred_y = jax.vmap(model, in_axes=(0, 0, None, None, None, 0))(
+            batch[0], batch[2], eval_iters, None, False, keys)
         
         # compute accuracy
         pred_y = pred_y.squeeze(-2) # (batch_size, tgt_vocab_size)
@@ -187,13 +189,14 @@ class Trainer:
             
             for step, batch in tqdm(enumerate(trainloader), total=self.dataset_length // self.batch_size):
                 batch = mask_fn(batch)
-                x, y = convert_to_jax(batch)
-                x, y = jax.device_put((x, y), self.shard)
+                seq, label, attn_mask = convert_to_jax(batch)
+                seq, label, attn_mask = jax.device_put((seq, label, attn_mask), self.shard)
                 
-                loss, model, opt_state = make_step(model, x, y, rndm_n, rndm_k, optim, opt_state,
-                                                   self.num_classes, keys)
+                loss, model, opt_state = make_step(model, seq, label, attn_mask, rndm_n, rndm_k,
+                                                   optim, opt_state, self.num_classes, keys)
                 
-                accuracy, loss, perplexity = self.compute_metrics(model, (x, y), self.max_iters, keys)
+                accuracy, loss, perplexity = self.compute_metrics(model, (seq, label, attn_mask),
+                                                                  self.max_iters, keys)
                 
                 train_acc.append(accuracy)
                 train_loss.append(loss)
@@ -224,7 +227,7 @@ class Trainer:
                     
                     # Visualize one sample and model prediction
                     viz_key = keys[0]
-                    sample_x = x[0] # Trainng sample
+                    sample_x = seq[0] # Trainng sample
                     
                     model_prediction = model(sample_x, self.max_iters, None, False, viz_key)
                     

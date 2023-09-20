@@ -23,8 +23,8 @@ def count_params(model: eqx.Module):
     print(f"Model # of parameters: {num_millions:.2f}M")
 
 def process_seq(seq):
-    x, y = jnp.array(seq[0]), jnp.array(seq[1])
-    return x, y
+    x, y, z = jnp.array(seq[0]), jnp.array(seq[1]), jnp.array(seq[2])
+    return x, y, z
 
 def convert_to_jax(x: torch.Tensor) -> Array:
     if isinstance(x, torch.Tensor):
@@ -32,9 +32,9 @@ def convert_to_jax(x: torch.Tensor) -> Array:
     elif isinstance(x, list):
         # x is a list of tuples
         output = list(map(process_seq, x))
-        output_x, output_y = zip(*output)
+        output_x, output_y, output_z = zip(*output)
         
-        return jnp.stack(output_x), jnp.stack(output_y)
+        return jnp.stack(output_x), jnp.stack(output_y), jnp.stack(output_z)
     else:
         return jnp.array(x)
 

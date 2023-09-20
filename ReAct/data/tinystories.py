@@ -34,7 +34,11 @@ class TinyStoriesDataset:
         
         seq[random_idx] = 3 # [MASK] token id
         
-        return seq, [label]
+        # synthesize binary attention mask: 1 for real tokens, 0 for [PAD], [MASK].
+        # Specials tokens are: [PAD] = 0
+        attn_mask = [1 if i != 0 else 0 for i in seq]
+        
+        return seq, [label], attn_mask
     
     @staticmethod
     def mask_tokens(text: List[List]) -> List[Tuple]:

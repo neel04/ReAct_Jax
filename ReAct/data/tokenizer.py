@@ -1,3 +1,4 @@
+from typing import List
 from tokenizers import Tokenizer, normalizers
 from tokenizers.normalizers import NFD, Lowercase, StripAccents
 from tokenizers.processors import TemplateProcessing
@@ -25,7 +26,7 @@ class Tok:
         self.tokenizer.enable_padding(pad_id=0, pad_token="[PAD]", length=self.max_length)
         self.tokenizer.enable_truncation(max_length=self.max_length)
     
-    def encode(self, text: str):
+    def encode(self, text: List[str]):
         if len(text) > 1:
             return self.tokenizer.encode_batch(text)
         elif isinstance(text, list):
@@ -81,5 +82,5 @@ if __name__ == '__main__':
     
     # decode [0, 1, 2, 614, 69, 420]
     print(
-        tok.decode([0, 1, 2, 101, 69, 420])
+        tok.decode()
     )
