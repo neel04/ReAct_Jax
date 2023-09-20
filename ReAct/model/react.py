@@ -94,14 +94,19 @@ class output_head(eqx.Module):
     Output head for the model
     '''
     out_proj: eqx.Module
+    down_proj: eqx.Module
 
     def __init__(self, bottleneck: int, tgt_vocab_size: int, seq_len: int, key: PRNGKeyArray):
         key1, key2 = jax.random.split(key, 2)
         
         self.out_proj = LinearProj(bottleneck, tgt_vocab_size, key=key1)
+        self.down_proj = LinearProj(seq_len, 1, key=key2)
 
     def __call__(self, x: Array) -> Array:
-        x = self.out_proj(x) # (batch, seqlen, bottleneck) -> (batch, seqlen, tgt_vocab_size)
+        x = self.out_proj(x) # (seqlen, bottleneck) -> (seqlen, tgt_vocab_size)
+        x = jnp.transpose(x, (1, 0))
+        x = self.down_proj(x)
+        x = jnp.squeeze(x, axis=-1)
         
         return x
 
