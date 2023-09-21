@@ -34,7 +34,6 @@ def compute_loss(model: eqx.Module, x: Array, y: Array, attn_mask: Array,
                  n: int, k: int, num_classes: int = 2, keys: PRNGKeyArray = None):
     
     pred_y = jax.vmap(n_k_loop, in_axes=(None, 0, 0, 0, 0, 0))(model, x, attn_mask, n, k, keys) # (batch_size, seqlen, num_classes)
-    pred_y = pred_y.squeeze() # (batch_size, tgt_vocab_size)
     
     y_one_hot = jax.nn.one_hot(y, num_classes=num_classes) # (batch_size, seqlen, num_classes)
     
@@ -252,14 +251,14 @@ class Trainer:
                     
                     self.my_logger.info(f"epoch={epoch}, step={step}, loss={loss}")
                     self.my_logger.info(f"Sample x:, {decode_fn(sample_x)}")
-                    self.my_logger.info(f"Model prediction:: {decode_fn(model_prediction.argmax(-1))}")
+                    self.my_logger.info(f"Model prediction: {decode_fn([model_prediction.argmax(-1)])}")
                     self.my_logger.info(f'Validation accuracy: {val_metrics[0]} | using {self.max_iters} iterations')
                     self.my_logger.info(f'Validation accuracy: {val_metrics_5[0]} | using {self.max_iters + 5} iterations')
                     self.my_logger.info(f'Cumulative Training accuracy: {cum_train_acc}\n')
                     
                     self.my_logger.info(f'Sample val x: {decode_fn(val_sample)}')
-                    self.my_logger.info(f'Val prediction:{decode_fn(val_pred.argmax(-1))}')
-                    self.my_logger.info(f'Val prediction @ +5 iters: {decode_fn(val_pred_5.argmax(-1))}')
+                    self.my_logger.info(f'Val prediction:{decode_fn([val_pred.argmax(-1)])}')
+                    self.my_logger.info(f'Val prediction @ +5 iters: {decode_fn([val_pred_5.argmax(-1)])}')
                     
                     if step % self.save_interval == 0:
                         # Save the model 

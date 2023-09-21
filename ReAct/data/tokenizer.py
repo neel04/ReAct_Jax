@@ -82,5 +82,5 @@ if __name__ == '__main__':
     
     # decode [0, 1, 2, 614, 69, 420]
     print(
-        tok.decode()
+        tok.decode([0, 1, 2, 614, 69, 420])
     )
