@@ -94,16 +94,23 @@ class output_head(eqx.Module):
     Output head for the model
     '''
     out_proj: eqx.Module
+    out_proj_2: eqx.Module
     down_proj: eqx.Module
+    act: eqx.Module
 
     def __init__(self, bottleneck: int, tgt_vocab_size: int, seq_len: int, key: PRNGKeyArray):
         key1, key2 = jax.random.split(key, 2)
         
-        self.out_proj = LinearProj(bottleneck, tgt_vocab_size, key=key1)
+        # Progessively increasing the dimensionality of the output
+        self.out_proj = LinearProj(bottleneck, tgt_vocab_size // 2, key=key1)
+        self.out_proj_2 = LinearProj(tgt_vocab_size // 2, tgt_vocab_size, key=key2)
+        
         self.down_proj = LinearProj(seq_len, 1, key=key2)
+        self.act = NewGELU()
 
     def __call__(self, x: Array) -> Array:
         x = self.out_proj(x) # (seqlen, bottleneck) -> (seqlen, tgt_vocab_size)
+        x = self.out_proj_2(self.act(x))
         x = jnp.transpose(x, (1, 0))
         x = self.down_proj(x)
         x = jnp.squeeze(x, axis=-1)
