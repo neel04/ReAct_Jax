@@ -42,10 +42,8 @@ class TinyStoriesDataset:
     
     @staticmethod
     def mask_tokens(text: List[List]) -> List[Tuple]:
-        text_seq = list(map(lambda x: TinyStoriesDataset._mask_seq(x), text))
+        return [TinyStoriesDataset._mask_seq(x) for x in text]
         
-        return text_seq
-
     @staticmethod
     def collate_fn(batch: List[dict]) -> List:
         # batch is a list of dicts, each with a key 'text'
