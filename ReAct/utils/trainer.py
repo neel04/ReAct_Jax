@@ -253,6 +253,7 @@ class Trainer:
                     )
                     
                     self.my_logger.info(f"epoch={epoch}, step={step}, loss={loss}")
+                    self.my_logger.info(f"Sample x:, {sample_x}")
                     self.my_logger.info(f"Sample x:, {decode_fn(sample_x)}")
                     self.my_logger.info(f"Model prediction: {decode_fn([model_prediction.argmax(-1)])}")
                     self.my_logger.info(f'Validation accuracy: {val_metrics[0]} | using {self.max_iters} iterations')
