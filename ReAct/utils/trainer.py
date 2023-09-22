@@ -188,13 +188,9 @@ class Trainer:
             for step, batch in tqdm(enumerate(trainloader), total=self.dataset_length // self.batch_size):
                 # TODO: remove this hardcoded input
                 batch = [jnp.arange(3, 35).tolist()] * self.batch_size
-                print(f'OG batch: {batch}')
                 batch = mask_fn(batch)
-                print(f'Masked batch: {batch}')
                 seq, label, attn_mask = convert_to_jax(batch)
-                print(f'Converted batch: {seq}')
                 seq, label, attn_mask = jax.device_put((seq, label, attn_mask), self.shard)
-                print(f'Device put batch: {seq}')
                 
                 loss, model, opt_state = make_step(model, seq, label, attn_mask, rndm_n, rndm_k,
                                                    optim, opt_state, self.num_classes, keys)
