@@ -30,7 +30,6 @@ class TinyStoriesDataset:
         else:
             random_idx = randint(0, len(seq) - 1)
         
-        print(f'before mask: {seq}')
         label = seq[random_idx]
         
         seq[random_idx] = 3 # [MASK] token id
@@ -38,7 +37,6 @@ class TinyStoriesDataset:
         # synthesize binary attention mask: 1 for real tokens, 0 for [PAD], [MASK].
         # Specials tokens are: [PAD] = 0
         attn_mask = [1 if i != 0 else 0 for i in seq]
-        print(f'After mask: {seq}')
         return seq, [label], attn_mask
     
     @staticmethod
