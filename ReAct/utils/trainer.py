@@ -187,11 +187,14 @@ class Trainer:
             
             for step, batch in tqdm(enumerate(trainloader), total=self.dataset_length // self.batch_size):
                 # TODO: remove this hardcoded input
-                # TODO: SHarding may actually be fucking up with the stuff
                 batch = [jnp.arange(3, 35).tolist()] * self.batch_size
+                print(f'OG batch: {batch}')
                 batch = mask_fn(batch)
+                print(f'Masked batch: {batch}')
                 seq, label, attn_mask = convert_to_jax(batch)
+                print(f'Converted batch: {seq}')
                 seq, label, attn_mask = jax.device_put((seq, label, attn_mask), self.shard)
+                print(f'Device put batch: {seq}')
                 
                 loss, model, opt_state = make_step(model, seq, label, attn_mask, rndm_n, rndm_k,
                                                    optim, opt_state, self.num_classes, keys)
@@ -253,7 +256,6 @@ class Trainer:
                     )
                     
                     self.my_logger.info(f"epoch={epoch}, step={step}, loss={loss}")
-                    self.my_logger.info(f"Sample x:, {sample_x}")
                     self.my_logger.info(f"Sample x:, {decode_fn(sample_x)}")
                     self.my_logger.info(f"Model prediction: {decode_fn([model_prediction.argmax(-1)])}")
                     self.my_logger.info(f'Validation accuracy: {val_metrics[0]} | using {self.max_iters} iterations')
