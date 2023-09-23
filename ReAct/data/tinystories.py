@@ -23,6 +23,7 @@ class TinyStoriesDataset:
         return {'text': [i.ids for i in encoded]}
     
     def _mask_seq(seq: List[int]) -> Tuple[List[int], int]:
+        print(f'input seq: {seq}')
         pad_idx = seq.index(0) if 0 in seq else None
         
         if pad_idx is not None:
@@ -37,6 +38,7 @@ class TinyStoriesDataset:
         # synthesize binary attention mask: 1 for real tokens, 0 for [PAD], [MASK].
         # Specials tokens are: [PAD] = 0
         attn_mask = [1 if i != 0 else 0 for i in seq]
+        print(f'returned seq: {seq} | label: {label} | attn_mask: {attn_mask}')
         return seq, [label], attn_mask
     
     @staticmethod

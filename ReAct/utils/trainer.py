@@ -189,7 +189,6 @@ class Trainer:
                 # TODO: remove this hardcoded input
                 batch = [jnp.arange(3, 35).tolist()] * self.batch_size
                 batch = mask_fn(batch)
-                print(f'post batcg: {batch}')
                 seq, label, attn_mask = convert_to_jax(batch)
                 seq, label, attn_mask = jax.device_put((seq, label, attn_mask), self.shard)
                 
