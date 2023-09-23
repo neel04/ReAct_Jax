@@ -22,7 +22,7 @@ class TinyStoriesDataset:
         
         return {'text': [i.ids for i in encoded]}
     
-    def _mask_seq(seq: List[int]) -> Tuple[List[int], int]:
+    def _mask_seq(self, seq: List[int]) -> Tuple[List[int], int]:
         pad_idx = seq.index(0) if 0 in seq else None
         
         if pad_idx is not None:
@@ -39,9 +39,8 @@ class TinyStoriesDataset:
         attn_mask = [1 if i != 0 else 0 for i in seq]
         return seq, [label], attn_mask
     
-    @staticmethod
-    def mask_tokens(text: List[List]) -> List[Tuple]:
-        return [TinyStoriesDataset._mask_seq(x) for x in text]
+    def mask_tokens(self, text: List[List]) -> List[Tuple]:
+        return [self._mask_seq(x.copy()) for x in text]
         
     @staticmethod
     def collate_fn(batch: List[dict]) -> List:
