@@ -226,8 +226,8 @@ class Trainer:
                     val_metrics_5, _ = self.evaluate_acc(model, valloader, self.max_iters + 5, keys, mask_fn)
                     
                     # Visualize one sample and model prediction
-                    viz_key = keys[0]
-                    sample_x = seq[0] # Trainng sample
+                    viz_key = keys[0].copy()
+                    sample_x = seq[0].copy() # Trainng sample
                     attn_mask = jnp.ones_like(sample_x)
                     
                     model_prediction = model(sample_x, attn_mask, self.max_iters, None, False, viz_key)
