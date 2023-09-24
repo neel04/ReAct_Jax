@@ -108,9 +108,11 @@ class output_head(eqx.Module):
 
     def __call__(self, x: Array) -> Array:
         x = self.out_proj(x) # (seqlen, bottleneck) -> (seqlen, tgt_vocab_size)
-        x = jnp.transpose(x, (1, 0))
-        x = self.down_proj(x)
-        x = jnp.squeeze(x, axis=-1)
+        # (seq_len, tgt_vocab_size) -> (1, tgt_vocab_size)
+        x = jnp.mean(x, axis=0, keepdims=True)
+        #x = jnp.transpose(x, (1, 0))
+        #x = self.down_proj(x)
+        x = jnp.squeeze(x)
         
         return x
 
