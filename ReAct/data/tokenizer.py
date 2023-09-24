@@ -15,6 +15,7 @@ class Tok:
             special_tokens=[
                 ("[SOS]", 1),
                 ("[EOS]", 2),
+                ("[MASK]", 3)
             ])
         
         self.tokenizer.normalizer = normalizers.Sequence([
@@ -25,7 +26,7 @@ class Tok:
         
         self.tokenizer.enable_padding(pad_id=0, pad_token="[PAD]", length=self.max_length)
         self.tokenizer.enable_truncation(max_length=self.max_length)
-    
+        
     def encode(self, text: List[str]):
         if len(text) > 1:
             return self.tokenizer.encode_batch(text)
@@ -40,27 +41,6 @@ class Tok:
     
     def save(self):
         self.tokenizer.save(f'./ReAct/data/{self.dataset}tok.json')
-    
-    def load(self):
-        self.tokenizer = Tokenizer.from_file(f'./ReAct/data/{self.dataset}tok.json')
-        
-        self.tokenizer.post_processor = TemplateProcessing(
-            single="[SOS] $A [EOS]",
-            pair="[SOS] $A [EOS] $B:1 [EOS]:1",
-            special_tokens=[
-                ("[SOS]", 1),
-                ("[EOS]", 2),
-                ("[MASK]", 3)
-            ])
-        
-        self.tokenizer.normalizer = normalizers.Sequence([
-            NFD(),
-            Lowercase(),
-            StripAccents(),
-        ])
-        
-        self.tokenizer.enable_padding(pad_id=0, pad_token="[PAD]", length=self.max_length)
-        self.tokenizer.enable_truncation(max_length=self.max_length)
     
     def __repr__(self):
         return f'Tok(dataset={self.dataset}, max_length={self.max_length})'
