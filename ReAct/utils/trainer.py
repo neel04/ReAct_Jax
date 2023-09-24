@@ -108,7 +108,8 @@ class Trainer:
         # AdamW optimizer with weight decay
         optim = optax.chain(
             optax.clip(self.grad_clip),
-            optax.adamw(learning_rate=schedule_fn, weight_decay=self.weight_decay, b1=0.95, b2=0.99)
+            #optax.adamw(learning_rate=schedule_fn, weight_decay=self.weight_decay, b1=0.95, b2=0.99)
+            optax.lion(learning_rate=schedule_fn, weight_decay=self.weight_decay, b1=0.95, b2=0.99)
         )
         
         opt_state = optim.init(eqx.filter(model, eqx.is_array))
@@ -226,8 +227,8 @@ class Trainer:
                     val_metrics_5, _ = self.evaluate_acc(model, valloader, self.max_iters + 5, keys, mask_fn)
                     
                     # Visualize one sample and model prediction
-                    viz_key = keys[0].copy()
-                    sample_x = seq[0].copy() # Trainng sample
+                    viz_key = keys[0]
+                    sample_x = seq[0] # Trainng sample
                     attn_mask = jnp.ones_like(sample_x)
                     
                     model_prediction = model(sample_x, attn_mask, self.max_iters, None, False, viz_key)
