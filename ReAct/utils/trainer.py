@@ -27,8 +27,6 @@ class DebugReact(eqx.Module):
 
     proj_1: LinearProj
     act_1: NewGELU
-    proj_2: LinearProj
-    act_2: NewGELU
     embed_layer: eqx.nn.Embedding
     pos_enc: jax.Array
 
@@ -36,15 +34,13 @@ class DebugReact(eqx.Module):
                  drop_rate: float, tgt_vocab_size: int, key: PRNGKeyArray):
         key1, key2, key3, key4 = jax.random.split(key, 4)
         
-        self.bottleneck = width // 2
+        self.bottleneck = width
         self.SEQLEN = seqlen
         self.max_iters = max_iters
         
         self.embed_layer = eqx.nn.Embedding(tgt_vocab_size, self.bottleneck, key=key1)
         self.proj_1 = LinearProj(self.bottleneck, tgt_vocab_size, key=key2)
         self.act_1 = NewGELU()
-        self.proj_2 = LinearProj(seqlen, 1, key=key2)
-        self.act_2 = NewGELU()
 
         self.pos_enc = jax.lax.stop_gradient(self.positional_encoding(self.SEQLEN, self.bottleneck))
     
@@ -69,11 +65,9 @@ class DebugReact(eqx.Module):
                  prev_thought: Optional[Array] = None, training: bool = True,
                  key: Optional[PRNGKeyArray] = None) -> Array:
         
-        x = self.embed_layer(input) + self.pos_enc # (batch, seqlen, embed_dim)
-        x = self.proj_1(self.act_1(x)) # (batch, seqlen, tgt_vocab_size)
-        x = x.T
-        x = self.proj_2(self.act_2(x)) # (batch, tgt_vocab_size, 1)
-        output = x.T
+        x = self.embed_layer(input) + self.pos_enc # (seqlen, embed_dim)
+        x = self.proj_1(self.act_1(x)) # (seqlen, tgt_vocab_size)
+        output = jnp.mean(x, axis=0) # (tgt_vocab_size)
         
         if training:
             return output.squeeze(), jnp.zeros_like(output)
