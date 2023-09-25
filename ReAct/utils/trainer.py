@@ -178,7 +178,7 @@ class Trainer:
             optax.adamw(learning_rate=schedule_fn, weight_decay=self.weight_decay, b1=0.95, b2=0.99)
         )
         
-        opt_state = optim.init(eqx.filter(model, eqx.is_array))
+        opt_state = optim.init(eqx.filter(model, eqx.is_inexact_array))
         
         return optim, opt_state, model
     
