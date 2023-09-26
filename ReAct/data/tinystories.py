@@ -24,6 +24,7 @@ class TinyStoriesDataset:
     
     def _mask_seq(self, seq: List[int]) -> Tuple[List[int], int]:
         pad_idx = seq.index(0) if 0 in seq else None
+        mask_token_id = 3
         
         if pad_idx is not None:
             random_idx = randint(0, pad_idx)
@@ -32,11 +33,11 @@ class TinyStoriesDataset:
         
         label = seq[random_idx]
         
-        seq[random_idx] = 3 # [MASK] token id
+        seq[random_idx] = mask_token_id # [MASK] token id
         
         # synthesize binary attention mask: 1 for real tokens, 0 for [PAD], [MASK].
         # Specials tokens are: [PAD] = 0
-        attn_mask = [1 if i != 0 else 0 for i in seq]
+        attn_mask = [1 if i == mask_token_id else 0 for i in seq]
         return seq, [label], attn_mask
     
     def mask_tokens(self, text: List[List]) -> List[Tuple]:
