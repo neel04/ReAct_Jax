@@ -65,7 +65,7 @@ class DebugReact(eqx.Module):
                  prev_thought: Optional[Array] = None, training: bool = True,
                  key: Optional[PRNGKeyArray] = None) -> Array:
         
-        x = self.embed_layer(input) #+ self.pos_enc # (seqlen, embed_dim)
+        x = self.embed_layer(input) + self.pos_enc # (seqlen, embed_dim)
         x = self.act_1(self.proj_1(x)) # (seqlen, tgt_vocab_size)
         
         output = jnp.mean(x, axis=0) # (tgt_vocab_size)
@@ -253,7 +253,7 @@ class Trainer:
             
             for step, batch in tqdm(enumerate(trainloader), total=self.dataset_length // self.batch_size):
                 # TODO: remove this hardcoded input
-                batch = [jnp.arange(4, 36).tolist()] * self.batch_size
+                batch = [jnp.arange(4, 4 + self.seqlen).tolist()] * self.batch_size
                 batch = mask_fn(batch)
                 seq, label, attn_mask = convert_to_jax(batch)
                 seq, label, attn_mask = jax.device_put((seq, label, attn_mask), self.shard)
