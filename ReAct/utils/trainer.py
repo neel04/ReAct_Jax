@@ -25,8 +25,8 @@ class DebugReact(eqx.Module):
     bottleneck: int = eqx.field(static=True)
     SEQLEN: int = eqx.field(static=True)
 
-    proj_1: LinearProj
-    act_1: NewGELU
+    proj_1: eqx.Module
+    act_1: eqx.Module
     embed_layer: eqx.nn.Embedding
     pos_enc: jax.Array
 
@@ -65,8 +65,9 @@ class DebugReact(eqx.Module):
                  prev_thought: Optional[Array] = None, training: bool = True,
                  key: Optional[PRNGKeyArray] = None) -> Array:
         
-        x = self.embed_layer(input) + self.pos_enc # (seqlen, embed_dim)
-        x = self.proj_1(self.act_1(x)) # (seqlen, tgt_vocab_size)
+        x = self.embed_layer(input) #+ self.pos_enc # (seqlen, embed_dim)
+        x = self.act_1(self.proj_1(x)) # (seqlen, tgt_vocab_size)
+        
         output = jnp.mean(x, axis=0) # (tgt_vocab_size)
         
         if training:
@@ -99,9 +100,10 @@ def compute_loss(model: eqx.Module, x: Array, y: Array, attn_mask: Array,
     y_one_hot = jax.nn.one_hot(y, num_classes=num_classes) # (batch_size, seqlen, num_classes)
     
     # Softmax cross entropy loss
-    loss = optax.softmax_cross_entropy(pred_y, y_one_hot)
+    loss = -jax.nn.log_softmax(pred_y) * y_one_hot
+    loss = loss.sum() / y_one_hot.sum()
     
-    return jnp.mean(loss) # across all the baches
+    return loss # across all the baches
     
 @eqx.filter_jit
 def make_step(model: eqx.Module, x: Array, y: Array, attn_mask: Array, n: int, k: int,
@@ -222,7 +224,7 @@ class Trainer:
         loss = optax.softmax_cross_entropy(pred_y, y_one_hot).mean()
         
         # compute perplexity
-        perplexity = 2 ** loss
+        perplexity = jnp.exp(loss)
         
         return accuracy, loss, perplexity     
     
