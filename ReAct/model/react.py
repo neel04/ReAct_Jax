@@ -52,7 +52,7 @@ class AttentionBlock(eqx.Module):
                             mask=self._make_self_attention_mask(self.seqlen, mask),
                             key=key, inference=False)[0]
         
-        x = jax.vmapp(self.ln2)(x)
+        x = jax.vmap(self.ln2)(x)
         x += self.mlp(x, key=key)
 
         return self.activation(x)  # skip connection
