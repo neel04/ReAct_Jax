@@ -40,7 +40,7 @@ class UnifiedLogger:
         else:
             id = None
             
-        wandb.init(project='ReAct_Jax', config=args, anonymous='allow',
+        wandb.init(project='ReAct_Jax', config=args, anonymous='allow', group='TinyStories',
                    mode=args.wandb, magic=True, resume='allow', id=id)
         
         wandb.run.log_code(

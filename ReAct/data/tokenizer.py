@@ -1,3 +1,4 @@
+from typing import List
 from tokenizers import Tokenizer, normalizers
 from tokenizers.normalizers import NFD, Lowercase, StripAccents
 from tokenizers.processors import TemplateProcessing
@@ -14,6 +15,7 @@ class Tok:
             special_tokens=[
                 ("[SOS]", 1),
                 ("[EOS]", 2),
+                ("[MASK]", 3)
             ])
         
         self.tokenizer.normalizer = normalizers.Sequence([
@@ -24,41 +26,21 @@ class Tok:
         
         self.tokenizer.enable_padding(pad_id=0, pad_token="[PAD]", length=self.max_length)
         self.tokenizer.enable_truncation(max_length=self.max_length)
-    
-    def encode(self, text: str):
-        if isinstance(text, dict):
-            text = text['text']
-            
+        
+    def encode(self, text: List[str]):
         if len(text) > 1:
             return self.tokenizer.encode_batch(text)
-        
-        return self.tokenizer.encode(text)
+        elif isinstance(text, list):
+            return self.tokenizer.encode(text[0])
+        else:
+            return self.tokenizer.encode(text)
     
     def decode(self, ids: list):
-        return self.tokenizer.decode(ids)
+        decoded = self.tokenizer.decode(ids, skip_special_tokens=False)
+        return decoded.replace('[UNK]', '').replace('[PAD]', '')
     
     def save(self):
         self.tokenizer.save(f'./ReAct/data/{self.dataset}tok.json')
-    
-    def load(self):
-        self.tokenizer = Tokenizer.from_file(f'./ReAct/data/{self.dataset}tok.json')
-        
-        self.tokenizer.post_processor = TemplateProcessing(
-            single="[SOS] $A [EOS]",
-            pair="[SOS] $A [EOS] $B:1 [EOS]:1",
-            special_tokens=[
-                ("[SOS]", 1),
-                ("[EOS]", 2),
-            ])
-        
-        self.tokenizer.normalizer = normalizers.Sequence([
-            NFD(),
-            Lowercase(),
-            StripAccents(),
-        ])
-        
-        self.tokenizer.enable_padding(pad_id=0, pad_token="[PAD]", length=self.max_length)
-        self.tokenizer.enable_truncation(max_length=self.max_length)
     
     def __repr__(self):
         return f'Tok(dataset={self.dataset}, max_length={self.max_length})'
@@ -74,5 +56,11 @@ class Tok:
 
 if __name__ == '__main__':
     tok = Tok('./ReAct/data/', 32)
-    out = tok(['Sam and alice', 'go and stab diana', 'for fun'])
-    print(out[1].tokens)
+    out = tok(['Sam and alice go and stab diana for [MASK]', '[MASK] off'])
+    print('Vocab size:', tok.tokenizer.get_vocab_size())
+    print(dict(zip(out[0].tokens, out[0].ids)))
+    
+    # decode [0, 1, 2, 614, 69, 420]
+    print(
+        tok.decode([0, 1, 2, 614, 69, 420])
+    )

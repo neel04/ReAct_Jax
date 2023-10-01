@@ -3,9 +3,8 @@ import jax.experimental.mesh_utils as mesh_utils
 import jax.sharding as sharding
 from jax import config
 from jaxtyping import PRNGKeyArray
-from torch.utils.data import DataLoader
 
-from ReAct.data.reverse_string import RevDataset
+from ReAct.data.tinystories import TinyStoriesDataset
 from ReAct.utils.arg_parser import parse_args
 from ReAct.utils.logger import UnifiedLogger
 from ReAct.utils.trainer import Trainer
@@ -25,45 +24,23 @@ def main(key: PRNGKeyArray):
     logger = UnifiedLogger(args, level='DEBUG')
     
     _, model_key = jax.random.split(key)
-
-    dataset = RevDataset(args.seqlen, 3, args.dataset_length)
-    # Truncated dataset for calculating training accuracy
-    trunc_dataset = RevDataset(args.seqlen, 3, args.dataset_length // 20)
     
-    val_dataset = RevDataset(args.seqlen, args.cl_seqlen + 3, args.dataset_length // 20)
-    test_dataset = RevDataset(args.seqlen, args.seqlen, args.dataset_length // 20)
-
-    trainloader = DataLoader(dataset,
-                             batch_size=args.batch_size,
-                             drop_last=True,
-                             shuffle=False,
-                             num_workers=2,
-                             pin_memory=True,
-                             prefetch_factor=4)
-
-    truncloader = DataLoader(trunc_dataset,
-                             batch_size=args.batch_size,
-                             drop_last=True,
-                             shuffle=False)
-
-    valloader = DataLoader(val_dataset,
-                           batch_size=args.batch_size,
-                           drop_last=True,
-                           shuffle=False)
+    train_dataset = TinyStoriesDataset(split='train', max_length=args.seqlen, bsz=args.batch_size)
+    trainloader = train_dataset.create_dataloader()
     
-    testloader = DataLoader(test_dataset,
-                            batch_size=args.batch_size,
-                            drop_last=True,
-                            shuffle=False)
-
+    trainloader.shuffle = True
+    
+    valloader = TinyStoriesDataset(
+        split='validation', max_length=args.seqlen, bsz=args.batch_size).create_dataloader()
+    
     num_devices = jax.local_device_count()
     print(f'Number of devices: {num_devices}')
     
     devices = mesh_utils.create_device_mesh((num_devices, 1))
     shard = sharding.PositionalSharding(devices)
     
-    trainer = Trainer(args, logger, shard)
-    trainer.train(args.epochs, trainloader, truncloader, valloader, testloader, key)
+    trainer = Trainer(args, logger, train_dataset.tok.decode, train_dataset.shift_tokens, shard)
+    trainer.train(args.epochs, trainloader, valloader, key)
 
 if __name__ == '__main__':
     key = jax.random.PRNGKey(69)

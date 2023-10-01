@@ -1,5 +1,6 @@
 import os
-from typing import Any, Tuple, List
+from functools import partial
+from typing import Any, Callable, List, Optional, Tuple
 
 import equinox as eqx
 import jax
@@ -9,49 +10,140 @@ from jaxtyping import Array, PRNGKeyArray
 from torch.utils.data import DataLoader
 from tqdm.auto import tqdm
 
-from ReAct.model.react import React
+from ReAct.model.blocks import LinearProj, NewGELU
+from ReAct.model.react import React, AttentionBlock
 from ReAct.utils.helpers import convert_to_jax, count_params, load_eqx_obj, save_eqx_obj
 from ReAct.utils.logger import UnifiedLogger
 
 from .helpers import get_rand_nums
 
+class output_head(eqx.Module):
+    '''
+    Output head for the model
+    '''
+    proj_1: eqx.Module
+    act_1: eqx.Module
 
+    def __init__(self, bottleneck: int, tgt_vocab_size: int, seq_len: int, key: PRNGKeyArray):
+        # linear Layers
+        self.proj_1 = LinearProj(bottleneck, tgt_vocab_size, key=key)
+        self.act_1 = NewGELU()
+        
+    def __call__(self, x: Array) -> Array:
+        x = self.act_1(self.proj_1(x)) # (seqlen, tgt_vocab_size)
+        
+        return x
+
+class DebugReact(eqx.Module):
+    '''
+    Bare bones model that has a couple of layers
+    '''
+    max_iters: int = eqx.field(static=True)
+    bottleneck: int = eqx.field(static=True)
+    SEQLEN: int = eqx.field(static=True)
+
+    embed_layer: eqx.nn.Embedding
+    input_proj: eqx.Module
+    input_act: eqx.Module
+    input_attn_gate: eqx.Module
+    out_head: eqx.Module
+    pos_enc: jax.Array
+
+    def __init__(self, n_heads:int, seqlen: int, max_iters: int, num_blocks: int, width: int,
+                 drop_rate: float, tgt_vocab_size: int, key: PRNGKeyArray):
+        key1, key2, key3 = jax.random.split(key, 3)
+        
+        self.bottleneck = width
+        self.SEQLEN = seqlen
+        self.max_iters = max_iters
+        
+        self.embed_layer = eqx.nn.Embedding(tgt_vocab_size, self.bottleneck, key=key1)
+        self.input_proj = LinearProj(self.bottleneck, self.bottleneck, key=key2)
+        self.input_attn_gate = AttentionBlock(seqlen, n_heads, drop_rate, self.bottleneck, key=key3)
+        self.input_act = NewGELU()
+        
+        self.out_head = output_head(self.bottleneck, tgt_vocab_size, seqlen, key=key3)
+
+        self.pos_enc = jax.lax.stop_gradient(self.positional_encoding(self.SEQLEN, self.bottleneck))
+    
+    @partial(jax.jit, static_argnums=[1,2])
+    def positional_encoding(self, seq_len, d_model):
+        '''
+        Generates the positional encoding for the input sequence
+        of shape (batch_size, max_seq_len, d_model) which would be added
+        to the sequence embeddings.
+        '''
+        position = jnp.arange(seq_len, dtype=jnp.float32).reshape(-1, 1)
+        div_term = jnp.exp(jnp.arange(0, d_model, 2, dtype=jnp.float32) * -(jnp.log(10000.0) / d_model))
+        pe = jnp.zeros((seq_len, d_model))
+
+        pe = pe.at[:, 0::2].set(jnp.sin(position * div_term))
+        pe = pe.at[:, 1::2].set(jnp.cos(position * div_term))
+
+        return pe
+    
+    @partial(jax.jit, static_argnames=['prev_thought', 'training'])
+    def __call__(self, input: Array, iters_to_do: int, pad_mask: Optional[Array], 
+                 prev_thought: Optional[Array] = None, training: bool = True,
+                 key: Optional[PRNGKeyArray] = None) -> Array:
+        
+        x = self.embed_layer(input) + self.pos_enc # (seqlen, embed_dim)
+        x = self.input_proj(self.input_act(x)) # (seqlen, bottleneck)
+        x = self.input_attn_gate(x, key, pad_mask)
+        
+        output = self.out_head(x)
+        
+        if training:
+            return output.squeeze(), x
+        else:
+            return output.squeeze()
+    
 # A unified Trainer class for training and evaluation
 @jax.jit
-def n_k_loop(model: eqx.Module, input_arr: Array, n: int, k: int, key: PRNGKeyArray) -> Array:
+def n_k_loop(model: eqx.Module, input_arr: Array, pad_mask: Array, n: int, k: int, key: PRNGKeyArray) -> Array:
+    '''
     # forward pass the model without tracking grads
     output, intermediate_array = model(
-        jax.lax.stop_gradient(input_arr), 
+        jax.lax.stop_gradient(input_arr),
         iters_to_do=n, prev_thought=None, key=key)
     
     # n-k passes, but track the gradient this time
     output, _ = model(input_arr, k, prev_thought=intermediate_array, key=key)
+    '''
+    output, _ = model(input_arr, n+k, pad_mask, prev_thought=None, key=key)
 
     return output
 
 @eqx.filter_value_and_grad
-def compute_loss(model: eqx.Module, x: Array, y: Array,
-                 n: int, k: int, num_classes: int = 2, keys: List[PRNGKeyArray] = None):
+def compute_loss(model: eqx.Module, x: Array, y: Array, pad_mask: Array,
+                 n: int, k: int, num_classes: int = 2, keys: PRNGKeyArray = None):
     
-    pred_y = jax.vmap(n_k_loop, in_axes=(None, 0, 0, 0, 0))(model, x, n, k, keys) # (batch_size, seqlen, num_classes)
+    pred_y = jax.vmap(n_k_loop, in_axes=(None, 0, 0, 0, 0, 0))(model, x, pad_mask, n, k, keys) # (batch_size, seqlen, num_classes)
     
     y_one_hot = jax.nn.one_hot(y, num_classes=num_classes) # (batch_size, seqlen, num_classes)
-    loss = optax.sigmoid_binary_cross_entropy(pred_y, y_one_hot)
     
-    return jnp.mean(loss)
+    # Softmax cross entropy loss
+    loss = optax.softmax_cross_entropy(pred_y, y_one_hot).sum()
+    
+    return loss.mean() # across all the baches
     
 @eqx.filter_jit
-def make_step(model: eqx.Module, x: Array, y: Array,  n: int, k: int,
+def make_step(model: eqx.Module, x: Array, y: Array, pad_mask: Array, n: int, k: int,
               optim, opt_state, num_classes: int, keys: List[PRNGKeyArray]):  # noqa: F821
     
-    loss, grads = compute_loss(model, x, y, n, k, num_classes, keys)
+    loss, grads = compute_loss(model, x, y, pad_mask, n, k, num_classes, keys)
     updates, opt_state = optim.update(grads, opt_state, model)
     model = eqx.apply_updates(model, updates)
     return loss, model, opt_state
 
 class Trainer:
-    def __init__(self, args: dict, logger=None, shard: Any = None):
+    def __init__(self, args: dict, logger, decode_fn: Callable, mask_fn: Callable, 
+                 shard: Any = None):
+        
         self.shard = shard if shard is not None else None
+        self.dataset_length = 2119719
+        self.decode_fn = decode_fn
+        self.mask_fn = mask_fn
         
         logger = UnifiedLogger(args, level='DEBUG')
         self.my_logger = logger.my_logger()
@@ -74,20 +166,25 @@ class Trainer:
         return rndm_n, rndm_k
 
     def evaluate_acc(self, model: eqx.Module, loader: DataLoader, eval_iters: int,
-                     keys: List[PRNGKeyArray]):
+                     keys: List[PRNGKeyArray], mask_fn: Callable):
         
         metric = []
 
-        for step, (x, y) in enumerate(loader):
-            x, y = convert_to_jax(x), convert_to_jax(y)
-            pred_y = jax.vmap(model, in_axes=(0, None, None, None, 0))(
-                x, eval_iters, None, False, keys)
+        for step, batch in enumerate(loader):
+            batch = mask_fn(batch)
+            seq, label, pad_mask = convert_to_jax(batch)
+            seq, label, pad_mask = jax.device_put((seq, label, pad_mask), self.shard)
             
-            val_pred_y = jax.nn.softmax(pred_y, axis=-1).argmax(-1)
-            accuracy = jnp.mean(val_pred_y == y)
-            metric.append(accuracy)
+            acc, loss, ppl = self.compute_metrics(model, (seq, label, pad_mask), eval_iters, keys)
+            
+            metric.extend([acc, loss, ppl])
         
-        return sum(metric) / len(metric), x[0] # return one sample for viz
+        # Compute cumulatives
+        cum_acc = sum(metric[::3]) / len(metric[::3])
+        cum_loss = sum(metric[1::3]) / len(metric[1::3])
+        cum_ppl = sum(metric[2::3]) / len(metric[2::3])
+        
+        return (cum_acc, cum_loss, cum_ppl), seq[0] # return one sample for viz
     
     def set_optim_and_scheduler(self, model: eqx.Module):
         assert isinstance(model, eqx.Module), 'Model is not initialized'
@@ -100,7 +197,7 @@ class Trainer:
         # AdamW optimizer with weight decay
         optim = optax.chain(
             optax.clip(self.grad_clip),
-            optax.adamw(learning_rate=schedule_fn, weight_decay=self.weight_decay)
+            optax.adamw(learning_rate=schedule_fn, weight_decay=self.weight_decay, b1=0.95, b2=0.99)
         )
         
         opt_state = optim.init(eqx.filter(model, eqx.is_inexact_array))
@@ -109,8 +206,10 @@ class Trainer:
     
     def init_model(self, key: PRNGKeyArray):
         # Initialize the model
-        model = React(self.seqlen, self.max_iters, self.num_blocks, self.width,
+        model = React(self.n_heads, self.seqlen, self.max_iters, self.num_blocks, self.width,
                            self.drop_rate, self.num_classes, key)
+        #model = DebugReact(self.n_heads, self.seqlen, self.max_iters, self.num_blocks, self.width,
+                           #self.drop_rate, self.num_classes, key)
         
         optim, opt_state, model = self.set_optim_and_scheduler(model)
         count_params(model)
@@ -135,10 +234,36 @@ class Trainer:
         
         return model, opt_state, epoch
     
-    def train(self, epochs: int, trainloader: DataLoader, truncloader: DataLoader,
-              valloader: DataLoader, testloader: DataLoader, key: PRNGKeyArray):
+    def compute_metrics(self, model: eqx.Module, batch: Tuple, eval_iters: int, keys: List[PRNGKeyArray]):
+        '''
+        Computes the accuracy, perplexity, loss of the model w.r.t batch
+        '''
+        # make an array of size of batch[0] with each element as eval_iters
+        eval_iters = jnp.ones_like(batch[0][:, 0]) * eval_iters if isinstance(eval_iters, int) else eval_iters
+        input_arr = batch[0]
+        pad_mask = batch[2]
+        
+        pred_y = jax.vmap(model, in_axes=(0, 0, 0, None, None, 0))(
+            input_arr, eval_iters, pad_mask, None, False, keys)
+        
+        # compute accuracy
+        y_hat = jax.nn.softmax(pred_y, axis=-1).argmax(-1) * pad_mask
+        accuracy = jnp.mean(y_hat == batch[1])
+        
+        # compute loss
+        y_one_hot = jax.nn.one_hot(batch[1], num_classes=self.num_classes) # (batch_size, seqlen, num_classes)
+        loss = optax.softmax_cross_entropy(pred_y, y_one_hot).mean()
+        
+        # compute perplexity
+        perplexity = jnp.exp(loss)
+        
+        return accuracy, loss, perplexity     
+    
+    def train(self, epochs: int, trainloader: DataLoader, valloader: DataLoader, 
+              key: PRNGKeyArray):
         
         optim, opt_state, model = self.init_model(key)
+        print(f'Model: {model}')
         
         if self.resume:
             model, opt_state, epoch_done = self.resume_training(model, opt_state)
@@ -146,6 +271,9 @@ class Trainer:
             epoch_done = 0
         
         for epoch in range(epoch_done, epochs):
+            # init empty metrics
+            train_acc, train_loss, train_ppl = [], [], []
+            
             keys = jax.random.split(
                 jnp.array([epoch, epoch + 1]).astype(jnp.uint32),
                 self.batch_size)
@@ -154,69 +282,114 @@ class Trainer:
                 key=jnp.array([epoch, epoch + 1]).astype(jnp.uint32),
                 )
             
-            for step, (x, y) in tqdm(enumerate(trainloader), total=self.dataset_length // self.batch_size):
-                x, y = convert_to_jax(x), convert_to_jax(y)
-                x, y = jax.device_put((x, y), self.shard)
+            for step, batch in tqdm(enumerate(trainloader), total=self.dataset_length // self.batch_size):
+                batch = self.mask_fn(batch)
+                seq, label, pad_mask = convert_to_jax(batch)
+                seq, label, pad_mask = jax.device_put((seq, label, pad_mask), self.shard)
                 
-                loss, model, opt_state = make_step(model, x, y, rndm_n, rndm_k, optim, opt_state,
-                                                   self.num_classes, keys)
+                loss, model, opt_state = make_step(model, seq, label, pad_mask, rndm_n, rndm_k,
+                                                   optim, opt_state, self.num_classes, keys)
+                
+                accuracy, loss, perplexity = self.compute_metrics(model, (seq, label, pad_mask),
+                                                                  self.max_iters, keys)
+                
+                train_acc.append(accuracy)
+                train_loss.append(loss)
+                train_ppl.append(perplexity)
                 
                 loss = loss.item()
-            
-            # Validation
-            val_acc, val_sample = self.evaluate_acc(model, valloader, self.max_iters, keys)
-            val_acc_5, _ = self.evaluate_acc(model, valloader, self.max_iters + 5, keys)
-            train_acc, _ = self.evaluate_acc(model, truncloader, self.max_iters, keys)
-            test_acc, _ = self.evaluate_acc(model, testloader, self.max_iters + 5, keys)
-            
-            # Visualize one sample and model prediction
-            sample_x = x[0] # Trainng sample
-            model_prediction = model(sample_x, self.max_iters, None, False, keys[0])
-            
-            val_pred = model(val_sample, self.max_iters, None, False, keys[0])
-            val_pred_5 = model(val_sample, self.max_iters + 5, None, False, keys[0])
-            
-            self.wandb_logger.log(
-                {
-                    'loss': loss,
-                    f'Val/acc_{self.max_iters}': val_acc,
-                    f'Val/acc_{self.max_iters + 5}': val_acc_5,
-                    'Train/acc': train_acc,
-                    'Test/acc': test_acc
-                },
                 
-                step=epoch
-            )
-            
-            self.my_logger.info(f"epoch={epoch}, step={step}, loss={loss}")
-            self.my_logger.info(f"Sample x:, {sample_x}")
-            self.my_logger.info(f"Model prediction:: {model_prediction.argmax(-1)}")
-            self.my_logger.info(f'Validation accuracy: {val_acc} | using {self.max_iters} iterations')
-            self.my_logger.info(f'Validation accuracy: {val_acc_5} | using {self.max_iters + 5} iterations')
-            self.my_logger.info(f'Training accuracy: {train_acc}\n')
-            self.my_logger.info(f'Test accuracy: {test_acc}\n')
-            
-            self.my_logger.info(f'Sample val x: {val_sample}')
-            self.my_logger.info(f'Val prediction:\t\t\t{val_pred.argmax(-1)}')
-            self.my_logger.info(f'Val prediction @ +5 iters: {val_pred_5.argmax(-1)}')
-            self.my_logger.info(f'Correct answer:\t\t\t{val_sample[::-1]}')
-            
-            complexity = trainloader.dataset.complexity
-            
-            # Curriculum learning: increase complexity if training accuracy is high
-            if epoch > 1 and train_acc >= 0.98 and complexity <= self.cl_seqlen:
-                trainloader.dataset.complexity += 1
-                print(f'\n\n~~~ New CL dataset complexity: {trainloader.dataset.complexity} ~~~\n\n')
-            
-            if epoch % self.save_interval == 0:
-                # Save the model 
-                filepath = f"{self.save_dir}model_{epoch}.eqx"
-                
-                save_eqx_obj(self.save_dir, filepath, (model, opt_state))
-                
-                self.wandb_logger.save(filepath)
+                if step % 20 == 0:
+                    self.wandb_logger.log(
+                        {
+                            'Train/loss': loss,
+                        },
+                        step=step
+                    )
+                                
+                if step % self.log_interval == 0:
+                    # Comput cumulatives
+                    cum_train_acc = sum(train_acc) / len(train_acc)
+                    cum_train_loss = sum(train_loss) / len(train_loss)
+                    cum_train_ppl = sum(train_ppl) / len(train_ppl)
+                    
+                    ## clear the metrics
+                    train_acc, train_loss, train_ppl = [], [], []
+                    
+                    ## Validation
+                    val_metrics, val_sample = self.evaluate_acc(model, valloader, self.max_iters, keys, self.mask_fn)
+                    val_metrics_5, _ = self.evaluate_acc(model, valloader, self.max_iters + 5, keys, self.mask_fn)
+                    
+                    self.wandb_logger.log(
+                        {
+                            f'Train/acc_{self.max_iters}': cum_train_acc,
+                            f'Train/cum_loss_{self.max_iters}': cum_train_loss,
+                            f'Train/ppl_{self.max_iters}': cum_train_ppl,
+                            f'Val/acc_{self.max_iters + 5}': val_metrics_5[0],
+                            f'Val/loss_{self.max_iters + 5}': val_metrics_5[1],
+                            f'Val/ppl_{self.max_iters + 5}': val_metrics_5[2],
+                            f'Val/acc_{self.max_iters}': val_metrics[0],
+                            f'Val/loss_{self.max_iters}': val_metrics[1],
+                            f'Val/ppl_{self.max_iters}': val_metrics[2],
+                        },
+                        
+                        step=step
+                    )
+                    
+                    ## Visualize one sample and model prediction
+                    sample_x = seq[0][:16]
+                    val_sample_x = val_sample[:16]
+                    
+                    self.my_logger.info(f"epoch={epoch}, step={step}, loss={loss}")
+                    self.my_logger.info(f'Validation accuracy: {val_metrics[0]} | using {self.max_iters} iterations')
+                    self.my_logger.info(f'Validation accuracy: {val_metrics_5[0]} | using {self.max_iters + 5} iterations')
+                    self.my_logger.info(f'Cumulative Training accuracy: {cum_train_acc}\n')
+                    
+                    self.generate(model, sample_x, max_new_tokens=8)
+                    self.my_logger.info(f'{"=" * 20}\tVal set prompt:\n')
+                    self.generate(model, val_sample_x, max_new_tokens=8)
+                    
+                    if step % self.save_interval == 0:
+                        # Save the model 
+                        filepath = f"{self.save_dir}model_{epoch}.eqx"
+                        
+                        save_eqx_obj(self.save_dir, filepath, (model, opt_state))
+                        
+                        self.wandb_logger.save(filepath)
                 
         return loss, model, opt_state
+    
+    def generate(self, model: eqx.Module, input_arr: Array, max_new_tokens: int, temperature: float = 1.0):
+        '''
+        Take a conditioning sequence , call output_head to obtain a prediction
+        and autoregressively complete the sequence max_new_tokens times.
+        '''
+        self.my_logger.info(f'Prompt: {self.decode_fn(input_arr)}')
+        
+        for _ in range(max_new_tokens):
+            if input_arr.shape[0] < self.seqlen:
+                padded_array = jnp.pad(input_arr, (0, self.seqlen - input_arr.shape[0]))
+            else:
+                padded_array = input_arr
+            
+            pad_mask = jnp.array([1 if i != 0 else 0 for i in padded_array])
+            
+            # Find the correct index to extract the logits from
+            try:
+                zero_idx = jnp.where(padded_array == 0)[0][0]
+            except IndexError:
+                zero_idx = self.seqlen
+            
+            logits = model(padded_array, self.max_iters, pad_mask, None, True, jax.random.PRNGKey(0))[1]
+            logits = logits[zero_idx - 1, :] # chose the last token representation
+            probs = jax.nn.softmax(logits / temperature)
+            
+            gen = model.out_head(probs).argmax(-1)
+            input_arr = jnp.concatenate([input_arr, gen.reshape(-1)])
+            
+        self.my_logger.info(f'Model generation: {self.decode_fn(input_arr[-max_new_tokens:-1])}\n')
+            
+        return input_arr
 
 if __name__ == '__main__':
     x = jnp.ones((32)).astype(int)
