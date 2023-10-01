@@ -182,7 +182,7 @@ class React(eqx.Module):
                  prev_thought: Optional[Array] = None, training: bool = True,
                  key: Optional[PRNGKeyArray] = None) -> Array:
         
-        x = self.embed_layer(input) + self.pos_enc # (batch, seqlen, embed_dim)
+        x = jax.vmap(self.embed_layer)(input) + self.pos_enc # (batch, seqlen, embed_dim
         interim_thought = self.input_act(self.input_proj(x)) # (batch, seqlen, bottleneck)
 
         if isinstance(prev_thought, Array):
