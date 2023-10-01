@@ -1,0 +1,20 @@
+{
+    "version": "0.2.0",
+    "configurations": [
+        {
+            "name": "Python: Debug train_model.py",
+            "type": "python",
+            "request": "launch",
+            "program": "${workspaceFolder}/train_model.py",
+            "console": "integratedTerminal",
+            "args": [
+                "--debug",
+                "--width", "256",
+                "--batch_size", "128",
+                "--num_blocks", "1",
+                "--epochs", "1",
+            ],
+            "justMyCode": true
+        }
+    ]
+}
