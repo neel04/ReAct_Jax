@@ -159,6 +159,10 @@ class Trainer:
     def get_n_k(self, key: PRNGKeyArray) -> Tuple[Array, Array]:
         n_key, k_key = jax.random.split(key, 2)
         
+        rndm_n = get_rand_nums(n_key, 0, self.max_iters, self.batch_size)
+        rndm_k = get_rand_nums(k_key, jnp.ones(self.batch_size), 
+                               self.max_iters - rndm_n + 1, self.batch_size)
+        
         return rndm_n, rndm_k
 
     def evaluate_acc(self, model: eqx.Module, loader: DataLoader, eval_iters: int,
