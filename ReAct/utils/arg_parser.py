@@ -18,6 +18,9 @@ def parse_args():
 
     parser.add_argument('--num_classes', type=int, default=4096,
                         help='Number of target classes OR vocab size. Default: 4096')
+    
+    parser.add_argument('--n_heads', type=int, default=4,
+                        help='Number of attention heads. Default: 4')
 
     parser.add_argument('--max_iters', type=int, default=10,
                         help='Number of iterations. Default: 10')
