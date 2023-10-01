@@ -33,8 +33,15 @@ class UnifiedLogger:
         key = os.environ.get('WANDB_API_KEY')
         wandb.login(key=key)
         
-        wandb.init(project='ReAct_Jax', magic=True, anonymous='allow',
-                   mode=args.wandb, config=args)
+        if args.resume:
+            # args.resume is of the form: "neel/ReAct_Jax/lxxn0x54 + 20"
+            # we want to extract the run id, i.e "lxxn0x54"
+            id = args.resume.split("+")[0].split("/")[-1].strip()
+        else:
+            id = None
+            
+        wandb.init(project='ReAct_Jax', config=args, anonymous='allow', group='TinyStories',
+                   mode=args.wandb, magic=True, resume='allow', id=id)
         
         wandb.run.log_code(
             "../",

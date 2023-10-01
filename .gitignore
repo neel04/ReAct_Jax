@@ -162,6 +162,12 @@ cython_debug/
 # vscode
 .vscode/
 .*
+<<<<<<< HEAD
+*.eqx
+**wandb
+*.wandb
+=======
 *outputs*
 **outputs**
 *.eqx
+>>>>>>> main
