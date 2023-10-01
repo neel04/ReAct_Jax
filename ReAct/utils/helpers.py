@@ -1,10 +1,14 @@
+<<<<<<< HEAD
 import os
 from typing import List
 
+=======
+>>>>>>> main
 import equinox as eqx
 import jax
 import jax.numpy as jnp
 import torch
+<<<<<<< HEAD
 from jaxtyping import Array, PRNGKeyArray
 
 def save_eqx_obj(save_dir: str, filename: str, obj: tuple):
@@ -24,23 +28,44 @@ def count_params(model: eqx.Module):
 
 def process_seq(seq):
     return [list(map(jnp.array, subseq)) for subseq in seq]
+=======
+
+from jaxtyping import Array, PRNGKeyArray
+
+def count_params(model: eqx.Module):
+  num_params = sum(x.size for x in jax.tree_util.tree_leaves(eqx.filter(model, eqx.is_array)))
+  num_millions = num_params / 1_000_000
+  print(f"Model # of parameters: {num_millions:.2f}M")
+>>>>>>> main
 
 def convert_to_jax(x: torch.Tensor) -> Array:
     if isinstance(x, torch.Tensor):
         return jnp.array(x.detach().cpu().numpy())
+<<<<<<< HEAD
     elif isinstance(x, list):
         # x is a list of tuples
         output = process_seq(x)
         output_x, output_y, output_z = zip(*output)
         
         return jnp.stack(output_x), jnp.stack(output_y), jnp.stack(output_z)
+=======
+>>>>>>> main
     else:
         return jnp.array(x)
 
 def get_rand_nums(key: PRNGKeyArray, lower_bound: int, upper_bound: int, bsz: int) -> Array:
+<<<<<<< HEAD
     random_numbers = jax.random.randint(key, shape=(bsz,), minval=lower_bound, maxval=upper_bound)
     return random_numbers
 
 if __name__ == '__main__':
     key = jax.random.PRNGKey(0)
     print(get_rand_nums(key, 0, 2, 10))
+=======
+  random_numbers = jax.random.randint(key, shape=(bsz,), minval=lower_bound, maxval=upper_bound)
+  return random_numbers
+
+if __name__ == '__main__':
+  key = jax.random.PRNGKey(0)
+  print(get_rand_nums(key, 0, 2, 10))
+>>>>>>> main

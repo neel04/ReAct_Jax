@@ -1,6 +1,7 @@
 # ReAct_Jax
 ReAct architecture and training loop - now in Jax!
 
+<<<<<<< HEAD
 ```shell
 export WANDB_API_KEY=...
 export jax_threefry_partitionable=1
@@ -18,3 +19,9 @@ clear; python3 train_model.py \--save_dir /Users/neel/Documents/research/ReAct_J
 # Inference
 python3 inferencer.py --checkpoint_path './ReAct/outputs/model_200.eqx' --prompt '1010101010101
 ```
+=======
+
+export WANDB_API_KEY=...
+
+python3 inferencer.py --checkpoint_path './ReAct/outputs/model_200.eqx' --prompt '1010101010101'
+>>>>>>> main
