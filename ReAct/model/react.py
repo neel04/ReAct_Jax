@@ -44,14 +44,15 @@ class AttentionBlock(eqx.Module):
         return jnp.greater(mask * pad_mask, 0.5) # Get the boolean mask
 
     def __call__(self, x: Array, key: PRNGKeyArray, mask: Optional[Array] = None):
+        # x: (batch, seqlen, bottleneck)
         mask = jnp.zeros_like(x) if mask is None else mask
+        x = jax.vmap(self.ln1)(x)
         
-        x = self.ln1(x)
-        #x += self.attn_gate(x)
         x += self.attn_gate(x, x, x,
                             mask=self._make_self_attention_mask(self.seqlen, mask),
                             key=key, inference=False)[0]
-        x = self.ln2(x)
+        
+        x = jax.vmapp(self.ln2)(x)
         x += self.mlp(x, key=key)
 
         return self.activation(x)  # skip connection
