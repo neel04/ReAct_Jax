@@ -101,16 +101,13 @@ class DebugReact(eqx.Module):
 # A unified Trainer class for training and evaluation
 @jax.jit
 def n_k_loop(model: eqx.Module, input_arr: Array, pad_mask: Array, n: int, k: int, key: PRNGKeyArray) -> Array:
-    '''
     # forward pass the model without tracking grads
     output, intermediate_array = model(
-        jax.lax.stop_gradient(input_arr),
-        iters_to_do=n, prev_thought=None, key=key)
+        jax.lax.stop_gradient(input_arr), n,
+        pad_mask=pad_mask, prev_thought=None, key=key)
     
     # n-k passes, but track the gradient this time
-    output, _ = model(input_arr, k, prev_thought=intermediate_array, key=key)
-    '''
-    output, _ = model(input_arr, n+k, pad_mask, prev_thought=None, key=key)
+    output, _ = model(input_arr, k, pad_mask, prev_thought=intermediate_array, key=key)
 
     return output
 
