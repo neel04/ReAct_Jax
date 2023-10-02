@@ -1,6 +1,5 @@
 import os
-from functools import partial
-from typing import Any, Callable, List, Optional, Tuple
+from typing import Any, Callable, List, Tuple
 
 import equinox as eqx
 import jax
@@ -10,94 +9,12 @@ from jaxtyping import Array, PRNGKeyArray
 from torch.utils.data import DataLoader
 from tqdm.auto import tqdm
 
-from ReAct.model.blocks import LinearProj, NewGELU
-from ReAct.model.react import React, AttentionBlock
+from ReAct.model.react import React
 from ReAct.utils.helpers import convert_to_jax, count_params, load_eqx_obj, save_eqx_obj
 from ReAct.utils.logger import UnifiedLogger
 
 from .helpers import get_rand_nums
 
-class output_head(eqx.Module):
-    '''
-    Output head for the model
-    '''
-    proj_1: eqx.Module
-    act_1: eqx.Module
-
-    def __init__(self, bottleneck: int, tgt_vocab_size: int, seq_len: int, key: PRNGKeyArray):
-        # linear Layers
-        self.proj_1 = LinearProj(bottleneck, tgt_vocab_size, key=key)
-        self.act_1 = NewGELU()
-        
-    def __call__(self, x: Array) -> Array:
-        x = self.act_1(self.proj_1(x)) # (seqlen, tgt_vocab_size)
-        
-        return x
-
-class DebugReact(eqx.Module):
-    '''
-    Bare bones model that has a couple of layers
-    '''
-    max_iters: int = eqx.field(static=True)
-    bottleneck: int = eqx.field(static=True)
-    SEQLEN: int = eqx.field(static=True)
-
-    embed_layer: eqx.nn.Embedding
-    input_proj: eqx.Module
-    input_act: eqx.Module
-    input_attn_gate: eqx.Module
-    out_head: eqx.Module
-    pos_enc: jax.Array
-
-    def __init__(self, n_heads:int, seqlen: int, max_iters: int, num_blocks: int, width: int,
-                 drop_rate: float, tgt_vocab_size: int, key: PRNGKeyArray):
-        key1, key2, key3 = jax.random.split(key, 3)
-        
-        self.bottleneck = width
-        self.SEQLEN = seqlen
-        self.max_iters = max_iters
-        
-        self.embed_layer = eqx.nn.Embedding(tgt_vocab_size, self.bottleneck, key=key1)
-        self.input_proj = LinearProj(self.bottleneck, self.bottleneck, key=key2)
-        self.input_attn_gate = AttentionBlock(seqlen, n_heads, drop_rate, self.bottleneck, key=key3)
-        self.input_act = NewGELU()
-        
-        self.out_head = output_head(self.bottleneck, tgt_vocab_size, seqlen, key=key3)
-
-        self.pos_enc = jax.lax.stop_gradient(self.positional_encoding(self.SEQLEN, self.bottleneck))
-    
-    @partial(jax.jit, static_argnums=[1,2])
-    def positional_encoding(self, seq_len, d_model):
-        '''
-        Generates the positional encoding for the input sequence
-        of shape (batch_size, max_seq_len, d_model) which would be added
-        to the sequence embeddings.
-        '''
-        position = jnp.arange(seq_len, dtype=jnp.float32).reshape(-1, 1)
-        div_term = jnp.exp(jnp.arange(0, d_model, 2, dtype=jnp.float32) * -(jnp.log(10000.0) / d_model))
-        pe = jnp.zeros((seq_len, d_model))
-
-        pe = pe.at[:, 0::2].set(jnp.sin(position * div_term))
-        pe = pe.at[:, 1::2].set(jnp.cos(position * div_term))
-
-        return pe
-    
-    @partial(jax.jit, static_argnames=['prev_thought', 'training'])
-    def __call__(self, input: Array, iters_to_do: int, pad_mask: Optional[Array], 
-                 prev_thought: Optional[Array] = None, training: bool = True,
-                 key: Optional[PRNGKeyArray] = None) -> Array:
-        
-        x = self.embed_layer(input) + self.pos_enc # (seqlen, embed_dim)
-        x = self.input_proj(self.input_act(x)) # (seqlen, bottleneck)
-        x = self.input_attn_gate(x, key, pad_mask)
-        
-        output = self.out_head(x)
-        
-        if training:
-            return output.squeeze(), x
-        else:
-            return output.squeeze()
-    
 # A unified Trainer class for training and evaluation
 @jax.jit
 def n_k_loop(model: eqx.Module, input_arr: Array, pad_mask: Array, n: int, k: int, key: PRNGKeyArray) -> Array:
@@ -194,7 +111,8 @@ class Trainer:
         # AdamW optimizer with weight decay
         optim = optax.chain(
             optax.clip(self.grad_clip),
-            optax.adamw(learning_rate=schedule_fn, weight_decay=self.weight_decay, b1=0.95, b2=0.99)
+            #optax.adamw(learning_rate=schedule_fn, weight_decay=self.weight_decay, b1=0.95, b2=0.99)
+            optax.lion(learning_rate=schedule_fn, weight_decay=self.weight_decay, b1=0.95, b2=0.99)
         )
         
         opt_state = optim.init(eqx.filter(model, eqx.is_inexact_array))
@@ -205,8 +123,6 @@ class Trainer:
         # Initialize the model
         model = React(self.n_heads, self.seqlen, self.max_iters, self.num_blocks, self.width,
                            self.drop_rate, self.num_classes, key)
-        #model = DebugReact(self.n_heads, self.seqlen, self.max_iters, self.num_blocks, self.width,
-                           #self.drop_rate, self.num_classes, key)
         
         optim, opt_state, model = self.set_optim_and_scheduler(model)
         count_params(model)
