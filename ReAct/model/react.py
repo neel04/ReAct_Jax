@@ -50,7 +50,7 @@ class AttentionBlock(eqx.Module):
         
         x += self.attn_gate(x, x, x,
                             mask=self._make_self_attention_mask(self.seqlen, mask),
-                            key=key, inference=False)[0]
+                            key=key, inference=False)
         
         x = jax.vmap(self.ln2)(x)
         x += self.mlp(x, key=key)
