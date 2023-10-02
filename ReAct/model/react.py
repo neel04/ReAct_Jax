@@ -1,10 +1,10 @@
 from functools import partial
-from typing import Optional, Tuple, Int
+from typing import Optional, Tuple
 
 import equinox as eqx
 import jax
 import jax.numpy as jnp
-from jaxtyping import Array, Float, PRNGKeyArray
+from jaxtyping import Array, Float, Int, PRNGKeyArray
 
 from .blocks import MLP, LinearProj, LiteAttention, NewGELU
 
