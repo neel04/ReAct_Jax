@@ -249,8 +249,8 @@ class Trainer:
                     )
                     
                     ## Visualize one sample and model prediction
-                    sample_x = seq[0][:16]
-                    val_sample_x = val_sample[:16]
+                    sample_x = seq[0][:8]
+                    val_sample_x = val_sample[:8]
                     
                     self.my_logger.info(f"epoch={epoch}, step={step}, loss={loss}")
                     self.my_logger.info(f'Validation accuracy: {val_metrics[0]} | using {self.max_iters} iterations')
@@ -277,6 +277,7 @@ class Trainer:
         and autoregressively complete the sequence max_new_tokens times.
         '''
         self.my_logger.info(f'Prompt: {self.decode_fn(input_arr)}')
+        inference_model = eqx.nn.inference_mode(model) # switching to inferencing
         
         for _ in range(max_new_tokens):
             if input_arr.shape[0] < self.seqlen:
@@ -292,14 +293,14 @@ class Trainer:
             except IndexError:
                 zero_idx = self.seqlen
             
-            logits = model(padded_array, self.max_iters, pad_mask, None, True, jax.random.PRNGKey(0))[1]
+            logits = inference_model(padded_array, self.max_iters, pad_mask, None, True, jax.random.PRNGKey(0))[1]
             logits = logits[zero_idx - 1, :] # chose the last token representation
             probs = jax.nn.softmax(logits / temperature)
             
-            gen = model.out_head(probs).argmax(-1)
+            gen = inference_model.out_head(probs).argmax(-1)
             input_arr = jnp.concatenate([input_arr, gen.reshape(-1)])
             
-        self.my_logger.info(f'Model generation: {self.decode_fn(input_arr[-max_new_tokens:-1])}\n')
+        self.my_logger.info(f'inference_model generation: {self.decode_fn(input_arr[-max_new_tokens:-1])}\n')
             
         return input_arr
 
