@@ -295,12 +295,11 @@ class Trainer:
             
             logits = inference_model(padded_array, self.max_iters, pad_mask, None, True, jax.random.PRNGKey(0))[1]
             logits = logits[zero_idx - 1, :] # chose the last token representation
-            probs = jax.nn.softmax(logits / temperature)
             
-            gen = inference_model.out_head(probs).argmax(-1)
+            gen = jax.nn.softmax(inference_model.out_head(logits)).argmax(-1)
             input_arr = jnp.concatenate([input_arr, gen.reshape(-1)])
             
-        self.my_logger.info(f'inference_model generation: {self.decode_fn(input_arr[-max_new_tokens:-1])}\n')
+        self.my_logger.info(f'model generation: {self.decode_fn(input_arr[-max_new_tokens:-1])}\n')
             
         return input_arr
 
