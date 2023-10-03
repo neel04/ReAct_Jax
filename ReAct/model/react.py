@@ -13,6 +13,8 @@ class AttentionBlock(eqx.Module):
     """Basic Block for LiteAttention"""
 
     seqlen: int = eqx.field(static=True)
+    n_heads: int = eqx.field(static=True)
+    
     activation: eqx.Module
     attn_gate: eqx.Module
     ln1: eqx.Module
@@ -24,19 +26,20 @@ class AttentionBlock(eqx.Module):
 
         self.activation = NewGELU()
         self.seqlen = seqlen
+        self.n_heads = n_heads
 
-        self.attn_gate = LiteAttention(bottleneck, key1)
-        #self.attn_gate = eqx.nn.MultiheadAttention(num_heads=n_heads, query_size=bottleneck,
-                                                   #use_query_bias=True, use_key_bias=True,
-                                                   #use_value_bias=True, use_output_bias=True, 
-                                                   #dropout_p=drop_rate, key=key1)
+        #self.attn_gate = LiteAttention(bottleneck, key1)
+        self.attn_gate = eqx.nn.MultiheadAttention(num_heads=n_heads, query_size=bottleneck,
+                                                   use_query_bias=True, use_key_bias=True,
+                                                   use_value_bias=True, use_output_bias=True, 
+                                                   dropout_p=drop_rate, key=key1)
 
         self.ln1 = eqx.nn.LayerNorm(bottleneck)
         self.ln2 = eqx.nn.LayerNorm(bottleneck)
 
         self.mlp = MLP(bottleneck, bottleneck, drop_rate, key2)
 
-    def make_self_attention_mask(
+    def _make_self_attention_mask(
         self, mask: Int[Array, " seq_len"]
     ) -> Float[Array, "num_heads seq_len seq_len"]:
         """Create self-attention mask from sequence-level mask."""
@@ -44,18 +47,18 @@ class AttentionBlock(eqx.Module):
             jnp.expand_dims(mask, axis=-1), jnp.expand_dims(mask, axis=-2)
         )
         mask = jnp.expand_dims(mask, axis=-3)
-        mask = jnp.repeat(mask, repeats=self.num_heads, axis=-3)
+        mask = jnp.repeat(mask, repeats=self.n_heads, axis=-3)
         return mask.astype(jnp.float32)
 
     def __call__(self, x: Array, key: PRNGKeyArray, mask: Optional[Array] = None):
-        # x: (batch, seqlen, bottleneck)
+        # x: (seqlen, bottleneck)
         mask = jnp.zeros_like(x) if mask is None else mask
         x = jax.vmap(self.ln1)(x)
         
-        #x += self.attn_gate(x, x, x,
-                            #mask=self._make_self_attention_mask(mask),
-                            #key=key, inference=False)
-        x = self.attn_gate(x)
+        x += self.attn_gate(x, x, x,
+                            mask=self._make_self_attention_mask(mask),
+                            key=key, inference=False)
+        #x = self.attn_gate(x)
         
         x = jax.vmap(self.ln2)(x)
         x += self.mlp(x, key=key)
