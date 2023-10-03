@@ -46,8 +46,8 @@ def parse_args():
     parser.add_argument('--epochs', type=int, default=1,
                         help='Number of epochs. Default: 1')
 
-    parser.add_argument('--save_interval', type=int, default=1000,
-                        help='Save interval. Default: 1000')
+    parser.add_argument('--save_interval', type=int, default=2500,
+                        help='Save interval. Default: 2500')
     
     parser.add_argument('--log_interval', type=int, default=1000,
                         help='Log interval. Default: 1000')
@@ -69,7 +69,7 @@ def parse_args():
     
     parser.add_argument('--resume', type=str, default=None,
                         help='Obtain WandB run_path from Overview tab and append the'
-                             'epoch number. \nExample arg: "neel/ReAct_Jax/6ktmhalt/ + 200"')
+                             'step number. \nExample arg: "neel/ReAct_Jax/6ktmhalt/ + 200"')
 
     args = parser.parse_args()
     return args

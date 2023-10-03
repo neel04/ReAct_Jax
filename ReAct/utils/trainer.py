@@ -130,21 +130,21 @@ class Trainer:
     
     def resume_training(self, model: eqx.Module, opt_state: eqx.Module):
         # extracting out the paths
-        run_path, epoch = self.resume.split('+')
-        run_path, epoch = run_path.strip(), int(epoch.strip())
+        run_path, step = self.resume.split('+')
+        run_path, step = run_path.strip(), int(step.strip())
         
         base_path = "https://api.wandb.ai/files/"
-        model_path = f'{base_path}{run_path}/model_{epoch}.eqx'
+        model_path = f'{base_path}{run_path}/model_{step}.eqx'
         
         # wget both files to ReAct/outputs/, if they those files don't exist
-        if not os.path.exists(f'{self.save_dir}model_{epoch}.eqx'):
-            os.system(f'wget -O {self.save_dir}model_{epoch}.eqx {model_path}')
+        if not os.path.exists(f'{self.save_dir}model_{step}.eqx'):
+            os.system(f'wget -O {self.save_dir}model_{step}.eqx {model_path}')
         
-        model, opt_state = load_eqx_obj(f'{self.save_dir}model_{epoch}.eqx', (model, opt_state))
+        model, opt_state = load_eqx_obj(f'{self.save_dir}model_{step}.eqx', (model, opt_state))
         
-        self.my_logger.info(f'-------- Resuming training from epoch {epoch} ---------\n')
+        self.my_logger.info(f'-------- Resuming training from step {step} ---------\n')
         
-        return model, opt_state, epoch
+        return model, opt_state, step
     
     def compute_metrics(self, model: eqx.Module, batch: Tuple, eval_iters: int, keys: List[PRNGKeyArray]):
         '''
@@ -178,11 +178,11 @@ class Trainer:
         print(f'Model: {model}')
         
         if self.resume:
-            model, opt_state, epoch_done = self.resume_training(model, opt_state)
+            model, opt_state, step_done = self.resume_training(model, opt_state)
         else:
-            epoch_done = 0
+            step_done = 0
         
-        for epoch in range(epoch_done, epochs):
+        for epoch in range(step_done, epochs):
             # init empty metrics
             train_acc, train_loss, train_ppl = [], [], []
             
@@ -263,7 +263,7 @@ class Trainer:
                     
                     if step % self.save_interval == 0:
                         # Save the model 
-                        filepath = f"{self.save_dir}model_{epoch}.eqx"
+                        filepath = f"{self.save_dir}model_{step}.eqx"
                         
                         save_eqx_obj(self.save_dir, filepath, (model, opt_state))
                         
