@@ -28,8 +28,8 @@ def process_seq(seq):
 def convert_to_jax(x: torch.Tensor) -> Array:
     if isinstance(x, torch.Tensor):
         return jnp.array(x.detach().cpu().numpy())
-    elif isinstance(x, list):
-        # x is a list of tuples
+    elif isinstance(x, list) and isinstance(x[0], tuple):
+        # i.e, x is a list of tuples
         output = process_seq(x)
         output_x, output_y, output_z = zip(*output)
         

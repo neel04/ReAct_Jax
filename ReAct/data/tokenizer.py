@@ -28,7 +28,7 @@ class Tok:
         self.tokenizer.enable_truncation(max_length=self.max_length)
         
     def encode(self, text: List[str]):
-        if len(text) > 1:
+        if len(text) > 1 and not isinstance(text, str):
             return self.tokenizer.encode_batch(text)
         elif isinstance(text, list):
             return self.tokenizer.encode(text[0])

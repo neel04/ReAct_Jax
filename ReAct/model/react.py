@@ -40,15 +40,14 @@ class AttentionBlock(eqx.Module):
         self.mlp = MLP(bottleneck, bottleneck, drop_rate, key2)
 
     def _make_self_attention_mask(
-        self, mask: Int[Array, " seq_len"]
+        self, pad_mask: Int[Array, " seq_len"]
     ) -> Float[Array, "num_heads seq_len seq_len"]:
         """Create self-attention mask from sequence-level mask."""
-        mask = jnp.multiply(
-            jnp.expand_dims(mask, axis=-1), jnp.expand_dims(mask, axis=-2)
-        )
-        mask = jnp.expand_dims(mask, axis=-3)
-        mask = jnp.repeat(mask, repeats=self.n_heads, axis=-3)
-        return mask.astype(jnp.float32)
+        # merge with pad_mask in the end
+        mask = jnp.ones((self.seqlen, self.seqlen))
+        mask = jnp.tril(mask)
+        mask = jnp.repeat(mask, self.n_heads, axis=0)
+        return jnp.where(mask * pad_mask > 0, True, False)
 
     def __call__(self, x: Array, key: PRNGKeyArray, mask: Optional[Array] = None):
         # x: (seqlen, bottleneck)
