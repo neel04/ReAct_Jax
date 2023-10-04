@@ -33,7 +33,7 @@ class Inferencer:
         encoded = [i for i in encoded if i not in [0, 2]]
         return encoded
     
-    def inference(self, my_input: str):
+    def inference(self, my_input: str, num_tokens: int = 32):
         model = self.skeleton_model(self.key)
         model = load_eqx_obj(self.checkpoint_path, model)
         
@@ -43,7 +43,7 @@ class Inferencer:
         my_input = convert_to_jax(my_input)
         
         # Make prediction
-        output = self.trainer.generate(model, my_input, 8, temperature=2)
+        output = self.trainer.generate(model, my_input, num_tokens, temperature=1)
         
         return output
     

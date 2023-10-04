@@ -194,7 +194,7 @@ class Trainer:
                 key=jnp.array([epoch, epoch + 1]).astype(jnp.uint32),
                 )
             
-            for step, batch in tqdm(enumerate(trainloader), total=self.dataset_length // self.batch_size):
+            for step, batch in tqdm(enumerate(trainloader)):
                 batch = self.mask_fn(batch)
                 seq, label, pad_mask = convert_to_jax(batch)
                 seq, label, pad_mask = jax.device_put((seq, label, pad_mask), self.shard)
@@ -257,13 +257,13 @@ class Trainer:
                     self.my_logger.info(f'Validation accuracy: {val_metrics_5[0]} | using {self.max_iters + 5} iterations')
                     self.my_logger.info(f'Cumulative Training accuracy: {cum_train_acc}\n')
                     
-                    self.generate(model, sample_x, max_new_tokens=8)
+                    self.generate(model, sample_x, max_new_tokens=16)
                     self.my_logger.info(f'{"=" * 20}\tVal set prompt:\n')
-                    self.generate(model, val_sample_x, max_new_tokens=8)
+                    self.generate(model, val_sample_x, max_new_tokens=16)
                     
                     if step % self.save_interval == 0:
                         # Save the model 
-                        filepath = f"{self.save_dir}model_{step}.eqx"
+                        filepath = f"{self.save_dir}model_{epoch}_{step}.eqx"
                         
                         save_eqx_obj(self.save_dir, filepath, (model, opt_state))
                         
@@ -279,7 +279,7 @@ class Trainer:
         and autoregressively complete the sequence max_new_tokens times.
         '''
         self.my_logger.info(f'Prompt: {self.decode_fn(input_arr)}')
-        inference_model = eqx.nn.inference_mode(model) # switching to inferencing
+        inference_model = eqx.tree_inference(model, value=True) # switching to inferencing
         
         for _ in range(max_new_tokens):
             if input_arr.shape[0] < self.seqlen:
