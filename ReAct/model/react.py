@@ -46,8 +46,9 @@ class AttentionBlock(eqx.Module):
         # merge with pad_mask in the end
         mask = jnp.ones((self.seqlen, self.seqlen))
         mask = jnp.tril(mask)
+        mask = jnp.expand_dims(mask, 0)
         mask = jnp.repeat(mask, self.n_heads, axis=0)
-        return jnp.where(mask * pad_mask > 0, True, False)
+        return jnp.where(mask * pad_mask > 0.5, True, False)
 
     def __call__(self, x: Array, key: PRNGKeyArray, mask: Optional[Array] = None):
         # x: (seqlen, bottleneck)

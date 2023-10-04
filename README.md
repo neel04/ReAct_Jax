@@ -16,5 +16,5 @@ clear; python3 train_model.py \--save_dir /Users/neel/Documents/research/ReAct_J
 --resume "neel/ReAct_Jax/bmc9v0f4 + 0"
 
 # Inference
-python3 inferencer.py --checkpoint_path './ReAct/outputs/model_200.eqx' --prompt '1010101010101
+python3 inferencer.py --checkpoint_path '/Users/neel/Documents/research/ReAct_Jax/ReAct/outputs/fast-elevator-155 model.eqx' --num_blocks 3 --width 256 --n_heads 4 --seqlen 196  --prompt "Sam is sad because"
 ```
