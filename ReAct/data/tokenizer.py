@@ -36,6 +36,9 @@ class Tok:
             return self.tokenizer.encode(text)
     
     def decode(self, ids: list):
+        # convert ids to a list of ints
+        ids = [int(i) for i in ids]
+        
         decoded = self.tokenizer.decode(ids, skip_special_tokens=False)
         return decoded.replace('[UNK]', '').replace('[PAD]', '')
     

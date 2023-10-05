@@ -40,7 +40,7 @@ class Inferencer:
         count_params(model)
         
         # Convert to JAX
-        my_input = convert_to_jax(my_input)
+        my_input = convert_to_jax(my_input, self.bf16)
         
         # Make prediction
         output = self.trainer.generate(model, my_input, num_tokens, temperature=1)

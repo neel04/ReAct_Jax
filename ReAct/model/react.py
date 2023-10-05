@@ -190,9 +190,10 @@ class React(eqx.Module):
     def __call__(self, input: Array, iters_to_do: int, pad_mask: Array,
                  prev_thought: Optional[Array] = None, training: bool = True,
                  key: Optional[PRNGKeyArray] = None) -> Array:
-        
+        input = input.astype(jnp.int32)
         x = jax.vmap(self.embed_layer)(input) + self.pos_enc # (batch, seqlen, embed_dim
-        interim_thought = self.input_act(self.input_proj(x)) # (batch, seqlen, bottleneck)
+        
+        interim_thought = self.input_act(self.input_proj(x.astype(jnp.bfloat16))) # (batch, seqlen, bottleneck)
 
         if isinstance(prev_thought, Array):
             interim_thought = prev_thought

@@ -5,6 +5,7 @@ import equinox as eqx
 import jax
 import jax.numpy as jnp
 import optax
+from jax import tree_util as jtu
 from jaxtyping import Array, PRNGKeyArray
 from torch.utils.data import DataLoader
 from tqdm.auto import tqdm
@@ -86,7 +87,7 @@ class Trainer:
 
         for step, batch in enumerate(loader):
             batch = mask_fn(batch)
-            seq, label, pad_mask = convert_to_jax(batch)
+            seq, label, pad_mask = convert_to_jax(batch, self.bf16)
             seq, label, pad_mask = jax.device_put((seq, label, pad_mask), self.shard)
             
             acc, loss, ppl = self.compute_metrics(model, (seq, label, pad_mask), eval_iters, keys)
@@ -125,6 +126,10 @@ class Trainer:
         
         optim, opt_state, model = self.set_optim_and_scheduler(model)
         count_params(model)
+        
+        # switch to half precision
+        if self.bf16:
+            model = jtu.tree_map(lambda x: x.astype(jnp.bfloat16) if eqx.is_inexact_array(x) else x, model)
         
         return optim, opt_state, model
     
@@ -196,7 +201,7 @@ class Trainer:
             
             for step, batch in tqdm(enumerate(trainloader)):
                 batch = self.mask_fn(batch)
-                seq, label, pad_mask = convert_to_jax(batch)
+                seq, label, pad_mask = convert_to_jax(batch, self.bf16)
                 seq, label, pad_mask = jax.device_put((seq, label, pad_mask), self.shard)
                 
                 loss, model, opt_state = make_step(model, seq, label, pad_mask, rndm_n, rndm_k,

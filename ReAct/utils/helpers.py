@@ -1,6 +1,6 @@
 import os
-from typing import List
 
+from functools import partial
 import equinox as eqx
 import jax
 import jax.numpy as jnp
@@ -25,17 +25,21 @@ def count_params(model: eqx.Module):
 def process_seq(seq):
     return [list(map(jnp.array, subseq)) for subseq in seq]
 
-def convert_to_jax(x: torch.Tensor) -> Array:
+@partial(jax.jit, static_argnums=(1,))
+def convert_to_jax(x: torch.Tensor, mixed_p: bool = True) -> Array:
+    #dtype = jnp.bfloat16 if mixed_p else jnp.float32
+    dtype = jnp.bfloat16
+    
     if isinstance(x, torch.Tensor):
-        return jnp.array(x.detach().cpu().numpy())
+        return jnp.array(x.detach().cpu().numpy()).astype(dtype)
     elif isinstance(x, list) and isinstance(x[0], tuple):
         # i.e, x is a list of tuples
         output = process_seq(x)
         output_x, output_y, output_z = zip(*output)
         
-        return jnp.stack(output_x), jnp.stack(output_y), jnp.stack(output_z)
+        return [jnp.array(i).astype(dtype) for i in [output_x, output_y, output_z]]
     else:
-        return jnp.array(x)
+        return jnp.array(x).astype(dtype)
 
 def get_rand_nums(key: PRNGKeyArray, lower_bound: int, upper_bound: int, bsz: int) -> Array:
     random_numbers = jax.random.randint(key, shape=(bsz,), minval=lower_bound, maxval=upper_bound)
