@@ -12,7 +12,7 @@ class TinyStoriesDataset:
         self.bsz = bsz
         self.max_length = max_length + 1
         
-        self.dataset = load_dataset('roneneldan/TinyStories', split=split, streaming=False,
+        self.dataset = load_dataset('roneneldan/TinyStories', split=split, streaming=True,
                                     ignore_verifications=True, keep_in_memory=False, num_proc=os.cpu_count())
         
         self.tok = Tok(vocab_dir=vocab_dir, max_length=self.max_length)
