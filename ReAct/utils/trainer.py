@@ -87,7 +87,7 @@ class Trainer:
 
         for step, batch in enumerate(loader):
             batch = mask_fn(batch)
-            seq, label, pad_mask = convert_to_jax(batch, self.bf16)
+            seq, label, pad_mask = convert_to_jax(batch)
             seq, label, pad_mask = jax.device_put((seq, label, pad_mask), self.shard)
             
             acc, loss, ppl = self.compute_metrics(model, (seq, label, pad_mask), eval_iters, keys)
@@ -201,7 +201,7 @@ class Trainer:
             
             for step, batch in tqdm(enumerate(trainloader)):
                 batch = self.mask_fn(batch)
-                seq, label, pad_mask = convert_to_jax(batch, self.bf16)
+                seq, label, pad_mask = convert_to_jax(batch)
                 seq, label, pad_mask = jax.device_put((seq, label, pad_mask), self.shard)
                 
                 loss, model, opt_state = make_step(model, seq, label, pad_mask, rndm_n, rndm_k,
