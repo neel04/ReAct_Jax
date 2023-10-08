@@ -254,8 +254,8 @@ class Trainer:
                     )
                     
                     ## Visualize one sample and model prediction
-                    sample_x = seq[0][:8]
-                    val_sample_x = val_sample[:8]
+                    sample_x = seq[0][:12]
+                    val_sample_x = val_sample[:12]
                     
                     self.my_logger.info(f"epoch={epoch}, step={step}, loss={loss}")
                     self.my_logger.info(f'Validation accuracy: {val_metrics[0]} | using {self.max_iters} iterations')
