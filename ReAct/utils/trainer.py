@@ -278,7 +278,7 @@ class Trainer:
                 
         return loss, model, opt_state
     
-    def generate(self, model: eqx.Module, input_arr: Array, max_new_tokens: int, temperature: float = 1.0):
+    def generate(self, model: eqx.Module, input_arr: Array, max_new_tokens: int, temperature: float = 0.25):
         '''
         Take a conditioning sequence , call output_head to obtain a prediction
         and autoregressively complete the sequence max_new_tokens times.
@@ -303,7 +303,9 @@ class Trainer:
             logits = inference_model(padded_array, self.max_iters, pad_mask, None, True, jax.random.PRNGKey(0))[1]
             logits = logits[zero_idx - 1, :] # chose the last token representation
             
-            gen = jax.nn.softmax(inference_model.out_head(logits)).argmax(-1)
+            gen = inference_model.out_head(logits) / temperature
+            # sample from the distribution with the probabilities in gen
+            gen = jax.random.categorical(jax.random.PRNGKey(0), gen, axis=-1)
             input_arr = jnp.concatenate([input_arr, gen.reshape(-1)])
             
         self.my_logger.info(f'model generation: {self.decode_fn(input_arr[-max_new_tokens:-1])}\n')

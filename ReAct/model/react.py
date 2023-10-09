@@ -6,7 +6,7 @@ import jax
 import jax.numpy as jnp
 from jaxtyping import Array, Float, Int, PRNGKeyArray
 
-from .blocks import MLP, LinearProj, LiteAttention, NewGELU
+from .blocks import MLP, LinearProj, LiteAttention, NewGELU, MixerBlock
 
 # ruff: noqa: F722
 class AttentionBlock(eqx.Module):
@@ -28,7 +28,8 @@ class AttentionBlock(eqx.Module):
         self.seqlen = seqlen
         self.n_heads = n_heads
 
-        self.attn_gate = LiteAttention(bottleneck, key1)
+        #self.attn_gate = LiteAttention(bottleneck, key1)
+        self.attn_gate = MixerBlock(bottleneck, seqlen, drop_rate, key=key1)
         #self.attn_gate = eqx.nn.MultiheadAttention(num_heads=n_heads, query_size=bottleneck,
                                                    #use_query_bias=True, use_key_bias=True,
                                                    #use_value_bias=True, use_output_bias=True, 
@@ -58,7 +59,7 @@ class AttentionBlock(eqx.Module):
         #x += self.attn_gate(x, x, x,
                             #mask=self._make_self_attention_mask(mask),
                             #key=key, inference=False)
-        x = self.attn_gate(x)
+        x = self.attn_gate(x, key)
         
         x = jax.vmap(self.ln2)(x)
         x += self.mlp(x, key=key)
@@ -191,7 +192,7 @@ class React(eqx.Module):
                  prev_thought: Optional[Array] = None, training: bool = True,
                  key: Optional[PRNGKeyArray] = None) -> Array:
         
-        x = jax.vmap(self.embed_layer)(input) + self.pos_enc # (batch, seqlen, embed_dim
+        x = jax.vmap(self.embed_layer)(input) #+ self.pos_enc # (batch, seqlen, embed_dim
         
         interim_thought = self.input_act(self.input_proj(x.astype(jnp.bfloat16))) # (batch, seqlen, bottleneck)
 

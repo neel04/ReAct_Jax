@@ -43,7 +43,7 @@ class Inferencer:
         my_input = convert_to_jax(my_input)
         
         # Make prediction
-        output = self.trainer.generate(model, my_input, num_tokens, temperature=1)
+        output = self.trainer.generate(model, my_input, num_tokens, temperature=0.25)
         
         return output
     

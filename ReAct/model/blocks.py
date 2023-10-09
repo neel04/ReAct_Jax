@@ -3,7 +3,7 @@ import equinox as eqx
 import jax.numpy as jnp
 import math
 
-from jaxtyping import Array, Float16, PRNGKeyArray
+from jaxtyping import Array, BFloat16, PRNGKeyArray
 from typing import Optional
 
 # ruff: noqa: F722
@@ -62,7 +62,7 @@ class LinearProj(eqx.Module):
 			self.bias = jnp.zeros((output_dim,))
 
 	@jax.jit
-	def __call__(self, input: Float16[Array, 'batch in_dim']):
+	def __call__(self, input: BFloat16[Array, 'batch in_dim']):
 		return input @ self.weight + self.bias
 
 class LiteAttention(eqx.Module):
@@ -74,9 +74,33 @@ class LiteAttention(eqx.Module):
 		self.weight = LinearProj(input_dim, input_dim, use_bias=False, key=key)
 
 	@jax.jit
-	def __call__(self, x: Float16[Array, 'batch in_dim']):
+	def __call__(self, x: BFloat16[Array, 'seqlen in_dim']):
 		attn_weights = jax.nn.softmax(self.weight(x), axis=1) # type: ignore
 		return x * attn_weights
+
+class MixerBlock(eqx.Module):
+    '''
+    MixerBlock from MLP-Mixer
+    Is applied in-place for self-attention
+    '''
+    norm: eqx.Module
+    channel_mixer: eqx.Module
+    token_mixer: eqx.Module
+    
+    def __init__(self, input_dim: int, seqlen: int, drop_rate: float, key: PRNGKeyArray):
+        key1, key2 = jax.random.split(key, 2)
+        
+        self.norm = eqx.nn.LayerNorm(input_dim)
+        
+        self.channel_mixer = MLP(input_dim, input_dim, drop_rate, key=key1)
+        self.token_mixer = MLP(seqlen, seqlen, drop_rate, key=key2)
+    
+    def __call__(self, x: BFloat16[Array, 'seqlen in_dim'], key: PRNGKeyArray):
+        arr = x.T
+        arr = self.token_mixer(arr, key)
+        arr = arr.T
+        x = x + arr
+        return x + self.channel_mixer(arr, key)
 
 if __name__ == '__main__':
 	key = jax.random.PRNGKey(0)
