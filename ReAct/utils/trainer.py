@@ -38,9 +38,12 @@ def compute_loss(model: eqx.Module, x: Array, y: Array, pad_mask: Array,
     y_one_hot = jax.nn.one_hot(y, num_classes=num_classes) # (batch_size, seqlen, num_classes)
     
     # Softmax cross entropy loss
-    loss = optax.softmax_cross_entropy(pred_y, y_one_hot).sum()
+    loss = -jnp.sum(jax.nn.log_softmax(pred_y) * y_one_hot * pad_mask[..., None], axis=-1).sum()
     
-    return loss.mean() # across all the baches
+    # Scale the loss by the number of sum(pad_mask)
+    loss = loss / jnp.sum(pad_mask)
+    
+    return loss.mean() # across all the batches
     
 @eqx.filter_jit
 def make_step(model: eqx.Module, x: Array, y: Array, pad_mask: Array, n: int, k: int,
