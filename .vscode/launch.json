@@ -13,6 +13,7 @@
                 "--batch_size", "128",
                 "--num_blocks", "1",
                 "--epochs", "1",
+                "--bf16",
             ],
             "justMyCode": true
         }

@@ -50,6 +50,14 @@ class AttentionBlock(eqx.Module):
         mask = jnp.expand_dims(mask, 0)
         mask = jnp.repeat(mask, self.n_heads, axis=0)
         return jnp.where(mask * pad_mask > 0.5, True, False)
+    
+    def _make_mixer_mask(self):
+        # Almost same, but we triu instead of tril
+        # and we don't need to merge with pad_mask
+        mask = jnp.ones((self.seqlen, self.seqlen))
+        mask = jnp.triu(mask)
+        
+        return mask
 
     def __call__(self, x: Array, key: PRNGKeyArray, mask: Optional[Array] = None):
         # x: (seqlen, bottleneck)
@@ -59,7 +67,7 @@ class AttentionBlock(eqx.Module):
         #x += self.attn_gate(x, x, x,
                             #mask=self._make_self_attention_mask(mask),
                             #key=key, inference=False)
-        x = self.attn_gate(x, key)
+        x = self.attn_gate(x, self._make_mixer_mask(), key)
         
         x = jax.vmap(self.ln2)(x)
         x += self.mlp(x, key=key)
@@ -192,7 +200,7 @@ class React(eqx.Module):
                  prev_thought: Optional[Array] = None, training: bool = True,
                  key: Optional[PRNGKeyArray] = None) -> Array:
         
-        x = jax.vmap(self.embed_layer)(input) #+ self.pos_enc # (batch, seqlen, embed_dim
+        x = jax.vmap(self.embed_layer)(input.astype(jnp.int32)) #+ self.pos_enc # (batch, seqlen, embed_dim
         
         interim_thought = self.input_act(self.input_proj(x.astype(jnp.bfloat16))) # (batch, seqlen, bottleneck)
 
