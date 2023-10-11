@@ -100,7 +100,7 @@ class MixerBlock(eqx.Module):
   
     def __call__(self, x: BFloat16[Array, 'seqlen in_dim'], mask: Array, key: PRNGKeyArray):
         arr = x.T
-        arr = self.token_mixer(arr, mask, key)
+        arr = self.token_act(self.token_mixer(arr, mask, key))
         arr = arr.T
         x = x + arr
         return x + self.channel_mixer(arr, key)
