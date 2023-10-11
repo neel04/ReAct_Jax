@@ -53,7 +53,7 @@ class TinyStoriesDataset:
             pin_memory=True,
             drop_last=True,
             collate_fn=self.collate_fn,
-            prefetch_factor=16)
+            prefetch_factor=8)
         
         return self.dataloader
 

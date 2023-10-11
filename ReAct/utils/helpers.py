@@ -34,7 +34,7 @@ def convert_to_jax(x: torch.Tensor) -> Array:
         output = process_seq(x)
         output_x, output_y, output_z = zip(*output)
         
-        return [jnp.array(i).astype(jnp.bfloat16) for i in [output_x, output_y, output_z]]
+        return [jnp.array(i) for i in [output_x, output_y, output_z]]
     else:
         return jnp.array(x)
 
