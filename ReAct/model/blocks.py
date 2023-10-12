@@ -84,7 +84,6 @@ class MixerBlock(eqx.Module):
     Is applied in-place for self-attention
     '''
     norm: eqx.Module
-    token_act: eqx.Module
     channel_mixer: eqx.Module
     token_mixer: eqx.Module
     
@@ -96,11 +95,10 @@ class MixerBlock(eqx.Module):
         self.channel_mixer = MLP(input_dim, input_dim, drop_rate, key=key1)
         
         self.token_mixer = LinearProj(seqlen, seqlen, key=key2)
-        self.token_act = NewGELU()
   
     def __call__(self, x: BFloat16[Array, 'seqlen in_dim'], mask: Array, key: PRNGKeyArray):
         arr = x.T
-        arr = self.token_act(self.token_mixer(arr, mask, key))
+        arr = self.token_mixer(arr, mask, key)
         arr = arr.T
         x = x + arr
         return x + self.channel_mixer(arr, key)
