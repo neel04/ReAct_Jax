@@ -93,7 +93,6 @@ class MixerBlock(eqx.Module):
         self.norm = eqx.nn.LayerNorm(input_dim)
         
         self.channel_mixer = MLP(input_dim, input_dim, drop_rate, key=key1)
-        
         self.token_mixer = LinearProj(seqlen, seqlen, key=key2)
   
     def __call__(self, x: BFloat16[Array, 'seqlen in_dim'], mask: Array, key: PRNGKeyArray):
@@ -101,6 +100,7 @@ class MixerBlock(eqx.Module):
         arr = self.token_mixer(arr, mask, key)
         arr = arr.T
         x = x + arr
+        arr = self.norm(x)
         return x + self.channel_mixer(arr, key)
 
 if __name__ == '__main__':

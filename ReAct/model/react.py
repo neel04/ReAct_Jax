@@ -69,7 +69,7 @@ class AttentionBlock(eqx.Module):
                             #key=key, inference=False)
         x = self.attn_gate(x, self._make_mixer_mask(), key)
         
-        x = jax.vmap(self.ln2)(x)
+        #x = jax.vmap(self.ln2)(x)
         x += self.mlp(x, key=key)
 
         return self.activation(x)  # skip connection
