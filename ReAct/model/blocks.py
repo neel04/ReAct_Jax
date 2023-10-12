@@ -100,7 +100,7 @@ class MixerBlock(eqx.Module):
         arr = self.token_mixer(arr, mask, key)
         arr = arr.T
         x = x + arr
-        arr = self.norm(x)
+        arr = jax.vmap(self.norm)(x)
         return x + self.channel_mixer(arr, key)
 
 if __name__ == '__main__':
