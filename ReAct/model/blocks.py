@@ -150,7 +150,7 @@ class MultiheadMixerBlock(eqx.Module):
         arr = self.merge_heads(arr)
 
         x = x + arr
-        return x + self.norm(arr)
+        return x + jax.vmap(self.norm)(x)
 
 if __name__ == '__main__':
     key = jax.random.PRNGKey(0)
