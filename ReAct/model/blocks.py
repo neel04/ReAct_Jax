@@ -1,10 +1,12 @@
-import jax
-import equinox as eqx
-import jax.numpy as jnp
 import math
-
-from jaxtyping import Array, BFloat16, PRNGKeyArray
 from typing import Optional
+
+import equinox as eqx
+import jax
+import jax.numpy as jnp
+from einops import reduce
+from icecream import ic
+from jaxtyping import Array, BFloat16, PRNGKeyArray
 
 # ruff: noqa: F722
 
@@ -100,8 +102,55 @@ class MixerBlock(eqx.Module):
         arr = self.token_mixer(arr, mask, key)
         arr = arr.T
         x = x + arr
-        arr = jax.vmap(self.norm)(x)
         return x + self.channel_mixer(arr, key)
+    
+class MultiheadMixerBlock(eqx.Module):
+    '''
+    Multihead MixerBlock from MLP-Mixer
+    Is applied in-place for self-attention
+    '''
+    num_heads: int = eqx.field(static=True)
+    head_dim: int = eqx.field(static=True)
+    
+    norm: eqx.Module
+    channel_mixer: eqx.Module
+    token_mixer: eqx.Module
+
+    def __init__(self, input_dim: int, seqlen: int, num_heads: int, drop_rate: float, key: PRNGKeyArray):
+        key1, key2 = jax.random.split(key, 2)
+        
+        self.num_heads = num_heads
+        self.head_dim = input_dim // num_heads
+
+        self.norm = eqx.nn.LayerNorm(input_dim)
+        self.channel_mixer = MLP(self.head_dim, self.head_dim, drop_rate, key=key1)
+        self.token_mixer = LinearProj(seqlen, seqlen, key=key2)
+
+    def split_heads(self, x: Array):
+        # Reshape the input tensor to (batch_size, num_heads, seqlen, head_dim)
+        x = x.reshape((x.shape[0], self.num_heads, -1, self.head_dim))
+        return x
+
+    def merge_heads(self, x):
+        x = x.reshape((x.shape[0], -1))
+        return x
+
+    def __call__(self, x: BFloat16[Array, 'seqlen in_dim'], mask: Array, key: PRNGKeyArray):
+        arr = x.T
+        arr = self.token_mixer(arr, mask, key)
+        arr = arr.T
+
+        # Split the input into multiple heads
+        arr = self.split_heads(arr)
+
+        # Apply channel mixing independently to each head
+        arr = self.channel_mixer(arr, key)
+
+        # Merge heads back
+        arr = self.merge_heads(arr)
+
+        x = x + arr
+        return x + self.norm(arr)
 
 if __name__ == '__main__':
     key = jax.random.PRNGKey(0)
