@@ -6,7 +6,7 @@ import jax
 import jax.numpy as jnp
 from jaxtyping import Array, Float, Int, PRNGKeyArray
 
-from .blocks import MLP, LinearProj, LiteAttention, NewGELU, MultiheadMixerBlock
+from .blocks import MLP, LinearProj, LiteAttention, NewGELU, MixerBlock
 
 # ruff: noqa: F722
 class AttentionBlock(eqx.Module):
@@ -29,7 +29,7 @@ class AttentionBlock(eqx.Module):
         self.n_heads = n_heads
 
         #self.attn_gate = LiteAttention(bottleneck, key1)
-        self.attn_gate = MultiheadMixerBlock(bottleneck, seqlen, n_heads, drop_rate, key=key1)
+        self.attn_gate = MixerBlock(bottleneck, seqlen, drop_rate, key=key1)
         #self.attn_gate = eqx.nn.MultiheadAttention(num_heads=n_heads, query_size=bottleneck,
                                                    #use_query_bias=True, use_key_bias=True,
                                                    #use_value_bias=True, use_output_bias=True, 

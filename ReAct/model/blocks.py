@@ -85,6 +85,8 @@ class MixerBlock(eqx.Module):
     MixerBlock from MLP-Mixer
     Is applied in-place for self-attention
     '''
+    act_1: eqx.Module
+    act_2: eqx.Module
     norm: eqx.Module
     channel_mixer: eqx.Module
     token_mixer: eqx.Module
@@ -93,65 +95,19 @@ class MixerBlock(eqx.Module):
         key1, key2 = jax.random.split(key, 2)
         
         self.norm = eqx.nn.LayerNorm(input_dim)
+        self.act_1 = NewGELU()
+        self.act_2 = NewGELU()
         
         self.channel_mixer = MLP(input_dim, input_dim, drop_rate, key=key1)
         self.token_mixer = LinearProj(seqlen, seqlen, key=key2)
   
     def __call__(self, x: BFloat16[Array, 'seqlen in_dim'], mask: Array, key: PRNGKeyArray):
         arr = x.T
-        arr = self.token_mixer(arr, mask, key)
+        arr = self.act_1(self.token_mixer(arr, mask, key))
         arr = arr.T
         x = x + arr
-        return x + self.channel_mixer(arr, key)
+        return x + self.act_2(self.channel_mixer(arr, key))
     
-class MultiheadMixerBlock(eqx.Module):
-    '''
-    Multihead MixerBlock from MLP-Mixer
-    Is applied in-place for self-attention
-    '''
-    num_heads: int = eqx.field(static=True)
-    head_dim: int = eqx.field(static=True)
-    
-    norm: eqx.Module
-    channel_mixer: eqx.Module
-    token_mixer: eqx.Module
-
-    def __init__(self, input_dim: int, seqlen: int, num_heads: int, drop_rate: float, key: PRNGKeyArray):
-        key1, key2 = jax.random.split(key, 2)
-        
-        self.num_heads = num_heads
-        self.head_dim = input_dim // num_heads
-
-        self.norm = eqx.nn.LayerNorm(input_dim)
-        self.channel_mixer = MLP(self.head_dim, self.head_dim, drop_rate, key=key1)
-        self.token_mixer = LinearProj(seqlen, seqlen, key=key2)
-
-    def split_heads(self, x: Array):
-        # Reshape the input tensor to (batch_size, num_heads, seqlen, head_dim)
-        x = x.reshape((x.shape[0], self.num_heads, -1, self.head_dim))
-        return x
-
-    def merge_heads(self, x):
-        x = x.reshape((x.shape[0], -1))
-        return x
-
-    def __call__(self, x: BFloat16[Array, 'seqlen in_dim'], mask: Array, key: PRNGKeyArray):
-        arr = x.T
-        arr = self.token_mixer(arr, mask, key)
-        arr = arr.T
-
-        # Split the input into multiple heads
-        arr = self.split_heads(arr)
-
-        # Apply channel mixing independently to each head
-        arr = self.channel_mixer(arr, key)
-
-        # Merge heads back
-        arr = self.merge_heads(arr)
-
-        x = x + arr
-        return x + jax.vmap(self.norm)(x)
-
 if __name__ == '__main__':
     key = jax.random.PRNGKey(0)
     LA = LiteAttention(256, key)
