@@ -28,8 +28,7 @@ class AttentionBlock(eqx.Module):
         self.seqlen = seqlen
         self.n_heads = n_heads
 
-        #self.attn_gate = LiteAttention(bottleneck, key1)
-        self.attn_gate = MixerBlock(bottleneck, seqlen, drop_rate, key=key1)
+        self.attn_gate = LiteAttention(seqlen, key1) #TODO: Repace seq_len with bottleneck
         #self.attn_gate = eqx.nn.MultiheadAttention(num_heads=n_heads, query_size=bottleneck,
                                                    #use_query_bias=True, use_key_bias=True,
                                                    #use_value_bias=True, use_output_bias=True, 
@@ -67,7 +66,7 @@ class AttentionBlock(eqx.Module):
         #x += self.attn_gate(x, x, x,
                             #mask=self._make_self_attention_mask(mask),
                             #key=key, inference=False)
-        x = self.attn_gate(x, self._make_mixer_mask(), key)
+        x = self.attn_gate(x, self._make_mixer_mask())
         
         #x = jax.vmap(self.ln2)(x)
         x += self.mlp(x, key=key)

@@ -73,12 +73,12 @@ class LiteAttention(eqx.Module):
 
     def __init__(self, input_dim: int, key: PRNGKeyArray):
         self.input_dim = input_dim
-        self.weight = LinearProj(input_dim, input_dim, use_bias=False, key=key)
+        self.weight = LinearProj(input_dim, input_dim, use_bias=True, key=key)
 
     @jax.jit
-    def __call__(self, x: BFloat16[Array, 'seqlen in_dim']):
-        attn_weights = jax.nn.softmax(self.weight(x), axis=1) # type: ignore
-        return x * attn_weights
+    def __call__(self, x: BFloat16[Array, 'seqlen in_dim'], mask: Array):
+        attn_weights = jax.nn.softmax(self.weight(x.T, mask), axis=1) # type: ignore
+        return x.T * attn_weights
 
 class MixerBlock(eqx.Module):
     '''
