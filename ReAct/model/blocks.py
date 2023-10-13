@@ -78,7 +78,7 @@ class LiteAttention(eqx.Module):
     @jax.jit
     def __call__(self, x: BFloat16[Array, 'seqlen in_dim'], mask: Array):
         attn_weights = jax.nn.softmax(self.weight(x.T, mask), axis=1) # type: ignore
-        return x.T * attn_weights
+        return x * attn_weights.T
 
 class MixerBlock(eqx.Module):
     '''
