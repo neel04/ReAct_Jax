@@ -1,4 +1,5 @@
 import os
+from icecream import ic
 from typing import Any, Callable, List, Tuple
 
 import equinox as eqx
@@ -38,7 +39,9 @@ def compute_loss(model: eqx.Module, x: Array, y: Array, pad_mask: Array,
     y_one_hot = jax.nn.one_hot(y, num_classes=num_classes) # (batch_size, seqlen, num_classes)
     
     # Softmax cross entropy loss
-    loss = -jnp.sum(jax.nn.log_softmax(pred_y) * y_one_hot * pad_mask[..., None], axis=-1).sum()
+    loss = -jnp.sum(jax.nn.log_softmax(pred_y) * y_one_hot * pad_mask[..., None], axis=-1)
+    k = jnp.repeat(k[:, None], loss.shape[1], axis=-1)
+    loss = (loss * (k)).sum()
     
     # Scale the loss by the number of sum(pad_mask)
     loss = loss / jnp.sum(pad_mask)

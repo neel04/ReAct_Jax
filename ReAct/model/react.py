@@ -28,11 +28,11 @@ class AttentionBlock(eqx.Module):
         self.seqlen = seqlen
         self.n_heads = n_heads
 
-        self.attn_gate = LiteAttention(seqlen, key1) #TODO: Repace seq_len with bottleneck
-        #self.attn_gate = eqx.nn.MultiheadAttention(num_heads=n_heads, query_size=bottleneck,
-                                                   #use_query_bias=True, use_key_bias=True,
-                                                   #use_value_bias=True, use_output_bias=True, 
-                                                   #dropout_p=drop_rate, key=key1)
+        #self.attn_gate = LiteAttention(seqlen, key1) #TODO: Repace seq_len with bottleneck
+        self.attn_gate = eqx.nn.MultiheadAttention(num_heads=n_heads, query_size=bottleneck,
+                                                   use_query_bias=True, use_key_bias=True,
+                                                   use_value_bias=True, use_output_bias=True, 
+                                                   dropout_p=drop_rate, key=key1)
 
         self.ln1 = eqx.nn.LayerNorm(bottleneck)
         self.ln2 = eqx.nn.LayerNorm(bottleneck)
@@ -63,12 +63,11 @@ class AttentionBlock(eqx.Module):
         mask = jnp.zeros_like(x) if mask is None else mask
         x = jax.vmap(self.ln1)(x)
         
-        #x += self.attn_gate(x, x, x,
-                            #mask=self._make_self_attention_mask(mask),
-                            #key=key, inference=False)
-        x = self.attn_gate(x, self._make_mixer_mask())
+        x += self.attn_gate(x, x, x,
+                            mask=self._make_self_attention_mask(mask),
+                            key=key, inference=False)
         
-        #x = jax.vmap(self.ln2)(x)
+        x = jax.vmap(self.ln2)(x)
         x += self.mlp(x, key=key)
 
         return self.activation(x)
@@ -199,7 +198,7 @@ class React(eqx.Module):
                  prev_thought: Optional[Array] = None, training: bool = True,
                  key: Optional[PRNGKeyArray] = None) -> Array:
         
-        x = jax.vmap(self.embed_layer)(input.astype(jnp.int32)) #+ self.pos_enc # (batch, seqlen, embed_dim
+        x = jax.vmap(self.embed_layer)(input.astype(jnp.int32)) + self.pos_enc # (batch, seqlen, embed_dim
         
         interim_thought = self.input_act(self.input_proj(x.astype(jnp.bfloat16))) # (batch, seqlen, bottleneck)
 
