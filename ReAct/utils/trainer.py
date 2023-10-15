@@ -43,11 +43,12 @@ def compute_loss(model: eqx.Module, x: Array, y: Array, pad_mask: Array,
     return loss
 
 @jax.jit
-def _compute_softmax_cross_entropy_loss(pred_y: Array, y_one_hot: Array, pad_mask: Array, k: Array) -> Array:
+def _compute_softmax_cross_entropy_loss(pred_y: Array, y_one_hot: Array, pad_mask: Array,
+                                        n: Array, k: Array) -> Array:
     #loss = -jnp.sum(jax.nn.log_softmax(pred_y) * y_one_hot * pad_mask[..., None], axis=-1)
-    loss = -jnp.sum(jax.nn.log_softmax(pred_y) * y_one_hot, axis=-1)
+    loss = -jnp.sum(jax.nn.log_softmax(pred_y, axis=-1) * y_one_hot, axis=-1)
     k = jnp.repeat(k[:, None], loss.shape[1], axis=-1)
-    loss = (loss * k).sum(-1)
+    loss = (loss * (n + k)).mean(-1)
     
     # Scale the loss by the number of number of padding tokens
     #loss = loss / jnp.clip(pad_mask.size - pad_mask.sum(), a_min=1)
