@@ -44,13 +44,13 @@ def compute_loss(model: eqx.Module, x: Array, y: Array, pad_mask: Array,
 
 @jax.jit
 def _compute_softmax_cross_entropy_loss(pred_y: Array, y_one_hot: Array, pad_mask: Array, k: Array) -> Array:
-    # Softmax cross entropy loss
-    loss = -jnp.sum(jax.nn.log_softmax(pred_y) * y_one_hot * pad_mask[..., None], axis=-1)
+    #loss = -jnp.sum(jax.nn.log_softmax(pred_y) * y_one_hot * pad_mask[..., None], axis=-1)
+    loss = -jnp.sum(jax.nn.log_softmax(pred_y) * y_one_hot, axis=-1)
     k = jnp.repeat(k[:, None], loss.shape[1], axis=-1)
     loss = (loss * k).sum(-1)
     
     # Scale the loss by the number of number of padding tokens
-    loss = loss / jnp.clip(pad_mask.size - pad_mask.sum(), a_min=1)
+    #loss = loss / jnp.clip(pad_mask.size - pad_mask.sum(), a_min=1)
     
     return loss.mean() # across all the batches
     
@@ -228,7 +228,7 @@ class Trainer:
                 
                 loss = loss.item()
                 
-                if step % 20 == 0:
+                if step % 10 == 0:
                     self.wandb_logger.log(
                         {
                             'Train/loss': loss,
