@@ -38,7 +38,7 @@ def compute_loss(model: eqx.Module, x: Array, y: Array, pad_mask: Array,
     
     y_one_hot = jax.nn.one_hot(y, num_classes=num_classes) # (batch_size, seqlen, num_classes)
     
-    loss = _compute_softmax_cross_entropy_loss(pred_y, y_one_hot, pad_mask, k)
+    loss = _compute_softmax_cross_entropy_loss(pred_y, y_one_hot, pad_mask, n, k)
     
     return loss
 
@@ -182,7 +182,7 @@ class Trainer:
         
         # compute loss
         y_one_hot = jax.nn.one_hot(batch[1], num_classes=self.num_classes) # (batch_size, seqlen, num_classes)
-        loss = _compute_softmax_cross_entropy_loss(pred_y, y_one_hot, pad_mask, eval_iters)
+        loss = _compute_softmax_cross_entropy_loss(pred_y, y_one_hot, pad_mask, eval_iters, eval_iters)
         
         # compute perplexity
         perplexity = jnp.exp(loss)
