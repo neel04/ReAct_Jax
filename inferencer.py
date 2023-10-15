@@ -2,6 +2,7 @@ import os
 
 import jax
 from jaxtyping import PRNGKeyArray
+from icecream import ic
 
 from ReAct.data.tinystories import TinyStoriesDataset
 from ReAct.model.react import React
@@ -33,7 +34,7 @@ class Inferencer:
         encoded = [i for i in encoded if i not in [0, 2]]
         return encoded
     
-    def inference(self, my_input: str, num_tokens: int = 32):
+    def inference(self, my_input: str, num_tokens: int = 24):
         model = self.skeleton_model(self.key)
         model = load_eqx_obj(self.checkpoint_path, model)
         
@@ -43,7 +44,7 @@ class Inferencer:
         my_input = convert_to_jax(my_input)
         
         # Make prediction
-        output = self.trainer.generate(model, my_input, num_tokens, temperature=0.25)
+        output = self.trainer.generate(model, my_input, num_tokens, temperature=0.35)
         
         return output
     

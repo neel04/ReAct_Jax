@@ -38,13 +38,19 @@ def compute_loss(model: eqx.Module, x: Array, y: Array, pad_mask: Array,
     
     y_one_hot = jax.nn.one_hot(y, num_classes=num_classes) # (batch_size, seqlen, num_classes)
     
+    loss = _compute_softmax_cross_entropy_loss(pred_y, y_one_hot, pad_mask, k)
+    
+    return loss
+
+@jax.jit
+def _compute_softmax_cross_entropy_loss(pred_y: Array, y_one_hot: Array, pad_mask: Array, k: Array) -> Array:
     # Softmax cross entropy loss
     loss = -jnp.sum(jax.nn.log_softmax(pred_y) * y_one_hot * pad_mask[..., None], axis=-1)
     k = jnp.repeat(k[:, None], loss.shape[1], axis=-1)
-    loss = (loss * (k)).sum()
+    loss = (loss * k).sum(-1)
     
-    # Scale the loss by the number of sum(pad_mask)
-    loss = loss / jnp.sum(pad_mask)
+    # Scale the loss by the number of number of padding tokens
+    loss = loss / jnp.clip(pad_mask.size - pad_mask.sum(), a_min=1)
     
     return loss.mean() # across all the batches
     
@@ -175,12 +181,12 @@ class Trainer:
         
         # compute loss
         y_one_hot = jax.nn.one_hot(batch[1], num_classes=self.num_classes) # (batch_size, seqlen, num_classes)
-        loss = optax.softmax_cross_entropy(pred_y, y_one_hot).mean()
+        loss = _compute_softmax_cross_entropy_loss(pred_y, y_one_hot, pad_mask, eval_iters)
         
         # compute perplexity
         perplexity = jnp.exp(loss)
         
-        return accuracy, loss, perplexity     
+        return accuracy, loss.mean(), perplexity     
     
     def train(self, epochs: int, trainloader: DataLoader, valloader: DataLoader, 
               key: PRNGKeyArray):
