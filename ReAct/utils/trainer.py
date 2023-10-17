@@ -195,12 +195,13 @@ class Trainer:
         print(f'Model: {model}')
         
         if self.resume:
-            model, opt_state, step_done = self.resume_training(model, opt_state)
+            model, opt_state, epoch_done = self.resume_training(model, opt_state)
         else:
-            step_done = 0
+            epoch_done = 0
         
-        for epoch in range(step_done, epochs):
+        for epoch in range(epoch_done, epochs):
             # init empty metrics
+            step_done = 0
             train_acc, train_loss, train_ppl = [], [], []
             
             keys = jax.random.split(
@@ -212,6 +213,8 @@ class Trainer:
                 )
             
             for step, batch in tqdm(enumerate(trainloader)):
+                step += step_done # for multiple epochs
+                
                 batch = self.mask_fn(batch)
                 seq, label, pad_mask = convert_to_jax(batch)
                 seq, label, pad_mask = jax.device_put((seq, label, pad_mask), self.shard)
@@ -287,6 +290,7 @@ class Trainer:
                         self.wandb_logger.save(filepath)
                         
             print(f'Epoch {epoch} done!')
+            step_done = step # prepare for next epoch
                 
         return loss, model, opt_state
     
