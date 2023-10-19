@@ -1,12 +1,11 @@
 import os
-from icecream import ic
 from typing import Any, Callable, List, Tuple
 
 import equinox as eqx
 import jax
 import jax.numpy as jnp
 import optax
-from jax import tree_util as jtu
+from icecream import ic
 from jaxtyping import Array, PRNGKeyArray
 from torch.utils.data import DataLoader
 from tqdm.auto import tqdm
@@ -15,7 +14,8 @@ from ReAct.model.react import React
 from ReAct.utils.helpers import convert_to_jax, count_params, load_eqx_obj, save_eqx_obj
 from ReAct.utils.logger import UnifiedLogger
 
-from .helpers import get_rand_nums
+from .helpers import get_rand_nums, half_precision
+
 
 # A unified Trainer class for training and evaluation
 @jax.jit
@@ -24,6 +24,8 @@ def n_k_loop(model: eqx.Module, input_arr: Array, pad_mask: Array, n: int, k: in
     output, intermediate_array = model(
         jax.lax.stop_gradient(input_arr), n,
         pad_mask=pad_mask, prev_thought=None, key=key)
+    
+    output, intermediate_array = jax.lax.stop_gradient(output), jax.lax.stop_gradient(intermediate_array)
     
     # n-k passes, but track the gradient this time
     output, _ = model(input_arr, k, pad_mask, prev_thought=intermediate_array, key=key)
@@ -50,7 +52,7 @@ def _compute_softmax_cross_entropy_loss(pred_y: Array, y_one_hot: Array, pad_mas
     n = jnp.repeat(n[:, None], loss.shape[1], axis=-1)
     k = jnp.repeat(k[:, None], loss.shape[1], axis=-1)
     
-    loss = (loss * (n + k)).mean(-1)
+    loss = (loss * k).mean(-1)
     
     return loss.mean() # across all the batches
     
@@ -59,8 +61,10 @@ def make_step(model: eqx.Module, x: Array, y: Array, pad_mask: Array, n: int, k:
               optim, opt_state, num_classes: int, keys: List[PRNGKeyArray]):  # noqa: F821
     
     loss, grads = compute_loss(model, x, y, pad_mask, n, k, num_classes, keys)
-    updates, opt_state = optim.update(grads, opt_state, model)
+    updates, opt_state = half_precision(optim.update(grads, opt_state, model))
+    
     model = eqx.apply_updates(model, updates)
+    
     return loss, model, opt_state
 
 class Trainer:
@@ -141,7 +145,7 @@ class Trainer:
         
         # switch to half precision
         if self.bf16:
-            model = jtu.tree_map(lambda x: x.astype(jnp.bfloat16) if eqx.is_inexact_array(x) else x, model)
+            model = half_precision(model)
         
         return optim, opt_state, model
     

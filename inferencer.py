@@ -34,7 +34,7 @@ class Inferencer:
         encoded = [i for i in encoded if i not in [0, 2]]
         return encoded
     
-    def inference(self, my_input: str, num_tokens: int = 64):
+    def inference(self, my_input: str, num_tokens: int = 32):
         model = self.skeleton_model(self.key)
         model = load_eqx_obj(self.checkpoint_path, model)
         

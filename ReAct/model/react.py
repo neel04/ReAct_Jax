@@ -44,11 +44,10 @@ class AttentionBlock(eqx.Module):
     ) -> Float[Array, "num_heads seq_len seq_len"]:
         """Create self-attention mask from sequence-level mask."""
         # merge with pad_mask in the end
-        mask = jnp.ones((self.seqlen, self.seqlen))
+        mask = jnp.ones((self.seqlen, self.seqlen), dtype=jnp.bfloat16)
         mask = jnp.tril(mask)
         mask = jnp.expand_dims(mask, 0)
-        mask = jnp.repeat(mask, self.n_heads, axis=0)
-        return jnp.where(mask * pad_mask > 0.5, True, False)
+        return jnp.repeat(mask, self.n_heads, axis=0)
     
     def _make_mixer_mask(self):
         # Almost same, but we triu instead of tril
@@ -132,7 +131,7 @@ class React(eqx.Module):
     embed_layer: eqx.nn.Embedding
     main_block: LiteAttention
     id: eqx.nn.Identity
-    pos_enc: jax.Array
+    pos_enc: Array
 
     def __init__(self, n_heads: int, seqlen: int, max_iters: int, num_blocks: int, width: int,
                  drop_rate: float, tgt_vocab_size: int, key: PRNGKeyArray):

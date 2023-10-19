@@ -1,11 +1,15 @@
 import os
 
-from functools import partial
 import equinox as eqx
 import jax
 import jax.numpy as jnp
 import torch
+from jax import tree_util as jtu
 from jaxtyping import Array, PRNGKeyArray
+
+
+def half_precision(model: eqx.Module) -> eqx.Module:
+    return jtu.tree_map(lambda x: x.astype(jnp.bfloat16) if eqx.is_inexact_array(x) else x, model)
 
 def save_eqx_obj(save_dir: str, filename: str, obj: tuple):
     if not os.path.exists(save_dir):
@@ -18,9 +22,13 @@ def load_eqx_obj(filepath: str, obj: tuple) -> tuple:
                                        like=obj)
 
 def count_params(model: eqx.Module):
-    num_params = sum(x.size for x in jax.tree_util.tree_leaves(eqx.filter(model, eqx.is_array)))
-    num_millions = num_params / 1_000_000
-    print(f"Model # of parameters: {num_millions:.2f}M")
+    params_fn = lambda model: sum(x.size for x in jax.tree_util.tree_leaves(eqx.filter(model, eqx.is_array)))
+    num_params, non_embed_params = params_fn(model), params_fn(model.main_block)
+    
+    num_params /= 1_000_000
+    non_embed_params /= 1_000_000
+    
+    print(f"\nModel # of parameters: {num_params:.2f}M\n# of recurrent parameters: {non_embed_params:.2f}M\n")
 
 def process_seq(seq):
     return [list(map(jnp.array, subseq)) for subseq in seq]
