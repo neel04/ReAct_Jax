@@ -50,6 +50,15 @@ def get_rand_nums(key: PRNGKeyArray, lower_bound: int, upper_bound: int, bsz: in
     random_numbers = jax.random.randint(key, shape=(bsz,), minval=lower_bound, maxval=upper_bound)
     return random_numbers
 
+
+def inverted_pyramid(arr: Array, max_iters: int):
+    arr_min, arr_max = arr.min(), arr.max()
+    mid = (arr_min + arr_max) / 2
+    base = jnp.arange(1, max_iters)
+    weights = jnp.abs(base - mid)
+    
+    return jnp.clip(weights, 1)
+
 if __name__ == '__main__':
     key = jax.random.PRNGKey(0)
     print(get_rand_nums(key, 0, 2, 10))

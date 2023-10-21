@@ -6,7 +6,7 @@ import jax
 import jax.numpy as jnp
 from jaxtyping import Array, Float, Int, PRNGKeyArray
 
-from .blocks import MLP, LinearProj, LiteAttention, NewGELU, MixerBlock
+from .blocks import MLP, LinearProj, LiteAttention, NewGELU
 
 # ruff: noqa: F722
 class AttentionBlock(eqx.Module):
