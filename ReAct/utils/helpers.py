@@ -52,10 +52,11 @@ def get_rand_nums(key: PRNGKeyArray, lower_bound: int, upper_bound: int, bsz: in
     random_numbers = jax.random.randint(key, shape=(bsz,), minval=lower_bound, maxval=upper_bound)
     return random_numbers
 
+@jax.jit
 def inverted_freq(arr: Array):
     values, counts = jnp.unique(arr, return_counts=True, size=64)
     counts = counts / counts.sum()
-    return 1 / counts[arr - 1]
+    return 1 / jnp.clip(counts[arr - 1], 1.0)
 
 if __name__ == '__main__':
     key = jax.random.PRNGKey(0)
