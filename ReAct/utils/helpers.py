@@ -4,6 +4,8 @@ import equinox as eqx
 import jax
 import jax.numpy as jnp
 import torch
+
+from functools import partial
 from jax import tree_util as jtu
 from jaxtyping import Array, PRNGKeyArray
 
@@ -50,14 +52,10 @@ def get_rand_nums(key: PRNGKeyArray, lower_bound: int, upper_bound: int, bsz: in
     random_numbers = jax.random.randint(key, shape=(bsz,), minval=lower_bound, maxval=upper_bound)
     return random_numbers
 
-
-def inverted_pyramid(arr: Array, max_iters: int):
-    arr_min, arr_max = arr.min(), arr.max()
-    mid = (arr_min + arr_max) / 2
-    base = jnp.arange(1, max_iters)
-    weights = jnp.abs(base - mid)
-    
-    return jnp.clip(weights, 1)
+def inverted_freq(arr: Array):
+    values, counts = jnp.unique(arr, return_counts=True, size=64)
+    counts = counts / counts.sum()
+    return counts[arr - 1]
 
 if __name__ == '__main__':
     key = jax.random.PRNGKey(0)
