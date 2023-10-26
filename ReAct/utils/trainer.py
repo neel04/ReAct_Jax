@@ -196,6 +196,7 @@ class Trainer:
     def train(self, epochs: int, trainloader: DataLoader, valloader: DataLoader, 
               key: PRNGKeyArray):
         
+        step_done = 0
         optim, opt_state, model = self.init_model(key)
         print(f'Model: {model}')
         
@@ -206,7 +207,6 @@ class Trainer:
         
         for epoch in range(epoch_done, epochs):
             # init empty metrics
-            step_done = 0
             train_acc, train_loss, train_ppl = [], [], []
             
             keys = jax.random.split(

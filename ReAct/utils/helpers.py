@@ -52,14 +52,6 @@ def get_rand_nums(key: PRNGKeyArray, lower_bound: int, upper_bound: int, bsz: in
     random_numbers = jax.random.randint(key, shape=(bsz,), minval=lower_bound, maxval=upper_bound)
     return random_numbers
 
-def scale_array(arr, min_val=0, max_val=1):
-    arr_min, arr_max = jnp.min(arr), jnp.max(arr)
-    # You can rewrite this as jnp.where
-    return jax.lax.cond(jnp.all(arr_min == arr_max),
-                        lambda _: jnp.full(arr.shape, min_val),
-                        lambda _: (arr - arr_min) * (max_val - min_val) / (arr_max - arr_min) + min_val,
-                        operand=None)
-
 @jax.jit
 def inverted_freq(arr: Array):
     arr = arr.sort(0)
@@ -71,7 +63,7 @@ def inverted_freq(arr: Array):
     # Replace 0s with any element for scaling to work
     counts = jnp.where(counts == 0, counts[0], counts)
     
-    inv_weights = scale_array((counts.max() / counts), 1.0, 5.0)
+    inv_weights = (counts.max() / counts) / 10 # scale it down
     
     return inv_weights[arr - arr.min()]
 
