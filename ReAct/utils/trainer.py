@@ -53,11 +53,6 @@ def _compute_softmax_cross_entropy_loss(pred_y: Array, y_one_hot: Array, pad_mas
     
     weights = inverted_freq(n + k)
     
-    # if all the weights are same, then don't scale
-    # this is a workaround to avoid NaNs
-    weights = jnp.where(jnp.all(weights == weights[0]), weights, 
-                        (weights - weights.min()) / (weights.max() - weights.min()) * 4 + 1)
-    
     loss = (loss * weights).mean(-1)
     
     return loss.mean() # across all the batches
@@ -287,9 +282,9 @@ class Trainer:
                     self.my_logger.info(f'Validation accuracy: {val_metrics_5[0]} | using {self.max_iters + 5} iterations')
                     self.my_logger.info(f'Cumulative Training accuracy: {cum_train_acc}\n')
                     
-                    self.generate(model, sample_x, max_new_tokens=16)
+                    self.generate(model, sample_x, max_new_tokens=32)
                     self.my_logger.info(f'{"=" * 20}\tVal set prompt:\n')
-                    self.generate(model, val_sample_x, max_new_tokens=16)
+                    self.generate(model, val_sample_x, max_new_tokens=32)
                     
                     if step % self.save_interval == 0:
                         # Save the model 
