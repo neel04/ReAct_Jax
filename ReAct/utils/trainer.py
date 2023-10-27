@@ -51,7 +51,7 @@ def _compute_softmax_cross_entropy_loss(pred_y: Array, y_one_hot: Array, pad_mas
     n = jnp.repeat(n[:, None], loss.shape[1], axis=-1)
     k = jnp.repeat(k[:, None], loss.shape[1], axis=-1)
     
-    weights = inverted_freq(n + k)
+    weights = inverted_freq(k)
     
     loss = (loss * weights).mean(-1)
     
