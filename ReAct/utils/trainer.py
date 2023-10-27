@@ -60,7 +60,7 @@ def make_step(model: eqx.Module, x: Array, y: Array, pad_mask: Array, n: int, k:
               optim, opt_state, num_classes: int, keys: List[PRNGKeyArray]):  # noqa: F821
     
     loss, grads = compute_loss(model, x, y, pad_mask, n, k, num_classes, keys)
-    updates, opt_state = half_precision(optim.update(grads, opt_state, model))
+    updates, opt_state = optim.update(grads, opt_state, model)
     
     model = eqx.apply_updates(model, updates)
     
