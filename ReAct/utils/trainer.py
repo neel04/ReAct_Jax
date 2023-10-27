@@ -10,7 +10,7 @@ from torch.utils.data import DataLoader
 from tqdm.auto import tqdm
 
 from ReAct.model.react import React
-from ReAct.utils.helpers import convert_to_jax, count_params, load_eqx_obj, save_eqx_obj, inverted_freq
+from ReAct.utils.helpers import convert_to_jax, count_params, load_eqx_obj, save_eqx_obj
 from ReAct.utils.logger import UnifiedLogger
 
 from .helpers import get_rand_nums, half_precision
@@ -51,9 +51,7 @@ def _compute_softmax_cross_entropy_loss(pred_y: Array, y_one_hot: Array, pad_mas
     n = jnp.repeat(n[:, None], loss.shape[1], axis=-1)
     k = jnp.repeat(k[:, None], loss.shape[1], axis=-1)
     
-    weights = inverted_freq(k)
-    
-    loss = (loss * weights).mean(-1)
+    loss = (loss * (n + k)).mean(-1)
     
     return loss.mean() # across all the batches
     
