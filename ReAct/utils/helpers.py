@@ -63,7 +63,7 @@ def inverted_freq(arr: Array):
     # Replace 0s with any element for scaling to work
     counts = jnp.where(counts == 0, counts[0], counts)
     
-    inv_weights = (counts.max() / counts) / 10 # scale it down
+    inv_weights = (counts.max() / counts) # scale it down
     
     return inv_weights[arr - arr.min()]
 

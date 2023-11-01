@@ -71,35 +71,68 @@ class AttentionBlock(eqx.Module):
 
         return self.activation(x)
 
+
 class RecurrentModule(eqx.Module):
     '''
-    Bunch of AttentionBlocks
+    Bunch of AttentionBlocks in a U-Net style architecture with long skip connections
     '''
-    gelu: eqx.Module
-    reshape_layer: eqx.Module
-    attention_blocks: list
+    bottleneck_layer: eqx.Module
+    encoder: list
+    decoder: list
 
     def __init__(self, seqlen: int, drop_rate: float, n_heads: int,
-                 num_blocks: int, bottleneck: int, key: PRNGKeyArray):  # noqa: E501
+                 num_blocks: int, bottleneck: int, key: PRNGKeyArray):
         
-        key1, key2 = jax.random.split(key)
+        key1, key2, key3 = jax.random.split(key, 3)
+        num_blocks = num_blocks
+        
+        self.encoder, self.decoder = [], []
+        
+        # Get the schedule of shapes for the encoder and decoder
+        downsampling_shapes = self.layer_shapes_schedule(num_blocks, bottleneck * 2)
+        upsampling_shapes = downsampling_shapes[::-1]
+        upsampling_shapes[-1] = bottleneck // 4
 
-        self.gelu = NewGELU()
-        self.reshape_layer = LinearProj(bottleneck * 2, bottleneck, key=key1)
-
-        self.attention_blocks = [
-            AttentionBlock(seqlen, n_heads, drop_rate, bottleneck * 2, key2)
-        ] * num_blocks
+        # Setting up the layers
+        for dim, next_dim in zip(downsampling_shapes, downsampling_shapes[1:]):
+            self.encoder.extend([
+                AttentionBlock(seqlen, n_heads, drop_rate, dim, key1),
+                LinearProj(dim, next_dim, key=key1),
+                NewGELU()])
+        
+        self.bottleneck_layer = AttentionBlock(seqlen, n_heads, drop_rate, downsampling_shapes[-1], key2)
+        
+        for dim, next_dim in zip(upsampling_shapes, upsampling_shapes[1:]):
+            self.decoder.extend([
+                AttentionBlock(seqlen, n_heads, drop_rate, dim * 2, key3),
+                LinearProj(dim * 2, next_dim * 2, key=key3),
+                NewGELU()])
+    
+    def layer_shapes_schedule(self, num_blocks: int, in_dim: int):
+        return [in_dim // (2 ** i) for i in range(num_blocks)]
 
     def __call__(self, x: Float[Array, ' seqlen in_dim'], pad_mask: Array,
                  key: PRNGKeyArray) -> Float[Array, ' seqlen out_dim']:
         
-        for block in self.attention_blocks:
+        encoder_outs = []
+        
+        for block in self.encoder:
             x = block(x, key, pad_mask)
-
-        # handling recurrence
-        x =  self.gelu(self.reshape_layer(x))
-
+            # Append after attention block
+            encoder_outs.append(x) if isinstance(block, LinearProj) else None
+        
+        x = self.bottleneck_layer(x, key, mask=pad_mask)
+        
+        # reverse the order of encoder outputs for correct pairing in skip connections
+        encoder_outs = encoder_outs[::-1]
+        
+        for block, skip_out in zip(self.decoder, encoder_outs):
+            # concatenate the skip connection output before passing to the block
+            if isinstance(block, AttentionBlock):
+                x = jnp.concatenate([x, skip_out], axis=-1)
+                
+            x = block(x, key, pad_mask)
+        
         return x
 
 class output_head(eqx.Module):

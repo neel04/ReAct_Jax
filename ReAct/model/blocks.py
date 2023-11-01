@@ -4,14 +4,12 @@ from typing import Optional
 import equinox as eqx
 import jax
 import jax.numpy as jnp
-from einops import reduce
-from icecream import ic
 from jaxtyping import Array, BFloat16, PRNGKeyArray
 
 # ruff: noqa: F722
 
 class NewGELU(eqx.Module):
-    def __call__(self, x: jax.Array) -> jax.Array:
+    def __call__(self, x: jax.Array, *args) -> jax.Array:
         c: float = math.sqrt(2.0 / math.pi)
         a: float = 0.044715
         return 0.5 * x * (1.0 + jax.nn.tanh(c * (x + a * jnp.power(x, 3.0))))
@@ -62,9 +60,10 @@ class LinearProj(eqx.Module):
         else:
             self.bias = jnp.zeros((output_dim,))
     
-    def __call__(self, input: BFloat16[Array, 'batch in_dim'], mask: Optional[Array] = None, *args):
-        mask = jnp.ones_like(self.weight) if mask is None else mask
-        output = input @ (self.weight * mask.astype(input.dtype)) + self.bias
+    def __call__(self, input: BFloat16[Array, 'batch in_dim'], *args):
+        #mask = jnp.ones_like(self.weight) if mask is None else mask
+        #output = input @ (self.weight * mask.astype(input.dtype)) + self.bias
+        output = input @ self.weight + self.bias
         return output
 
 class LiteAttention(eqx.Module):

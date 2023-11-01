@@ -53,7 +53,7 @@ def _compute_softmax_cross_entropy_loss(pred_y: Array, y_one_hot: Array, pad_mas
     
     weights = inverted_freq(n + k)
     
-    loss = (loss * weights).mean(-1)
+    loss = (loss * weights).mean(-1) # across the sequence
     
     return loss.mean() # across all the batches
     
@@ -124,7 +124,7 @@ class Trainer:
         total_steps = self.epochs * self.dataset_length // self.batch_size
         
         schedule_fn = optax.warmup_cosine_decay_schedule(self.lr, self.lr * 2, self.warmup_steps,
-                                                         total_steps, self.lr // 20)
+                                                         total_steps, self.lr // 15)
 
         # AdamW optimizer with weight decay
         optim = optax.chain(
