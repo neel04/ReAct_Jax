@@ -91,8 +91,10 @@ class RecurrentModule(eqx.Module):
         # Get the schedule of shapes for the encoder and decoder
         downsampling_shapes = self.layer_shapes_schedule(num_blocks, bottleneck * 2)
         upsampling_shapes = downsampling_shapes[::-1]
-        upsampling_shapes[-1] = bottleneck // 4
-
+        upsampling_shapes[-1] = bottleneck // 2
+        # multply all elements except the first by 2
+        upsampling_shapes = [upsampling_shapes[0]] + [i * 2 for i in upsampling_shapes[1:]]
+        
         # Setting up the layers
         for dim, next_dim in zip(downsampling_shapes, downsampling_shapes[1:]):
             self.encoder.extend([
@@ -102,10 +104,12 @@ class RecurrentModule(eqx.Module):
         
         self.bottleneck_layer = AttentionBlock(seqlen, n_heads, drop_rate, downsampling_shapes[-1], key2)
         
-        for dim, next_dim in zip(upsampling_shapes, upsampling_shapes[1:]):
+        for idx, (dim, next_dim) in enumerate(zip(upsampling_shapes, upsampling_shapes[1:])):
+            # We incorporate shapes from downsampling_shapes for the skip connections
+            src_dim, tgt_dim = dim + downsampling_shapes[::-1][idx], next_dim
             self.decoder.extend([
-                AttentionBlock(seqlen, n_heads, drop_rate, dim * 2, key3),
-                LinearProj(dim * 2, next_dim * 2, key=key3),
+                AttentionBlock(seqlen, n_heads, drop_rate, src_dim, key3),
+                LinearProj(src_dim, tgt_dim, key=key3),
                 NewGELU()])
     
     def layer_shapes_schedule(self, num_blocks: int, in_dim: int):
@@ -119,16 +123,17 @@ class RecurrentModule(eqx.Module):
         for block in self.encoder:
             x = block(x, key, pad_mask)
             # Append after attention block
-            encoder_outs.append(x) if isinstance(block, LinearProj) else None
+            encoder_outs.append(x) if isinstance(block, NewGELU) else None
         
         x = self.bottleneck_layer(x, key, mask=pad_mask)
         
         # reverse the order of encoder outputs for correct pairing in skip connections
         encoder_outs = encoder_outs[::-1]
         
-        for block, skip_out in zip(self.decoder, encoder_outs):
+        for idx, block in enumerate(self.decoder):
             # concatenate the skip connection output before passing to the block
             if isinstance(block, AttentionBlock):
+                skip_out = encoder_outs[idx // 3]
                 x = jnp.concatenate([x, skip_out], axis=-1)
                 
             x = block(x, key, pad_mask)
