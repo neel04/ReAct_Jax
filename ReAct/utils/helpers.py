@@ -5,9 +5,9 @@ import jax
 import jax.numpy as jnp
 import torch
 
-from functools import partial
 from jax import tree_util as jtu
 from jaxtyping import Array, PRNGKeyArray
+from typing import Optional
 
 
 def half_precision(model: eqx.Module) -> eqx.Module:
@@ -48,9 +48,13 @@ def convert_to_jax(x: torch.Tensor) -> Array:
     else:
         return jnp.array(x)
 
-def get_rand_nums(key: PRNGKeyArray, lower_bound: int, upper_bound: int, bsz: int) -> Array:
-    random_numbers = jax.random.randint(key, shape=(bsz,), minval=lower_bound, maxval=upper_bound)
-    return random_numbers
+def get_rand_nums(key: PRNGKeyArray, lower_bound: int, upper_bound: int, bsz: int, bias_val: Optional[int] = None) -> Array:
+    dist = jnp.clip(jax.random.normal(key, (bsz,)) * (bias_val ** .5) + bias_val + 1, lower_bound, upper_bound)
+    
+    if bias_val is None:
+        dist = jax.random.randint(key, shape=(bsz,), minval=lower_bound, maxval=upper_bound)
+        
+    return dist.astype(int)
 
 @jax.jit
 def inverted_freq(arr: Array):
@@ -68,5 +72,12 @@ def inverted_freq(arr: Array):
     return inv_weights[arr - arr.min()]
 
 if __name__ == '__main__':
+    import plotly.express as px
+    import pandas as pd
+    
     key = jax.random.PRNGKey(0)
-    print(get_rand_nums(key, 0, 2, 10))
+    out: Array = get_rand_nums(key, 1, 10, 512, 4)
+    elems, counts = jnp.unique(out, return_counts=True)
+    df = pd.DataFrame({'elems': elems, 'counts': counts})
+    fig = px.bar(df, x='elems', y='counts')
+    fig.show()

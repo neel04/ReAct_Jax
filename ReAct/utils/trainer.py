@@ -1,5 +1,5 @@
 import os
-from typing import Any, Callable, List, Tuple
+from typing import Any, Callable, List, Tuple, Optional
 
 import equinox as eqx
 import jax
@@ -88,12 +88,16 @@ class Trainer:
         for k, v in vars(args).items():
                 setattr(self, k, v)        
     
-    def get_n_k(self, key: PRNGKeyArray) -> Tuple[Array, Array]:
+    def get_n_k(self, key: PRNGKeyArray, bias_val: Optional[int] = None) -> Tuple[Array, Array]:
         n_key, k_key = jax.random.split(key, 2)
         
-        rndm_n = get_rand_nums(n_key, 0, self.max_iters, self.batch_size)
+        rndm_n = get_rand_nums(n_key, 0, self.max_iters, self.batch_size, bias_val)
         rndm_k = get_rand_nums(k_key, jnp.ones(self.batch_size), 
-                               self.max_iters - rndm_n + 1, self.batch_size)
+                               self.max_iters - rndm_n + 1, self.batch_size,
+                               bias_val)
+        
+        rndm_n, rndm_k = jnp.clip(rndm_n, 1, self.max_iters), jnp.clip(rndm_k, 1, self.max_iters)
+        rndm_n, rndm_k = rndm_n.astype(int), rndm_k.astype(int)
         
         return rndm_n, rndm_k
 
@@ -207,17 +211,22 @@ class Trainer:
         
         for epoch in range(epoch_done, epochs):
             # init empty metrics
+            epoch_key = jnp.array([epoch, epoch + 1]).astype(jnp.uint32)
             train_acc, train_loss, train_ppl = [], [], []
             
             keys = jax.random.split(
                 jnp.array([epoch, epoch + 1]).astype(jnp.uint32),
                 self.batch_size)
             
-            rndm_n, rndm_k = self.get_n_k(
-                key=jnp.array([epoch, epoch + 1]).astype(jnp.uint32),
-                )
+            n_k_bias_schedule = jnp.linspace(1, self.max_iters, self.dataset_length // self.batch_size)
             
             for step, batch in tqdm(enumerate(trainloader)):
+                # n k bias schedule
+                rndm_n, rndm_k = self.get_n_k(
+                    key=epoch_key,
+                    bias_val=n_k_bias_schedule[step]
+                )
+                
                 step += step_done # for multiple epochs
                 
                 batch = self.mask_fn(batch)
@@ -227,7 +236,7 @@ class Trainer:
                 loss, model, opt_state = make_step(model, seq, label, pad_mask, rndm_n, rndm_k,
                                                    optim, opt_state, self.num_classes, keys)
                 
-                accuracy, loss, perplexity = self.compute_metrics(model, (seq, label, pad_mask),
+                accuracy, _, perplexity = self.compute_metrics(model, (seq, label, pad_mask),
                                                                   self.max_iters, keys)
                 
                 train_acc.append(accuracy)
