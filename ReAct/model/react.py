@@ -6,7 +6,7 @@ import jax
 import jax.numpy as jnp
 from jaxtyping import Array, Float, Int, PRNGKeyArray
 
-from .blocks import MLP, LinearProj, LiteAttention, NewGELU
+from .blocks import MLP, LinearProj, LiteAttention, NewGELU, MixerBlock
 
 # ruff: noqa: F722
 class AttentionBlock(eqx.Module):
@@ -28,11 +28,11 @@ class AttentionBlock(eqx.Module):
         self.seqlen = seqlen
         self.n_heads = n_heads
 
-        #self.attn_gate = LiteAttention(seqlen, key1) #TODO: Repace seq_len with bottleneck
-        self.attn_gate = eqx.nn.MultiheadAttention(num_heads=n_heads, query_size=bottleneck,
-                                                   use_query_bias=True, use_key_bias=True,
-                                                   use_value_bias=True, use_output_bias=True, 
-                                                   dropout_p=drop_rate, key=key1)
+        #self.attn_gate = eqx.nn.MultiheadAttention(num_heads=n_heads, query_size=bottleneck,
+                                                   #use_query_bias=True, use_key_bias=True,
+                                                   #use_value_bias=True, use_output_bias=True, 
+                                                   #dropout_p=drop_rate, key=key1)
+        self.attn_gate = MixerBlock(bottleneck, seqlen, drop_rate, key1)
 
         self.ln1 = eqx.nn.LayerNorm(bottleneck)
         self.ln2 = eqx.nn.LayerNorm(bottleneck)
@@ -53,7 +53,7 @@ class AttentionBlock(eqx.Module):
         # Almost same, but we triu instead of tril
         # and we don't need to merge with pad_mask
         mask = jnp.ones((self.seqlen, self.seqlen))
-        mask = jnp.triu(mask)
+        mask = jnp.tril(mask)
         
         return mask
 
@@ -62,9 +62,10 @@ class AttentionBlock(eqx.Module):
         mask = jnp.zeros_like(x) if mask is None else mask
         x = jax.vmap(self.ln1)(x)
         
-        x += self.attn_gate(x, x, x,
-                            mask=self._make_self_attention_mask(mask),
-                            key=key, inference=False)
+        #x += self.attn_gate(x, x, x,
+                            #mask=self._make_self_attention_mask(mask),
+                            #key=key, inference=False)
+        x += self.attn_gate(x, mask=self._make_mixer_mask(), key=key)
         
         x = jax.vmap(self.ln2)(x)
         x += self.mlp(x, key=key)
