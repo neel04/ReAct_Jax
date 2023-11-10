@@ -60,10 +60,11 @@ class LinearProj(eqx.Module):
         else:
             self.bias = jnp.zeros((output_dim,))
     
-    def __call__(self, input: BFloat16[Array, 'batch in_dim'], *args):
-        #mask = jnp.ones_like(self.weight) if mask is None else mask
-        #output = input @ (self.weight * mask.astype(input.dtype)) + self.bias
-        output = input @ self.weight + self.bias
+    def __call__(self, input: BFloat16[Array, 'batch in_dim'], **kwargs):
+        mask = kwargs.get('mask', None)
+        mask = jnp.ones_like(self.weight) if mask is None else mask
+        output = input @ (self.weight * mask.astype(input.dtype)) + self.bias
+        #output = input @ self.weight + self.bias
         return output
 
 class LiteAttention(eqx.Module):
@@ -102,8 +103,8 @@ class MixerBlock(eqx.Module):
   
     def __call__(self, x: BFloat16[Array, 'seqlen in_dim'], mask: Array, key: PRNGKeyArray):
         arr = x.T
-        arr = self.act_1(self.token_mixer(arr, mask, key))
-        arr = arr.T
+        arr = self.act_1(self.token_mixer(arr, key=key, mask=mask))
+        arr = self.norm(arr.T)
         x = x + arr
         return x + self.act_2(self.channel_mixer(arr, key))
     

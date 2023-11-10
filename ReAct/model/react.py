@@ -14,6 +14,7 @@ class AttentionBlock(eqx.Module):
 
     seqlen: int = eqx.field(static=True)
     n_heads: int = eqx.field(static=True)
+    bottleneck: int = eqx.field(static=True)
     
     activation: eqx.Module
     attn_gate: eqx.Module
@@ -27,17 +28,18 @@ class AttentionBlock(eqx.Module):
         self.activation = NewGELU()
         self.seqlen = seqlen
         self.n_heads = n_heads
+        self.bottleneck = bottleneck
 
         #self.attn_gate = eqx.nn.MultiheadAttention(num_heads=n_heads, query_size=bottleneck,
                                                    #use_query_bias=True, use_key_bias=True,
                                                    #use_value_bias=True, use_output_bias=True, 
                                                    #dropout_p=drop_rate, key=key1)
-        self.attn_gate = MixerBlock(bottleneck, seqlen, drop_rate, key1)
+        self.attn_gate = MixerBlock(self.bottleneck, seqlen, drop_rate, key1)
 
-        self.ln1 = eqx.nn.LayerNorm(bottleneck)
-        self.ln2 = eqx.nn.LayerNorm(bottleneck)
+        self.ln1 = eqx.nn.LayerNorm(self.bottleneck)
+        self.ln2 = eqx.nn.LayerNorm(self.bottleneck)
 
-        self.mlp = MLP(bottleneck, bottleneck, drop_rate, key2)
+        self.mlp = MLP(self.bottleneck, self.bottleneck, drop_rate, key2)
 
     def _make_self_attention_mask(
         self, pad_mask: Int[Array, " seq_len"]
@@ -49,11 +51,11 @@ class AttentionBlock(eqx.Module):
         mask = jnp.expand_dims(mask, 0)
         return jnp.repeat(mask, self.n_heads, axis=0)
     
-    def _make_mixer_mask(self):
+    def _make_mixer_mask(self, pad_mask: Array):
         # Almost same, but we triu instead of tril
         # and we don't need to merge with pad_mask
-        mask = jnp.ones((self.seqlen, self.seqlen))
-        mask = jnp.tril(mask)
+        mask = jnp.ones((self.seqlen, self.seqlen)) * pad_mask
+        mask = jnp.triu(mask)
         
         return mask
 
@@ -65,7 +67,7 @@ class AttentionBlock(eqx.Module):
         #x += self.attn_gate(x, x, x,
                             #mask=self._make_self_attention_mask(mask),
                             #key=key, inference=False)
-        x += self.attn_gate(x, mask=self._make_mixer_mask(), key=key)
+        x += self.attn_gate(x, mask=self._make_mixer_mask(mask), key=key)
         
         x = jax.vmap(self.ln2)(x)
         x += self.mlp(x, key=key)
@@ -120,13 +122,14 @@ class RecurrentModule(eqx.Module):
                  key: PRNGKeyArray) -> Float[Array, ' seqlen out_dim']:
         
         encoder_outs = []
+        eqx.nn.MultiheadAttention
         
         for block in self.encoder:
-            x = block(x, key, pad_mask)
+            x = block(x, key=key, mask=pad_mask) if isinstance(block, AttentionBlock) else block(x)
             # Append after attention block
             encoder_outs.append(x) if isinstance(block, NewGELU) else None
         
-        x = self.bottleneck_layer(x, key, mask=pad_mask)
+        x = self.bottleneck_layer(x, key, pad_mask)
         
         # reverse the order of encoder outputs for correct pairing in skip connections
         encoder_outs = encoder_outs[::-1]
@@ -137,7 +140,7 @@ class RecurrentModule(eqx.Module):
                 skip_out = encoder_outs[idx // 3]
                 x = jnp.concatenate([x, skip_out], axis=-1)
                 
-            x = block(x, key, pad_mask)
+            x = block(x, key=key, mask=pad_mask) if isinstance(block, AttentionBlock) else block(x)
         
         return x
 
