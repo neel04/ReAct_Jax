@@ -268,17 +268,16 @@ class Trainer:
                     
                     self.wandb_logger.log(
                         {
-                            f'Train/acc_{self.max_iters}': cum_train_acc,
-                            f'Train/cum_loss_{self.max_iters}': cum_train_loss,
-                            f'Train/ppl_{self.max_iters}': cum_train_ppl,
-                            f'Val/acc_{self.max_iters + 5}': val_metrics_5[0],
-                            f'Val/loss_{self.max_iters + 5}': val_metrics_5[1],
-                            f'Val/ppl_{self.max_iters + 5}': val_metrics_5[2],
-                            f'Val/acc_{self.max_iters}': val_metrics[0],
-                            f'Val/loss_{self.max_iters}': val_metrics[1],
-                            f'Val/ppl_{self.max_iters}': val_metrics[2],
+                            'Train/acc': cum_train_acc,
+                            'Train/cum_loss': cum_train_loss,
+                            'Train/ppl': cum_train_ppl,
+                            'Val/acc_5': val_metrics_5[0],
+                            'Val/loss_5': val_metrics_5[1],
+                            'Val/ppl_5': val_metrics_5[2],
+                            'Val/acc': val_metrics[0],
+                            'Val/loss': val_metrics[1],
+                            'Val/ppl': val_metrics[2],
                         },
-                        
                         step=step
                     )
                     
