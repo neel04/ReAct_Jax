@@ -218,13 +218,10 @@ class Trainer:
                 jnp.array([epoch, epoch + 1]).astype(jnp.uint32),
                 self.batch_size)
             
-            n_k_bias_schedule = jnp.linspace(1, self.max_iters, self.dataset_length // self.batch_size)
-            
             for step, batch in tqdm(enumerate(trainloader)):
                 # n k bias schedule
                 rndm_n, rndm_k = self.get_n_k(
-                    key=epoch_key,
-                    bias_val=n_k_bias_schedule[step]
+                    key=epoch_key
                 )
                 
                 step += step_done # for multiple epochs

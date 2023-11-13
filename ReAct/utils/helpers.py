@@ -49,10 +49,10 @@ def convert_to_jax(x: torch.Tensor) -> Array:
         return jnp.array(x)
 
 def get_rand_nums(key: PRNGKeyArray, lower_bound: int, upper_bound: int, bsz: int, bias_val: Optional[int] = None) -> Array:
-    dist = jnp.clip(jax.random.normal(key, (bsz,)) * (bias_val ** .5) + bias_val + 1, lower_bound, upper_bound)
-    
     if bias_val is None:
         dist = jax.random.randint(key, shape=(bsz,), minval=lower_bound, maxval=upper_bound)
+    else:
+        dist = jnp.clip(jax.random.normal(key, (bsz,)) * (bias_val ** .5) + bias_val + 1, lower_bound, upper_bound)
         
     return dist.astype(int)
 
