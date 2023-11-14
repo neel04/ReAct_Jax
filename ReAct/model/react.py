@@ -30,11 +30,11 @@ class AttentionBlock(eqx.Module):
         self.n_heads = n_heads
         self.bottleneck = bottleneck
 
-        #self.attn_gate = eqx.nn.MultiheadAttention(num_heads=n_heads, query_size=bottleneck,
-                                                   #use_query_bias=True, use_key_bias=True,
-                                                   #use_value_bias=True, use_output_bias=True, 
-                                                   #dropout_p=drop_rate, key=key1)
-        self.attn_gate = MixerBlock(self.bottleneck, seqlen, drop_rate, key1)
+        self.attn_gate = eqx.nn.MultiheadAttention(num_heads=n_heads, query_size=bottleneck,
+                                                   use_query_bias=True, use_key_bias=True,
+                                                   use_value_bias=True, use_output_bias=True, 
+                                                   dropout_p=drop_rate, key=key1)
+        #self.attn_gate = MixerBlock(self.bottleneck, seqlen, drop_rate, key1)
 
         self.ln1 = eqx.nn.LayerNorm(self.bottleneck)
         self.ln2 = eqx.nn.LayerNorm(self.bottleneck)
@@ -64,10 +64,10 @@ class AttentionBlock(eqx.Module):
         mask = jnp.zeros_like(x) if mask is None else mask
         x = jax.vmap(self.ln1)(x)
         
-        #x += self.attn_gate(x, x, x,
-                            #mask=self._make_self_attention_mask(mask),
-                            #key=key, inference=False)
-        x += self.attn_gate(x, mask=self._make_mixer_mask(mask), key=key)
+        x += self.attn_gate(x, x, x,
+                            mask=self._make_self_attention_mask(mask),
+                            key=key, inference=False)
+        #x += self.attn_gate(x, mask=self._make_mixer_mask(mask), key=key)
         
         x = jax.vmap(self.ln2)(x)
         x += self.mlp(x, key=key)
@@ -171,7 +171,6 @@ class React(eqx.Module):
     input_act: eqx.Module
     out_head: eqx.Module
     embed_layer: eqx.nn.Embedding
-    time_emb: eqx.nn.Embedding
     main_block: LiteAttention
     id: eqx.nn.Identity
     pos_enc: Array
@@ -191,7 +190,6 @@ class React(eqx.Module):
         drop_rate: float = drop_rate
 
         self.embed_layer = eqx.nn.Embedding(src_vocab_size, self.embed_dim, key=key1)
-        self.time_emb = eqx.nn.Embedding(max_iters, self.embed_dim, key=key2)
         self.input_proj = LinearProj(self.bottleneck, self.bottleneck, key=key2)
         self.input_act = NewGELU()
 
@@ -226,9 +224,8 @@ class React(eqx.Module):
             return jax.lax.cond(i <= iters_to_do, iterate, Identity, i, carry)
 
         def iterate(i: int, carry: Tuple[Array]) -> Array:
-            timestep = jax.lax.stop_gradient(self.time_emb(i))
             # carry[0] -> interim_thought, carry[1] -> mask
-            interim_thought = jnp.concatenate([carry[0], x + timestep], 1)
+            interim_thought = jnp.concatenate([carry[0], x], 1)
             return self.main_block(interim_thought, carry[1], key), carry[1]
 
         def Identity(i: int, carry: Array) -> Array:
