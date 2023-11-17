@@ -172,7 +172,6 @@ class React(eqx.Module):
     out_head: eqx.Module
     embed_layer: eqx.nn.Embedding
     main_block: LiteAttention
-    id: eqx.nn.Identity
     pos_enc: Array
 
     def __init__(self, n_heads: int, seqlen: int, max_iters: int, num_blocks: int, width: int,
@@ -196,7 +195,6 @@ class React(eqx.Module):
         self.pos_enc = jax.lax.stop_gradient(self.positional_encoding(self.SEQLEN, self.bottleneck))
 
         self.main_block = RecurrentModule(seqlen, drop_rate, n_heads, num_blocks, self.bottleneck, key=key2)
-        self.id = eqx.nn.Identity()
 
         self.out_head = output_head(self.bottleneck, tgt_vocab_size, self.SEQLEN, key=key4)
     
@@ -229,7 +227,7 @@ class React(eqx.Module):
             return self.main_block(interim_thought, carry[1], key), carry[1]
 
         def Identity(i: int, carry: Array) -> Array:
-            return self.id(carry[0]), self.id(carry[1])
+            return carry[0], carry[1]
 
         final_interim_thought = jax.lax.fori_loop(1, self.max_iters, main, (interim_thought, mask))  # noqa: E501
         return final_interim_thought
