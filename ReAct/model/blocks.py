@@ -64,7 +64,6 @@ class LinearProj(eqx.Module):
         mask = kwargs.get('mask', None)
         mask = jnp.ones_like(self.weight) if mask is None else mask
         output = input @ (self.weight * mask.astype(input.dtype)) + self.bias
-        #output = input @ self.weight + self.bias
         return output
 
 class LiteAttention(eqx.Module):

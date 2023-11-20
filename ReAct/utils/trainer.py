@@ -20,14 +20,14 @@ from .helpers import get_rand_nums, half_precision
 @jax.jit
 def n_k_loop(model: eqx.Module, input_arr: Array, pad_mask: Array, n: int, k: int, key: PRNGKeyArray) -> Array:
     # forward pass the model without tracking grads
-    output, intermediate_array = model(
-        jax.lax.stop_gradient(input_arr), n,
-        pad_mask=pad_mask, prev_thought=None, key=key)
+    #output, intermediate_array = model(
+        #jax.lax.stop_gradient(input_arr), n,
+        #pad_mask=pad_mask, prev_thought=None, key=key)
     
-    output, intermediate_array = jax.lax.stop_gradient(output), jax.lax.stop_gradient(intermediate_array)
+    #output, intermediate_array = jax.lax.stop_gradient(output), jax.lax.stop_gradient(intermediate_array)
     
     # n-k passes, but track the gradient this time
-    output, _ = model(input_arr, k, pad_mask=pad_mask, prev_thought=intermediate_array, key=key)
+    output, _ = model(input_arr, 1, pad_mask=pad_mask, prev_thought=intermediate_array, key=key)
 
     return output
 
@@ -95,6 +95,9 @@ class Trainer:
         rndm_k = get_rand_nums(k_key, jnp.ones(self.batch_size), 
                                self.max_iters - rndm_n + 1, self.batch_size,
                                bias_val)
+        
+        rndm_k = jnp.ones_like(rndm_n)
+        rndm_n = rndm_k
         
         rndm_n, rndm_k = jnp.clip(rndm_n, 1, self.max_iters), jnp.clip(rndm_k, 1, self.max_iters)
         rndm_n, rndm_k = rndm_n.astype(int), rndm_k.astype(int)
@@ -304,7 +307,7 @@ class Trainer:
                 
         return loss, model, opt_state
     
-    def generate(self, model: eqx.Module, input_arr: Array, max_new_tokens: int, temperature: float = 0.25):
+    def generate(self, model: eqx.Module, input_arr: Array, max_new_tokens: int, temperature: float = 0.35):
         '''
         Take a conditioning sequence , call output_head to obtain a prediction
         and autoregressively complete the sequence max_new_tokens times.
