@@ -16,7 +16,6 @@ class AttentionBlock(eqx.Module):
     n_heads: int = eqx.field(static=True)
     bottleneck: int = eqx.field(static=True)
     
-    activation: eqx.Module
     attn_gate: eqx.Module
     ln1: eqx.Module
     ln2: eqx.Module
@@ -25,7 +24,6 @@ class AttentionBlock(eqx.Module):
     def __init__(self, seqlen: int, n_heads: int, drop_rate: float, bottleneck: int, key: PRNGKeyArray):
         key1, key2 = jax.random.split(key, 2)
 
-        self.activation = NewGELU()
         self.seqlen = seqlen
         self.n_heads = n_heads
         self.bottleneck = bottleneck
@@ -72,76 +70,35 @@ class AttentionBlock(eqx.Module):
         x = jax.vmap(self.ln2)(x)
         x += self.mlp(x, key=key)
 
-        return self.activation(x)
-
+        return x
 
 class RecurrentModule(eqx.Module):
     '''
-    Bunch of AttentionBlocks in a U-Net style architecture with long skip connections
+    Bunch of AttentionBlocks
     '''
-    bottleneck_layer: eqx.Module
-    encoder: list
-    decoder: list
+    reshape_layer: eqx.Module
+    attention_blocks: list
 
     def __init__(self, seqlen: int, drop_rate: float, n_heads: int,
-                 num_blocks: int, bottleneck: int, key: PRNGKeyArray):
+                 num_blocks: int, bottleneck: int, key: PRNGKeyArray):  # noqa: E501
         
-        key1, key2, key3 = jax.random.split(key, 3)
-        num_blocks = num_blocks
-        
-        self.encoder, self.decoder = [], []
-        
-        # Get the schedule of shapes for the encoder and decoder
-        downsampling_shapes = self.layer_shapes_schedule(num_blocks, bottleneck * 2)
-        upsampling_shapes = downsampling_shapes[::-1]
-        upsampling_shapes[-1] = bottleneck // 2
-        # multply all elements except the first by 2
-        upsampling_shapes = [upsampling_shapes[0]] + [i * 2 for i in upsampling_shapes[1:]]
-        
-        # Setting up the layers
-        for dim, next_dim in zip(downsampling_shapes, downsampling_shapes[1:]):
-            self.encoder.extend([
-                AttentionBlock(seqlen, n_heads, drop_rate, dim, key1),
-                LinearProj(dim, next_dim, key=key1),
-                NewGELU()])
-        
-        self.bottleneck_layer = AttentionBlock(seqlen, n_heads, drop_rate, downsampling_shapes[-1], key2)
-        
-        for idx, (dim, next_dim) in enumerate(zip(upsampling_shapes, upsampling_shapes[1:])):
-            # We incorporate shapes from downsampling_shapes for the skip connections
-            src_dim, tgt_dim = dim + downsampling_shapes[::-1][idx], next_dim
-            self.decoder.extend([
-                AttentionBlock(seqlen, n_heads, drop_rate, src_dim, key3),
-                LinearProj(src_dim, tgt_dim, key=key3),
-                NewGELU()])
-    
-    def layer_shapes_schedule(self, num_blocks: int, in_dim: int):
-        return [in_dim // (2 ** i) for i in range(num_blocks)]
+        key1, key2 = jax.random.split(key)
+
+        self.reshape_layer = LinearProj(bottleneck * 2, bottleneck, key=key1)
+
+        self.attention_blocks = [
+            AttentionBlock(seqlen, n_heads, drop_rate, bottleneck * 2, key2)
+        ] * num_blocks
 
     def __call__(self, x: Float[Array, ' seqlen in_dim'], pad_mask: Array,
                  key: PRNGKeyArray) -> Float[Array, ' seqlen out_dim']:
         
-        encoder_outs = []
-        eqx.nn.MultiheadAttention
-        
-        for block in self.encoder:
-            x = block(x, key=key, mask=pad_mask) if isinstance(block, AttentionBlock) else block(x)
-            # Append after attention block
-            encoder_outs.append(x) if isinstance(block, NewGELU) else None
-        
-        x = self.bottleneck_layer(x, key, pad_mask)
-        
-        # reverse the order of encoder outputs for correct pairing in skip connections
-        encoder_outs = encoder_outs[::-1]
-        
-        for idx, block in enumerate(self.decoder):
-            # concatenate the skip connection output before passing to the block
-            if isinstance(block, AttentionBlock):
-                skip_out = encoder_outs[idx // 3]
-                x = jnp.concatenate([x, skip_out], axis=-1)
-                
-            x = block(x, key=key, mask=pad_mask) if isinstance(block, AttentionBlock) else block(x)
-        
+        for block in self.attention_blocks:
+            x = block(x, key, pad_mask)
+
+        # handling recurrence
+        x =  self.reshape_layer(x)
+
         return x
 
 class output_head(eqx.Module):
@@ -149,15 +106,12 @@ class output_head(eqx.Module):
     Output head for the model
     '''
     out_proj: eqx.Module
-    act: eqx.Module
 
     def __init__(self, bottleneck: int, tgt_vocab_size: int, seq_len: int, key: PRNGKeyArray):
-        # Progessively increasing the dimensionality of the output
         self.out_proj = LinearProj(bottleneck, tgt_vocab_size, key=key)
-        self.act = NewGELU()
 
     def __call__(self, x: Array) -> Array:
-        x = self.act(self.out_proj(x)) # (batch, seqlen, tgt_vocab_size)
+        x = self.out_proj(x) # (batch, seqlen, tgt_vocab_size)
         
         return x
 
@@ -168,7 +122,6 @@ class React(eqx.Module):
     embed_dim: int = eqx.field(static=True)
 
     input_proj: eqx.Module
-    input_act: eqx.Module
     out_head: eqx.Module
     embed_layer: eqx.nn.Embedding
     main_block: LiteAttention
@@ -190,7 +143,6 @@ class React(eqx.Module):
 
         self.embed_layer = eqx.nn.Embedding(src_vocab_size, self.embed_dim, key=key1)
         self.input_proj = LinearProj(self.bottleneck, self.bottleneck, key=key2)
-        self.input_act = NewGELU()
 
         self.pos_enc = jax.lax.stop_gradient(self.positional_encoding(self.SEQLEN, self.bottleneck))
 
@@ -239,7 +191,7 @@ class React(eqx.Module):
         
         x = jax.vmap(self.embed_layer)(input.astype(jnp.int32)) + self.pos_enc # (batch, seqlen, embed_dim
         
-        interim_thought = self.input_act(self.input_proj(x.astype(jnp.bfloat16))) # (batch, seqlen, bottleneck)
+        interim_thought = self.input_proj(x.astype(jnp.bfloat16)) # (batch, seqlen, bottleneck)
 
         if isinstance(prev_thought, Array):
             interim_thought = prev_thought
