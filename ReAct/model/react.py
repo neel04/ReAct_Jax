@@ -76,7 +76,6 @@ class RecurrentModule(eqx.Module):
     '''
     Bunch of AttentionBlocks
     '''
-    reshape_layer: eqx.Module
     attention_blocks: list
 
     def __init__(self, seqlen: int, drop_rate: float, n_heads: int,
@@ -84,10 +83,8 @@ class RecurrentModule(eqx.Module):
         
         key1, key2 = jax.random.split(key)
 
-        self.reshape_layer = LinearProj(bottleneck * 2, bottleneck, key=key1)
-
         self.attention_blocks = [
-            AttentionBlock(seqlen, n_heads, drop_rate, bottleneck * 2, key2)
+            AttentionBlock(seqlen, n_heads, drop_rate, bottleneck, key2)
         ] * num_blocks
 
     def __call__(self, x: Float[Array, ' seqlen in_dim'], pad_mask: Array,
@@ -95,9 +92,6 @@ class RecurrentModule(eqx.Module):
         
         for block in self.attention_blocks:
             x = block(x, key, pad_mask)
-
-        # handling recurrence
-        x =  self.reshape_layer(x)
 
         return x
 
@@ -170,19 +164,20 @@ class React(eqx.Module):
     def iterate_for_steps(self, interim_thought: Array, mask: Array, iters_to_do: int, x: Array,
                           key: PRNGKeyArray) -> Array:
         
-        def main(i: int, carry: Tuple[Array]) -> Array:
-            return jax.lax.cond(i <= iters_to_do, iterate, Identity, i, carry)
+        #def main(i: int, carry: Tuple[Array]) -> Array:
+            #return jax.lax.cond(i <= iters_to_do, iterate, Identity, i, carry)
 
-        def iterate(i: int, carry: Tuple[Array]) -> Array:
-            # carry[0] -> interim_thought, carry[1] -> mask
-            interim_thought = jnp.concatenate([carry[0], x], 1)
-            return self.main_block(interim_thought, carry[1], key), carry[1]
+        #def iterate(i: int, carry: Tuple[Array]) -> Array:
+            ## carry[0] -> interim_thought, carry[1] -> mask
+            #interim_thought = jnp.concatenate([carry[0], x], 1)
+            #return self.main_block(interim_thought, carry[1], key), carry[1]
 
-        def Identity(i: int, carry: Array) -> Array:
-            return carry[0], carry[1]
+        #def Identity(i: int, carry: Array) -> Array:
+            #return carry[0], carry[1]
 
-        final_interim_thought = jax.lax.fori_loop(1, self.max_iters, main, (interim_thought, mask))  # noqa: E501
-        return final_interim_thought
+        #final_interim_thought = jax.lax.fori_loop(1, self.max_iters, main, (interim_thought, mask))  # noqa: E501
+        final_interim_thought = self.main_block(interim_thought, mask, key)
+        return final_interim_thought, None
 
     @partial(jax.jit, static_argnames=['prev_thought', 'training'])
     def __call__(self, input: Array, iters_to_do: int, pad_mask: Array,

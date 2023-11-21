@@ -27,6 +27,7 @@ def n_k_loop(model: eqx.Module, input_arr: Array, pad_mask: Array, n: int, k: in
     #output, intermediate_array = jax.lax.stop_gradient(output), jax.lax.stop_gradient(intermediate_array)
     
     # n-k passes, but track the gradient this time
+    #output, _ = model(input_arr, k, pad_mask=pad_mask, prev_thought=intermediate_array, key=key)
     output, _ = model(input_arr, 1, pad_mask=pad_mask, prev_thought=None, key=key)
 
     return output
@@ -96,6 +97,7 @@ class Trainer:
                                self.max_iters - rndm_n + 1, self.batch_size,
                                bias_val)
         
+        #TODO: Remove this
         rndm_k = jnp.ones_like(rndm_n)
         rndm_n = rndm_k
         
@@ -290,9 +292,9 @@ class Trainer:
                     self.my_logger.info(f'Validation accuracy: {val_metrics_5[0]} | using {self.max_iters + 5} iterations')
                     self.my_logger.info(f'Cumulative Training accuracy: {cum_train_acc}\n')
                     
-                    self.generate(model, sample_x, max_new_tokens=32)
+                    self.generate(model, sample_x, max_new_tokens=96)
                     self.my_logger.info(f'{"=" * 20}\tVal set prompt:\n')
-                    self.generate(model, val_sample_x, max_new_tokens=32)
+                    self.generate(model, val_sample_x, max_new_tokens=96)
                     
                     if step % self.save_interval == 0:
                         # Save the model 
