@@ -187,7 +187,7 @@ class React(eqx.Module):
         if isinstance(prev_thought, Array):
             interim_thought = prev_thought
         
-        interim_thought, _ = self.iterate_for_steps(interim_thought, pad_mask, iters_to_do, x, key) # (batch, seqlen, bottleneck)
+        interim_thought, _ = self.iterate_for_steps(x, pad_mask, iters_to_do, x, key) # (batch, seqlen, bottleneck)
         
         if training:
             return self.out_head(interim_thought), interim_thought
