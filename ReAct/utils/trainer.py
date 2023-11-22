@@ -335,8 +335,8 @@ class Trainer:
             logits = logits[zero_idx - 1, :] # chose the last token representation
             
             gen = inference_model.out_head(logits) / temperature
-            # sample from the distribution with the probabilities in gen
-            gen = jax.random.categorical(jax.random.PRNGKey(0), gen, axis=-1)
+            # greedy decoding
+            gen = gen.argmax()
             input_arr = jnp.concatenate([input_arr, gen.reshape(-1)])
             
         self.my_logger.info(f'model generation: {self.decode_fn(input_arr[-max_new_tokens:-1])}\n')

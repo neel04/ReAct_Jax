@@ -115,7 +115,6 @@ class React(eqx.Module):
     SEQLEN: int = eqx.field(static=True)
     embed_dim: int = eqx.field(static=True)
 
-    input_proj: eqx.Module
     out_head: eqx.Module
     embed_layer: eqx.nn.Embedding
     main_block: LiteAttention
@@ -136,7 +135,6 @@ class React(eqx.Module):
         drop_rate: float = drop_rate
 
         self.embed_layer = eqx.nn.Embedding(src_vocab_size, self.embed_dim, key=key1)
-        self.input_proj = LinearProj(self.bottleneck, self.bottleneck, key=key2)
 
         self.pos_enc = jax.lax.stop_gradient(self.positional_encoding(self.SEQLEN, self.bottleneck))
 
@@ -184,10 +182,8 @@ class React(eqx.Module):
                  prev_thought: Optional[Array] = None, training: bool = True,
                  key: Optional[PRNGKeyArray] = None) -> Array:
         
-        x = jax.vmap(self.embed_layer)(input.astype(jnp.int32)) + self.pos_enc # (batch, seqlen, embed_dim
+        interim_thought = jax.vmap(self.embed_layer)(input) + self.pos_enc # (batch, seqlen, bottleneck)
         
-        interim_thought = self.input_proj(x.astype(jnp.bfloat16)) # (batch, seqlen, bottleneck)
-
         if isinstance(prev_thought, Array):
             interim_thought = prev_thought
         

@@ -23,9 +23,9 @@ class MLP(eqx.Module):
         key1, key2 = jax.random.split(key, 2)
 
         self.layers = [
-            LinearProj(input_dim, output_dim, key=key1),
+            LinearProj(input_dim, output_dim * 4, key=key1),
             eqx.nn.Lambda(NewGELU()),
-            LinearProj(output_dim, output_dim, key=key2),
+            LinearProj(output_dim * 4, output_dim, key=key2),
             ]
 
         self.dropout = eqx.nn.Dropout(p=p)
