@@ -255,7 +255,7 @@ class Trainer:
                         step=step
                     )
                                 
-                if step % self.log_interval == 0:
+                if (step + 1) % self.log_interval == 0:
                     # Comput cumulatives
                     cum_train_acc = sum(train_acc) / len(train_acc)
                     cum_train_loss = sum(train_loss) / len(train_loss)
