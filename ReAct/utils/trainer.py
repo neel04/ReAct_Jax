@@ -266,16 +266,12 @@ class Trainer:
                     
                     ## Validation
                     val_metrics, val_sample = self.evaluate_acc(model, valloader, self.max_iters, keys, self.mask_fn)
-                    val_metrics_5, _ = self.evaluate_acc(model, valloader, self.max_iters + 5, keys, self.mask_fn)
                     
                     self.wandb_logger.log(
                         {
                             'Train/acc': cum_train_acc,
                             'Train/cum_loss': cum_train_loss,
                             'Train/ppl': cum_train_ppl,
-                            'Val/acc_5': val_metrics_5[0],
-                            'Val/loss_5': val_metrics_5[1],
-                            'Val/ppl_5': val_metrics_5[2],
                             'Val/acc': val_metrics[0],
                             'Val/loss': val_metrics[1],
                             'Val/ppl': val_metrics[2],
@@ -289,20 +285,19 @@ class Trainer:
                     
                     self.my_logger.info(f"epoch={epoch}, step={step}, loss={loss}")
                     self.my_logger.info(f'Validation accuracy: {val_metrics[0]} | using {self.max_iters} iterations')
-                    self.my_logger.info(f'Validation accuracy: {val_metrics_5[0]} | using {self.max_iters + 5} iterations')
                     self.my_logger.info(f'Cumulative Training accuracy: {cum_train_acc}\n')
                     
                     self.generate(model, sample_x, max_new_tokens=96)
                     self.my_logger.info(f'{"=" * 20}\tVal set prompt:\n')
                     self.generate(model, val_sample_x, max_new_tokens=96)
                     
-                    if step % self.save_interval == 0:
-                        # Save the model 
-                        filepath = f"{self.save_dir}model_{epoch}_{step}.eqx"
-                        
-                        save_eqx_obj(self.save_dir, filepath, (model, opt_state))
-                        
-                        self.wandb_logger.save(filepath)
+                if step % self.save_interval == 0:
+                    # Save the model 
+                    filepath = f"{self.save_dir}model_{epoch}_{step}.eqx"
+                    
+                    save_eqx_obj(self.save_dir, filepath, (model, opt_state))
+                    
+                    self.wandb_logger.save(filepath)
                         
             print(f'Epoch {epoch} done!')
             step_done = step # prepare for next epoch
