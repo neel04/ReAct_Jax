@@ -1,5 +1,5 @@
 from functools import partial
-from typing import Optional, Tuple
+from typing import Optional
 
 import equinox as eqx
 import jax
@@ -113,7 +113,6 @@ class React(eqx.Module):
     max_iters: int = eqx.field(static=True)
     bottleneck: int = eqx.field(static=True)
     SEQLEN: int = eqx.field(static=True)
-    embed_dim: int = eqx.field(static=True)
 
     out_head: eqx.Module
     embed_layer: eqx.nn.Embedding
@@ -126,15 +125,14 @@ class React(eqx.Module):
         key1, key2, key3, key4 = jax.random.split(key, 4)
 
         self.max_iters = max_iters
-        self.bottleneck = width // 2
-        self.embed_dim = self.bottleneck
+        self.bottleneck = width
         self.SEQLEN = seqlen
 
         src_vocab_size: int = tgt_vocab_size
         tgt_vocab_size: int = tgt_vocab_size
         drop_rate: float = drop_rate
 
-        self.embed_layer = eqx.nn.Embedding(src_vocab_size, self.embed_dim, key=key1)
+        self.embed_layer = eqx.nn.Embedding(src_vocab_size, self.bottleneck, key=key1)
 
         self.pos_enc = jax.lax.stop_gradient(self.positional_encoding(self.SEQLEN, self.bottleneck))
 
