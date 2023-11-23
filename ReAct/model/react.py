@@ -1,12 +1,12 @@
 from functools import partial
-from typing import Optional
+from typing import Optional, List
 
 import equinox as eqx
 import jax
 import jax.numpy as jnp
 from jaxtyping import Array, Float, Int, PRNGKeyArray
 
-from .blocks import MLP, LinearProj, LiteAttention, NewGELU, MixerBlock
+from .blocks import MLP, LinearProj, LiteAttention
 
 # ruff: noqa: F722
 class AttentionBlock(eqx.Module):
@@ -59,16 +59,18 @@ class AttentionBlock(eqx.Module):
 
     def __call__(self, x: Array, key: PRNGKeyArray, mask: Optional[Array] = None):
         # x: (seqlen, bottleneck)
+        key_1, key_2 = jax.random.split(key, 2)
+        
         mask = jnp.zeros_like(x) if mask is None else mask
         x = jax.vmap(self.ln1)(x)
         
         x += self.attn_gate(x, x, x,
                             mask=self._make_self_attention_mask(mask),
-                            key=key, inference=False)
+                            key=key_1, inference=False)
         #x += self.attn_gate(x, mask=self._make_mixer_mask(mask), key=key)
         
         x = jax.vmap(self.ln2)(x)
-        x += self.mlp(x, key=key)
+        x += self.mlp(x, key=key_2)
 
         return x
 
@@ -76,16 +78,18 @@ class RecurrentModule(eqx.Module):
     '''
     Bunch of AttentionBlocks
     '''
-    attention_blocks: list
+    attention_blocks: List[AttentionBlock]
 
     def __init__(self, seqlen: int, drop_rate: float, n_heads: int,
                  num_blocks: int, bottleneck: int, key: PRNGKeyArray):  # noqa: E501
         
-        key1, key2 = jax.random.split(key)
+        keys = jax.random.split(key, num_blocks)
 
-        self.attention_blocks = [
-            AttentionBlock(seqlen, n_heads, drop_rate, bottleneck, key2)
-        ] * num_blocks
+        self.attention_blocks = []
+        
+        for key in keys:
+            self.attention_blocks.append(
+                AttentionBlock(seqlen, n_heads, drop_rate, bottleneck, key))
 
     def __call__(self, x: Float[Array, ' seqlen in_dim'], pad_mask: Array,
                  key: PRNGKeyArray) -> Float[Array, ' seqlen out_dim']:
