@@ -132,7 +132,7 @@ class Trainer:
         
         total_steps = self.epochs * self.dataset_length // self.batch_size
         
-        schedule_fn = optax.warmup_cosine_decay_schedule(self.lr, self.lr * 2, self.warmup_steps,
+        schedule_fn = optax.warmup_cosine_decay_schedule(self.lr, self.lr, self.warmup_steps,
                                                          total_steps, self.lr // 15)
 
         # AdamW optimizer with weight decay
