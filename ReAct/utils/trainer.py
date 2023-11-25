@@ -133,7 +133,7 @@ class Trainer:
         total_steps = self.epochs * self.dataset_length // self.batch_size
         
         schedule_fn = optax.warmup_cosine_decay_schedule(self.lr, self.lr, self.warmup_steps,
-                                                         total_steps, self.lr // 15)
+                                                         total_steps, self.lr // 10)
 
         # AdamW optimizer with weight decay
         optim = optax.chain(
@@ -141,7 +141,7 @@ class Trainer:
             optax.adamw(learning_rate=schedule_fn, weight_decay=self.weight_decay, b1=0.95, b2=0.99)
         )
         
-        opt_state = optim.init(eqx.filter(model, eqx.is_inexact_array))
+        opt_state = optim.init(eqx.filter(model, eqx.is_array))
         
         return optim, opt_state, model
     
