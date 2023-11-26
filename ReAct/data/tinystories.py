@@ -13,7 +13,7 @@ class TinyStoriesDataset:
         self.max_length = max_length + 1
         
         self.dataset = load_dataset('roneneldan/TinyStories', split=split, ignore_verifications=True, 
-                                    keep_in_memory=False).to_iterable_dataset()
+                                    keep_in_memory=True, num_proc=os.cpu_count())
         
         self.tok = Tok(vocab_dir=vocab_dir, max_length=self.max_length)
 
@@ -33,29 +33,20 @@ class TinyStoriesDataset:
         return input_seq.tolist(), targets.tolist(), pad_mask.tolist()
 
     def shift_tokens(self, text: List[List]) -> List[Tuple]:
-        return [self._shift_seq(x.copy()) for x in text]
+        return [self._shift_seq(x) for x in text]
         
     @staticmethod
-    def collate_fn(batch: List[dict]) -> List:
-        # batch is a list of dicts, each with a key 'text'
-        # collate them into a nested list
-        nested_list = list(map(lambda x: x['text'], batch))
-        
-        return nested_list        
+    def group_batch(batch: List[dict]) -> dict:
+        # Simply batch the data stream
+        return {k: [v] for k, v in batch.items()}
 
     def create_dataloader(self):
-        self.dataset = self.dataset.map(self.tokenize_and_pad, batched=True, batch_size=self.bsz)
+        it_dataset = self.dataset.to_iterable_dataset()
+        it_dataset = it_dataset.map(self.tokenize_and_pad, batched=True, batch_size=self.bsz)
+        it_dataset = it_dataset.map(self.group_batch, batched=True, batch_size=self.bsz)
         
-        self.dataloader = torch.utils.data.DataLoader(
-            self.dataset,
-            batch_size=self.bsz,
-            num_workers=os.cpu_count(),
-            pin_memory=True,
-            drop_last=True,
-            collate_fn=self.collate_fn,
-            prefetch_factor=8)
-        
-        return self.dataloader
+        num_batches = len(self.dataset) // self.bsz
+        return it_dataset.take(num_batches)
 
 if __name__ == '__main__':
     dataset = TinyStoriesDataset(bsz=256)

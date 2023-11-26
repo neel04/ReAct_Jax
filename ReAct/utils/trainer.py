@@ -112,7 +112,7 @@ class Trainer:
         metric = []
 
         for step, batch in enumerate(loader):
-            batch = mask_fn(batch)
+            batch = mask_fn(batch["text"])
             seq, label, pad_mask = convert_to_jax(batch)
             seq, label, pad_mask = jax.device_put((seq, label, pad_mask), self.shard)
             
@@ -231,7 +231,7 @@ class Trainer:
                 
                 step += step_done # for multiple epochs
                 
-                batch = self.mask_fn(batch)
+                batch = self.mask_fn(batch["text"])
                 seq, label, pad_mask = convert_to_jax(batch)
                 seq, label, pad_mask = jax.device_put((seq, label, pad_mask), self.shard)
                 
