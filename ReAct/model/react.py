@@ -179,9 +179,6 @@ class React(eqx.Module):
 
         def Identity(i: int, carry: Array) -> Array:
             return carry[0], carry[1]
-
-        #TODO: Remove
-        iters_to_do = 1
         
         final_interim_thought = jax.lax.fori_loop(1, self.max_iters, main, (interim_thought, mask))  # noqa: E501
         
