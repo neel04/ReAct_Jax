@@ -93,7 +93,7 @@ class RecurrentModule(eqx.Module):
                 AttentionBlock(seqlen, n_heads, drop_rate, bottleneck * 2, key))
         
         self.reshape_layer = LinearProj(bottleneck * 2, bottleneck, key=key)
-
+        
     def __call__(self, x: Float[Array, ' seqlen in_dim'], pad_mask: Array,
                  key: PRNGKeyArray) -> Float[Array, ' seqlen out_dim']:
         
@@ -101,7 +101,7 @@ class RecurrentModule(eqx.Module):
             x = block(x, key, pad_mask)
         
         x = self.reshape_layer(x)
-
+        
         return x
 
 class output_head(eqx.Module):
@@ -169,20 +169,19 @@ class React(eqx.Module):
     def iterate_for_steps(self, interim_thought: Array, mask: Array, iters_to_do: int, x: Array,
                           key: PRNGKeyArray) -> Array:
         
-        def main(i: int, carry: Tuple[Array]) -> Array:
-            return jax.lax.cond(i <= iters_to_do, iterate, Identity, i, carry)
+        def cond_fun(carry):
+            arr, mask, i = carry
+            return i <= iters_to_do
 
-        def iterate(i: int, carry: Tuple[Array]) -> Array:
-            # carry[0] -> interim_thought, carry[1] -> mask
-            interim_thought = jnp.concatenate([carry[0], x], 1)
-            return self.main_block(interim_thought, carry[1], key), carry[1]
-
-        def Identity(i: int, carry: Array) -> Array:
-            return carry[0], carry[1]
+        def body_fun(carry):
+            arr, mask, i = carry
+            latent = jnp.concatenate([arr, x], axis=1)
+            latent = self.main_block(latent, mask, key)
+            return (arr, mask, i + 1)
         
-        final_interim_thought = jax.lax.fori_loop(1, self.max_iters, main, (interim_thought, mask))  # noqa: E501
+        final_thought = eqx.internal.while_loop(cond_fun, body_fun, (interim_thought, mask, 1), max_steps=self.max_iters, kind='bounded')
         
-        return final_interim_thought
+        return final_thought[0] # only get the latent vector
 
     @partial(jax.jit, static_argnames=['prev_thought', 'training'])
     def __call__(self, input: Array, iters_to_do: int, pad_mask: Array,
@@ -194,7 +193,7 @@ class React(eqx.Module):
         if isinstance(prev_thought, Array):
             interim_thought = prev_thought
         
-        interim_thought, _ = self.iterate_for_steps(x, pad_mask, iters_to_do, x, key) # (batch, seqlen, bottleneck)
+        interim_thought = self.iterate_for_steps(x, pad_mask, iters_to_do, x, key) # (batch, seqlen, bottleneck)
         
         if training:
             return self.out_head(interim_thought), interim_thought
