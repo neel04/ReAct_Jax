@@ -175,11 +175,12 @@ class React(eqx.Module):
 
         def body_fun(carry):
             arr, mask, i = carry
-            latent = jnp.concatenate([arr, x], axis=1)
+            latent = jnp.concatenate([arr, x], axis=-1)
             latent = self.main_block(latent, mask, key)
-            return (arr, mask, i + 1)
+            return (latent, mask, i + 1)
         
         final_thought = eqx.internal.while_loop(cond_fun, body_fun, (interim_thought, mask, 1), max_steps=self.max_iters, kind='bounded')
+        #final_thought = self.main_block(interim_thought, mask, key), None
         
         return final_thought[0] # only get the latent vector
 
