@@ -180,7 +180,6 @@ class React(eqx.Module):
             return (latent, mask, i + 1)
         
         final_thought = eqx.internal.while_loop(cond_fun, body_fun, (interim_thought, mask, 1), max_steps=self.max_iters, kind='bounded')
-        #final_thought = self.main_block(interim_thought, mask, key), None
         
         return final_thought[0] # only get the latent vector
 
@@ -189,12 +188,14 @@ class React(eqx.Module):
                  prev_thought: Optional[Array] = None, training: bool = True,
                  key: Optional[PRNGKeyArray] = None) -> Array:
         
-        x = jax.vmap(self.embed_layer)(input) + self.pos_enc # (batch, seqlen, bottleneck)
+        input_arr = jax.vmap(self.embed_layer)(input) + self.pos_enc # (batch, seqlen, bottleneck)
         
-        if isinstance(prev_thought, Array):
-            interim_thought = prev_thought
+        if eqx.is_array(prev_thought):
+            x = prev_thought # we continue from the previous thought
+        else:
+            x = input_arr # no previous thought, so we use the input
         
-        interim_thought = self.iterate_for_steps(x, pad_mask, iters_to_do, x, key) # (batch, seqlen, bottleneck)
+        interim_thought = self.iterate_for_steps(x, pad_mask, iters_to_do, input_arr, key) # (batch, seqlen, bottleneck)
         
         if training:
             return self.out_head(interim_thought), interim_thought

@@ -19,16 +19,13 @@ from .helpers import get_rand_nums, half_precision
 # A unified Trainer class for training and evaluation
 @jax.jit
 def n_k_loop(model: eqx.Module, input_arr: Array, pad_mask: Array, n: int, k: int, key: PRNGKeyArray) -> Array:
-    key1, key2 = jax.random.split(key, 2)
     # forward pass the model without tracking grads
     output, intermediate_array = model(
         jax.lax.stop_gradient(input_arr), n,
-        pad_mask=pad_mask, prev_thought=None, key=key1)
-    
-    output, intermediate_array = jax.lax.stop_gradient(output), jax.lax.stop_gradient(intermediate_array)
+        pad_mask=pad_mask, prev_thought=None, key=key)
     
     # n-k passes, but track the gradient this time
-    output, _ = model(input_arr, k, pad_mask=pad_mask, prev_thought=intermediate_array, key=key2)
+    output, _ = model(input_arr, k, pad_mask=pad_mask, prev_thought=intermediate_array, key=key)
 
     return output
 
