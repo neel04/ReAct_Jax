@@ -179,7 +179,7 @@ class React(eqx.Module):
             latent = self.main_block(latent, mask, key)
             return (latent, mask, i + 1)
         
-        final_thought = eqx.internal.while_loop(cond_fun, body_fun, (interim_thought, mask, 1), max_steps=self.max_iters, kind='bounded')
+        final_thought = eqx.internal.while_loop(cond_fun, body_fun, (interim_thought, mask, 1), max_steps=self.max_iters, kind='checkpointed')
         
         return final_thought[0] # only get the latent vector
 
