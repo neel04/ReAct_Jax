@@ -18,11 +18,11 @@ from .helpers import get_rand_nums, half_precision
 @jax.jit
 def n_k_loop(model: eqx.Module, input_arr: Array, pad_mask: Array, n: int, k: int, key: PRNGKeyArray) -> Array:
     # forward pass the model without tracking grads
-    output, intermediate_array = model(
-        jax.lax.stop_gradient(input_arr), n,
-        pad_mask=pad_mask, prev_thought=None, key=key)
+    #output, intermediate_array = model(
+        #jax.lax.stop_gradient(input_arr), n,
+        #pad_mask=pad_mask, prev_thought=None, key=key)
     
-    _, intermediate_array = jax.lax.stop_gradient(output), jax.lax.stop_gradient(intermediate_array)
+    #_, intermediate_array = jax.lax.stop_gradient(output), jax.lax.stop_gradient(intermediate_array)
     
     # n-k passes, but track the gradient this time
     output, _ = model(input_arr, k, pad_mask=pad_mask, prev_thought=intermediate_array, key=key)
