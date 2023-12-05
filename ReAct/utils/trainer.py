@@ -25,7 +25,7 @@ def n_k_loop(model: eqx.Module, input_arr: Array, pad_mask: Array, n: int, k: in
     #_, intermediate_array = jax.lax.stop_gradient(output), jax.lax.stop_gradient(intermediate_array)
     
     # n-k passes, but track the gradient this time
-    output, _ = model(input_arr, k, pad_mask=pad_mask, prev_thought=intermediate_array, key=key)
+    output, _ = model(input_arr, k, pad_mask=pad_mask, prev_thought=None, key=key)
 
     return output
 
