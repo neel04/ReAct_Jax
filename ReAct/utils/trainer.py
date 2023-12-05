@@ -15,8 +15,6 @@ from ReAct.utils.logger import UnifiedLogger
 
 from .helpers import get_rand_nums, half_precision
 
-
-# A unified Trainer class for training and evaluation
 @jax.jit
 def n_k_loop(model: eqx.Module, input_arr: Array, pad_mask: Array, n: int, k: int, key: PRNGKeyArray) -> Array:
     # forward pass the model without tracking grads
@@ -24,7 +22,7 @@ def n_k_loop(model: eqx.Module, input_arr: Array, pad_mask: Array, n: int, k: in
         jax.lax.stop_gradient(input_arr), n,
         pad_mask=pad_mask, prev_thought=None, key=key)
     
-    output, intermediate_array = jax.lax.stop_gradient(output), jax.lax.stop_gradient(intermediate_array)
+    _, intermediate_array = jax.lax.stop_gradient(output), jax.lax.stop_gradient(intermediate_array)
     
     # n-k passes, but track the gradient this time
     output, _ = model(input_arr, k, pad_mask=pad_mask, prev_thought=intermediate_array, key=key)
@@ -50,12 +48,10 @@ def _compute_softmax_cross_entropy_loss(pred_y: Array, y_one_hot: Array, pad_mas
     
     n = jnp.repeat(n[:, None], loss.shape[1], axis=-1)
     k = jnp.repeat(k[:, None], loss.shape[1], axis=-1)
+
+    loss = (loss * (n + k)).sum(-1) # across the sequence
     
-    weights = inverted_freq(n + k)
-    
-    loss = (loss * weights).mean(-1) # across the sequence
-    
-    return loss.mean() # across all the batches
+    return loss.sum() # across all the batches
     
 @eqx.filter_jit
 def make_step(model: eqx.Module, x: Array, y: Array, pad_mask: Array, n: int, k: int,

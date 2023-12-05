@@ -123,10 +123,11 @@ class React(eqx.Module):
     bottleneck: int = eqx.field(static=True)
     SEQLEN: int = eqx.field(static=True)
 
-    out_head: eqx.Module
+    pos_enc: Array
     embed_layer: eqx.nn.Embedding
     main_block: LiteAttention
-    pos_enc: Array
+    post_ln: eqx.nn.LayerNorm
+    out_head: eqx.Module
 
     def __init__(self, n_heads: int, seqlen: int, max_iters: int, num_blocks: int, width: int,
                  drop_rate: float, tgt_vocab_size: int, key: PRNGKeyArray):
@@ -146,6 +147,8 @@ class React(eqx.Module):
         self.pos_enc = jax.lax.stop_gradient(self.positional_encoding(self.SEQLEN, self.bottleneck))
 
         self.main_block = RecurrentModule(seqlen, drop_rate, n_heads, num_blocks, self.bottleneck, key=key2)
+        
+        self.post_ln = eqx.nn.LayerNorm(self.bottleneck)
 
         self.out_head = output_head(self.bottleneck, tgt_vocab_size, self.SEQLEN, key=key4)
     
@@ -177,6 +180,7 @@ class React(eqx.Module):
             arr, mask, i = carry
             latent = jnp.concatenate([arr, x], axis=-1)
             latent = self.main_block(latent, mask, key)
+            latent = jax.vmap(self.post_ln)(latent)
             return (latent, mask, i + 1)
         
         final_thought = eqx.internal.while_loop(cond_fun, body_fun, (interim_thought, mask, 1), max_steps=self.max_iters, kind='checkpointed')
