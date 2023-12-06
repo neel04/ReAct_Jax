@@ -25,7 +25,7 @@ def n_k_loop(model: eqx.Module, input_arr: Array, pad_mask: Array, n: int, k: in
     #_, intermediate_array = jax.lax.stop_gradient(output), jax.lax.stop_gradient(intermediate_array)
     
     # n-k passes, but track the gradient this time
-    output, _ = model(input_arr, k, pad_mask=pad_mask, prev_thought=None, key=key)
+    output, _ = model(input_arr, n, pad_mask=pad_mask, prev_thought=None, key=key)
 
     return output
 
@@ -49,7 +49,7 @@ def _compute_softmax_cross_entropy_loss(pred_y: Array, y_one_hot: Array, pad_mas
     n = jnp.repeat(n[:, None], loss.shape[1], axis=-1)
     k = jnp.repeat(k[:, None], loss.shape[1], axis=-1)
 
-    loss = (loss * (n + k)).sum(-1) # across the sequence
+    loss = (loss * n).sum(-1) # across the sequence
     
     return loss.mean() # across all the batches
     
@@ -87,7 +87,7 @@ class Trainer:
     def get_n_k(self, key: PRNGKeyArray, bias_val: Optional[int] = None) -> Tuple[Array, Array]:
         n_key, k_key = jax.random.split(key, 2)
         
-        rndm_n = get_rand_nums(n_key, 0, self.max_iters, self.batch_size, bias_val)
+        rndm_n = get_rand_nums(n_key, 1, self.max_iters, self.batch_size, bias_val)
         rndm_k = get_rand_nums(k_key, jnp.ones(self.batch_size), 
                                self.max_iters - rndm_n + 1, self.batch_size,
                                bias_val)
