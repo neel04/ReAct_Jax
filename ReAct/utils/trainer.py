@@ -1,5 +1,7 @@
 import os
-from typing import Any, Callable, List, Tuple, Optional
+import time
+from functools import partial
+from typing import Any, Callable, List, Optional, Tuple
 
 import equinox as eqx
 import jax
@@ -10,7 +12,13 @@ from torch.utils.data import DataLoader
 from tqdm.auto import tqdm
 
 from ReAct.model.react import React
-from ReAct.utils.helpers import convert_to_jax, count_params, load_eqx_obj, save_eqx_obj, inverted_freq
+from ReAct.utils.helpers import (
+    convert_to_jax,
+    count_params,
+    inverted_freq,
+    load_eqx_obj,
+    save_eqx_obj,
+)
 from ReAct.utils.logger import UnifiedLogger
 
 from .helpers import get_rand_nums, half_precision
@@ -107,7 +115,7 @@ class Trainer:
             seq, label, pad_mask = convert_to_jax(batch)
             seq, label, pad_mask = jax.device_put((seq, label, pad_mask), self.shard)
             
-            acc, loss, ppl = self.compute_metrics(model, (seq, label, pad_mask), eval_iters, keys)
+            acc, loss, ppl = self.compute_metrics(model, (seq, label, pad_mask), eval_iters, self.num_classes, keys)
             
             metric.extend([acc, loss, ppl])
         
@@ -168,12 +176,14 @@ class Trainer:
         
         return model, opt_state, step
     
-    def compute_metrics(self, model: eqx.Module, batch: Tuple, eval_iters: int, keys: List[PRNGKeyArray]):
+    @staticmethod
+    @partial(jax.jit, static_argnums=3)
+    def compute_metrics(model: eqx.Module, batch: Tuple, eval_iters: int, num_classes: int, keys: List[PRNGKeyArray]):
         '''
         Computes the accuracy, perplexity, loss of the model w.r.t batch
         '''
         # make an array of size of batch[0] with each element as eval_iters
-        eval_iters = jnp.ones_like(batch[0][:, 0]) * eval_iters if isinstance(eval_iters, int) else eval_iters
+        eval_iters = jnp.ones_like(batch[0][:, 0]) * eval_iters# if isinstance(eval_iters, int) else eval_iters
         input_arr = batch[0]
         pad_mask = batch[2]
         
@@ -185,13 +195,13 @@ class Trainer:
         accuracy = jnp.mean(y_hat == batch[1])
         
         # compute loss
-        y_one_hot = jax.nn.one_hot(batch[1], num_classes=self.num_classes) # (batch_size, seqlen, num_classes)
-        loss = _compute_softmax_cross_entropy_loss(pred_y, y_one_hot, pad_mask, eval_iters, eval_iters)
+        y_one_hot = jax.nn.one_hot(batch[1], num_classes=num_classes) # (batch_size, seqlen, num_classes)
+        loss = optax.softmax_cross_entropy(pred_y, y_one_hot)
         
         # compute perplexity
         perplexity = jnp.exp(loss)
         
-        return accuracy, loss.mean(), perplexity     
+        return accuracy, loss.mean(), perplexity
     
     def train(self, epochs: int, trainloader: DataLoader, valloader: DataLoader, 
               key: PRNGKeyArray):
@@ -229,16 +239,16 @@ class Trainer:
                 loss, model, opt_state = make_step(model, seq, label, pad_mask, rndm_n, rndm_k,
                                                    optim, opt_state, self.num_classes, keys)
                 
-                accuracy, _, perplexity = self.compute_metrics(model, (seq, label, pad_mask),
-                                                                  self.max_iters, keys)
+                if step % 25 == 0:
+                    accuracy, _, perplexity = self.compute_metrics(model, (seq, label, pad_mask),
+                                                                self.max_iters, self.num_classes,
+                                                                keys)
+                    train_acc.append(accuracy)
+                    train_loss.append(loss)
+                    train_ppl.append(perplexity)
+                    
+                    loss = loss.item()
                 
-                train_acc.append(accuracy)
-                train_loss.append(loss)
-                train_ppl.append(perplexity)
-                
-                loss = loss.item()
-                
-                if step % 10 == 0:
                     self.wandb_logger.log(
                         {
                             'Train/loss': loss,
@@ -247,7 +257,7 @@ class Trainer:
                     )
                                 
                 if (step + 1) % self.log_interval == 0:
-                    # Comput cumulatives
+                    # Compute cumulatives
                     cum_train_acc = sum(train_acc) / len(train_acc)
                     cum_train_loss = sum(train_loss) / len(train_loss)
                     cum_train_ppl = sum(train_ppl) / len(train_ppl)
