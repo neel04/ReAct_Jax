@@ -53,7 +53,7 @@ def _compute_softmax_cross_entropy_loss(pred_y: Array, y_one_hot: Array, pad_mas
     
     return loss.mean() # across all the batches
     
-@eqx.filter_jit
+@eqx.filter_jit(donate="all")
 def make_step(model: eqx.Module, x: Array, y: Array, pad_mask: Array, n: int, k: int,
               optim, opt_state, num_classes: int, keys: List[PRNGKeyArray]):  # noqa: F821
     

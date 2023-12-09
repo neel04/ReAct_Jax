@@ -32,7 +32,7 @@ class MLP(eqx.Module):
 
     def __call__(self, x: Array, key: PRNGKeyArray):
         for layer in self.layers:
-            x = layer(x)
+            x = layer(x).astype(jnp.bfloat16)
         
         return self.dropout(x, key=key, inference=False)
 
@@ -53,7 +53,7 @@ class LinearProj(eqx.Module):
         self.use_bias = use_bias
 
         lim = 1 / math.sqrt(input_dim)
-        self.weight = jax.random.uniform(wkey, (input_dim, output_dim), minval=-lim, maxval=lim)
+        self.weight = jax.random.uniform(wkey, (input_dim, output_dim), minval=-lim, maxval=lim).astype(jnp.bfloat16)
 
         if use_bias:
             self.bias = jax.random.uniform(bkey, (output_dim,), minval=-lim, maxval=lim)

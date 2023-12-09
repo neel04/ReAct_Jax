@@ -62,7 +62,7 @@ class AttentionBlock(eqx.Module):
         key_1, key_2 = jax.random.split(key, 2)
         
         mask = jnp.zeros_like(x) if mask is None else mask
-        x = jax.vmap(self.ln1)(x)
+        x = jax.vmap(self.ln1)(x.astype(jnp.bfloat16))
         
         x += self.attn_gate(x, x, x,
                             mask=self._make_self_attention_mask(mask),
@@ -72,7 +72,7 @@ class AttentionBlock(eqx.Module):
         x = jax.vmap(self.ln2)(x)
         x += self.mlp(x, key=key_2)
 
-        return x
+        return x.astype(jnp.bfloat16)
 
 class RecurrentModule(eqx.Module):
     '''
@@ -98,7 +98,7 @@ class RecurrentModule(eqx.Module):
                  key: PRNGKeyArray) -> Float[Array, ' seqlen out_dim']:
         
         for block in self.attention_blocks:
-            x = block(x, key, pad_mask)
+            x = block(x, key, pad_mask).astype(jnp.bfloat16)
         
         x = self.reshape_layer(x)
         
@@ -159,8 +159,8 @@ class React(eqx.Module):
         of shape (batch_size, max_seq_len, d_model) which would be added
         to the sequence embeddings.
         '''
-        position = jnp.arange(seq_len, dtype=jnp.float32).reshape(-1, 1)
-        div_term = jnp.exp(jnp.arange(0, d_model, 2, dtype=jnp.float32) * -(jnp.log(10000.0) / d_model))
+        position = jnp.arange(seq_len, dtype=jnp.bfloat16).reshape(-1, 1)
+        div_term = jnp.exp(jnp.arange(0, d_model, 2, dtype=jnp.bfloat16) * -(jnp.log(10000.0) / d_model))
         pe = jnp.zeros((seq_len, d_model))
 
         pe = pe.at[:, 0::2].set(jnp.sin(position * div_term))
@@ -178,9 +178,12 @@ class React(eqx.Module):
 
         def body_fun(carry):
             arr, mask, i = carry
+            
             latent = jnp.concatenate([arr, x], axis=-1)
-            latent = self.main_block(latent, mask, key)
-            latent = jax.vmap(self.post_ln)(latent)
+            latent = self.main_block(latent, mask, key).astype(jnp.bfloat16)
+            
+            latent = jax.vmap(self.post_ln)(latent) # LN to keep scales tidy
+            
             return (latent, mask, i + 1)
         
         final_thought = eqx.internal.while_loop(cond_fun, body_fun, (interim_thought, mask, 1), max_steps=self.max_iters, kind='checkpointed')
@@ -193,6 +196,7 @@ class React(eqx.Module):
                  key: Optional[PRNGKeyArray] = None) -> Array:
         
         input_arr = jax.vmap(self.embed_layer)(input) + self.pos_enc # (batch, seqlen, bottleneck)
+        input_arr = input_arr.astype(jnp.bfloat16)
         
         if eqx.is_array(prev_thought):
             x = prev_thought # we continue from the previous thought
