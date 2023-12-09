@@ -179,10 +179,10 @@ class React(eqx.Module):
         def body_fun(carry):
             arr, mask, i = carry
             
-            latent = jnp.concatenate([arr, x], axis=-1)
+            latent = jnp.concatenate([arr, x], axis=-1).astype(jnp.bfloat16)
             latent = self.main_block(latent, mask, key).astype(jnp.bfloat16)
             
-            latent = jax.vmap(self.post_ln)(latent) # LN to keep scales tidy
+            latent = jax.vmap(self.post_ln)(latent).astype(jnp.bfloat16) # LN to keep scales tidy
             
             return (latent, mask, i + 1)
         
