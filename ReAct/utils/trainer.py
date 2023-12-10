@@ -215,21 +215,17 @@ class Trainer:
         else:
             epoch_done = 0
         
+        rndm_n, rndm_k = self.get_n_k(key=key) # initial n and k
+        
         for epoch in range(epoch_done, epochs):
             # init empty metrics
             epoch_key = jnp.array([epoch, epoch + 1]).astype(jnp.uint32)
             train_acc, train_loss, train_ppl = [], [], []
             
-            keys = jax.random.split(
-                jnp.array([epoch, epoch + 1]).astype(jnp.uint32),
-                self.batch_size)
+            keys = jax.random.split(epoch_key, self.batch_size)
             
             for step, batch in tqdm(enumerate(trainloader)):
                 # n k bias schedule
-                rndm_n, rndm_k = self.get_n_k(
-                    key=epoch_key
-                )
-                
                 step += step_done # for multiple epochs
                 
                 batch = self.mask_fn(batch["text"])
@@ -240,7 +236,7 @@ class Trainer:
                                                    optim, opt_state, self.num_classes, keys)
                 
                 if step % 25 == 0:
-                    accuracy, _, perplexity = self.compute_metrics(model, (seq, label, pad_mask),
+                    accuracy, loss, perplexity = self.compute_metrics(model, (seq, label, pad_mask),
                                                                 self.max_iters, self.num_classes,
                                                                 keys)
                     train_acc.append(accuracy)
@@ -257,6 +253,9 @@ class Trainer:
                     )
                                 
                 if (step + 1) % self.log_interval == 0:
+                    # cycling through keys to get new n and k
+                    rndm_n, rndm_k = self.get_n_k(key=keys[step % self.batch_size])
+                
                     # Compute cumulatives
                     cum_train_acc = sum(train_acc) / len(train_acc)
                     cum_train_loss = sum(train_loss) / len(train_loss)
