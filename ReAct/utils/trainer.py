@@ -236,6 +236,9 @@ class Trainer:
                                                    optim, opt_state, self.num_classes, keys)
                 
                 if step % 25 == 0:
+                    # cycling through keys to get new n and k
+                    rndm_n, rndm_k = self.get_n_k(key=keys[step % self.batch_size])
+                    
                     accuracy, loss, perplexity = self.compute_metrics(model, (seq, label, pad_mask),
                                                                 self.max_iters, self.num_classes,
                                                                 keys)
@@ -253,9 +256,6 @@ class Trainer:
                     )
                                 
                 if (step + 1) % self.log_interval == 0:
-                    # cycling through keys to get new n and k
-                    rndm_n, rndm_k = self.get_n_k(key=keys[step % self.batch_size])
-                
                     # Compute cumulatives
                     cum_train_acc = sum(train_acc) / len(train_acc)
                     cum_train_loss = sum(train_loss) / len(train_loss)
