@@ -169,7 +169,7 @@ class React(eqx.Module):
         return pe
 
     @partial(jax.jit, static_argnums=1)
-    def iterate_for_steps(self, interim_thought: Array, mask: Array, iters_to_do: int, x: Array,
+    def iterate_for_steps(self, interim_thought: Array, mask: Array, iters_to_do: int, input_arr: Array,
                           key: PRNGKeyArray) -> Array:
         
         def cond_fun(carry):
@@ -177,9 +177,9 @@ class React(eqx.Module):
             return i <= iters_to_do
 
         def body_fun(carry):
-            arr, mask, i = carry
+            thought, mask, i = carry
             
-            latent = jnp.concatenate([arr, x], axis=-1).astype(jnp.bfloat16)
+            latent = jnp.concatenate([thought, input_arr], axis=-1).astype(jnp.bfloat16)
             latent = self.main_block(latent, mask, key).astype(jnp.bfloat16)
             
             latent = jax.vmap(self.post_ln)(latent).astype(jnp.bfloat16) # LN to keep scales tidy

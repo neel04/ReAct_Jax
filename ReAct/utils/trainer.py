@@ -26,8 +26,6 @@ from .helpers import get_rand_nums, half_precision
 @jax.jit
 def n_k_loop(model: eqx.Module, input_arr: Array, pad_mask: Array, n: int, k: int, key: PRNGKeyArray) -> Array:
     # forward pass the model without tracking grads
-    input_arr = jax.lax.stop_gradient(input_arr)
-    
     output, intermediate_array = jax.lax.stop_gradient(model(
         input_arr, n,
         pad_mask=pad_mask, prev_thought=None, key=key))
@@ -57,7 +55,7 @@ def _compute_softmax_cross_entropy_loss(pred_y: Array, y_one_hot: Array, pad_mas
     n = jnp.repeat(n[:, None], loss.shape[1], axis=-1)
     k = jnp.repeat(k[:, None], loss.shape[1], axis=-1)
 
-    loss = (loss * k).sum(-1) # across the sequence
+    loss = (loss * (n + k)).sum(-1) # across the sequence
     
     return loss.mean() # across all the batches
     
