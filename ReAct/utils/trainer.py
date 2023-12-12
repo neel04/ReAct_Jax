@@ -15,7 +15,6 @@ from ReAct.model.react import React
 from ReAct.utils.helpers import (
     convert_to_jax,
     count_params,
-    inverted_freq,
     load_eqx_obj,
     save_eqx_obj,
 )
@@ -26,12 +25,14 @@ from .helpers import get_rand_nums, half_precision
 @jax.jit
 def n_k_loop(model: eqx.Module, input_arr: Array, pad_mask: Array, n: int, k: int, key: PRNGKeyArray) -> Array:
     # forward pass the model without tracking grads
-    output, intermediate_array = jax.lax.stop_gradient(model(
+    _, intermediate_array = model(
         input_arr, n,
-        pad_mask=pad_mask, prev_thought=None, key=key))
+        pad_mask=pad_mask, prev_thought=None, key=key)
+    
+    intermediate_thought = jax.lax.stop_gradient(intermediate_array)
     
     # n-k passes, but track the gradient this time
-    output, _ = model(input_arr, k, pad_mask=pad_mask, prev_thought=intermediate_array, key=key)
+    output, _ = model(input_arr, k, pad_mask=pad_mask, prev_thought=intermediate_thought, key=key)
 
     return output
 
