@@ -9,7 +9,9 @@ from jax import tree_util as jtu
 from jaxtyping import Array, PRNGKeyArray
 from typing import Optional
 
-
+def get_dummy_thought(input_arr: Array, repeats: int) -> tuple:
+    return (jnp.repeat(jnp.ones_like(input_arr, jnp.bfloat16)[:, jnp.newaxis], repeats=repeats, axis=-1), False)
+    
 def half_precision(model: eqx.Module) -> eqx.Module:
     return jtu.tree_map(lambda x: x.astype(jnp.bfloat16) if eqx.is_inexact_array(x) else x, model)
 

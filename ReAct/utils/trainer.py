@@ -1,5 +1,4 @@
 import os
-import time
 from functools import partial
 from typing import Any, Callable, List, Optional, Tuple
 
@@ -17,6 +16,7 @@ from ReAct.utils.helpers import (
     count_params,
     load_eqx_obj,
     save_eqx_obj,
+    get_dummy_thought
 )
 from ReAct.utils.logger import UnifiedLogger
 
@@ -24,15 +24,23 @@ from .helpers import get_rand_nums, half_precision
 
 @jax.jit
 def n_k_loop(model: eqx.Module, input_arr: Array, pad_mask: Array, n: int, k: int, key: PRNGKeyArray) -> Array:
+    # dummy thought mimicking intermediate shape in model forward pass
+    dummy_thought = get_dummy_thought(input_arr, model.bottleneck)
+    
     # forward pass the model without tracking grads
     _, intermediate_array = model(
         input_arr, n,
-        pad_mask=pad_mask, prev_thought=None, key=key)
+        pad_mask=pad_mask,
+        prev_thought=dummy_thought,
+        key=key)
     
-    intermediate_thought = jax.lax.stop_gradient(intermediate_array)
+    p = 0.25 # probability of disabling n+k
+    cond = jax.random.uniform(key, ()) >= (1 - p) # flag to disable n+k, only do k
+    
+    intermediate_array, cond = jax.lax.stop_gradient(intermediate_array), jax.lax.stop_gradient(cond)
     
     # n-k passes, but track the gradient this time
-    output, _ = model(input_arr, k, pad_mask=pad_mask, prev_thought=intermediate_thought, key=key)
+    output, _ = model(input_arr, k, pad_mask=pad_mask, prev_thought=(intermediate_array, cond), key=key)
 
     return output
 
@@ -182,12 +190,14 @@ class Trainer:
         Computes the accuracy, perplexity, loss of the model w.r.t batch
         '''
         # make an array of size of batch[0] with each element as eval_iters
-        eval_iters = jnp.ones_like(batch[0][:, 0]) * eval_iters# if isinstance(eval_iters, int) else eval_iters
+        eval_iters = jnp.ones_like(batch[0][:, 0]) * eval_iters
+        
         input_arr = batch[0]
         pad_mask = batch[2]
+        dummy_thought = get_dummy_thought(input_arr[0], model.bottleneck)
         
         pred_y = jax.vmap(model, in_axes=(0, 0, 0, None, None, 0))(
-            input_arr, eval_iters, pad_mask, None, False, keys)
+            input_arr, eval_iters, pad_mask, dummy_thought, False, keys)
         
         # compute accuracy
         y_hat = jax.nn.softmax(pred_y, axis=-1).argmax(-1) * pad_mask
@@ -243,7 +253,7 @@ class Trainer:
                                                                 keys)
                     train_acc.append(accuracy)
                     train_loss.append(loss)
-                    train_ppl.append(perplexity)
+                    train_ppl.append(perplexity.mean())
                     
                     loss = loss.item()
                 
@@ -325,7 +335,8 @@ class Trainer:
             except IndexError:
                 zero_idx = self.seqlen
             
-            logits = inference_model(padded_array, self.max_iters, pad_mask, None, True, jax.random.PRNGKey(0))[1]
+            dummy_thought = get_dummy_thought(padded_array, model.bottleneck)
+            logits = inference_model(padded_array, self.max_iters, pad_mask, dummy_thought, True, jax.random.PRNGKey(0))[1]
             logits = logits[zero_idx - 1, :] # chose the last token representation
             
             gen = inference_model.out_head(logits) / temperature
