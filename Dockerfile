@@ -1,5 +1,7 @@
-# Colab image
-FROM europe-docker.pkg.dev/colab-images/public/runtime
+#FROM ubuntu:latest
+FROM python:3.11
+
+ENV WANDB_API_KEY=78c7285b02548bf0c06dca38776c08bb6018593f
 
 # Install base utilities
 RUN apt-get update && \
@@ -11,6 +13,9 @@ RUN apt-get update && \
     apt-get clean && \
     rm -rf /var/lib/apt/lists/*
 
-USER root
-RUN pip3 install Ipython matplotlib wandb jax equinox jaxtyping optax
-RUN pip3 install einops tqdm jupyterlab numpy pandas scipy
+RUN pip3 install Ipython matplotlib
+RUN pip3 install numpy pandas scipy
+
+RUN pip3 install -q jax[tpu] -f https://storage.googleapis.com/jax-releases/libtpu_releases.html
+RUN pip3 install -q datasets icecream tokenizers wandb einops torch tqdm jaxtyping optax equinox jaxlib
+RUN pip3 uninstall tensorflow -y

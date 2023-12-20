@@ -18,3 +18,23 @@ clear; python3 train_model.py \--save_dir /Users/neel/Documents/research/ReAct_J
 # Inference
 python3 inferencer.py --checkpoint_path '/Users/neel/Documents/research/ReAct_Jax/ReAct/outputs/model 5000.eqx' --num_blocks 3 --width 256 --n_heads 4 --seqlen 196  --prompt "Sam is sad because"
 ```
+
+## Other commands
+
+Getting a preemptible TPUv4-8 node
+
+```shell
+gcloud alpha compute tpus queued-resources create node-v4 \
+--node-id node-v4 \
+--project react-jax \
+--zone us-central2-b \
+--accelerator-type v4-8 \
+--runtime-version tpu-vm-v4-base \
+--best-effort
+```
+
+Docker:
+
+```shell
+sudo docker run -it --rm --privileged --entrypoint /bin/bash neel04/react_image:latest
+```

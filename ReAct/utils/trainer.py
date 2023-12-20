@@ -26,21 +26,22 @@ from .helpers import get_rand_nums, half_precision
 def n_k_loop(model: eqx.Module, input_arr: Array, pad_mask: Array, n: int, k: int, key: PRNGKeyArray) -> Array:
     # dummy thought mimicking intermediate shape in model forward pass
     dummy_thought = get_dummy_thought(input_arr, model.bottleneck)
+    key1, key2 = jax.random.split(key, 2)
     
     # forward pass the model without tracking grads
     _, intermediate_array = model(
         input_arr, n,
         pad_mask=pad_mask,
         prev_thought=dummy_thought,
-        key=key)
+        key=key1)
     
-    p = 0.25 # probability of disabling n+k
-    cond = jax.random.uniform(key, ()) >= (1 - p) # flag to disable n+k, only do k
+    p = 0.25 # probability of doing n+k
+    cond = jax.random.uniform(key, ()) >= (1 - p) # flag that disables n+k when True
     
     intermediate_array, cond = jax.lax.stop_gradient(intermediate_array), jax.lax.stop_gradient(cond)
     
     # n-k passes, but track the gradient this time
-    output, _ = model(input_arr, k, pad_mask=pad_mask, prev_thought=(intermediate_array, cond), key=key)
+    output, _ = model(input_arr, k, pad_mask=pad_mask, prev_thought=(intermediate_array, cond), key=key2)
 
     return output
 
@@ -64,7 +65,7 @@ def _compute_softmax_cross_entropy_loss(pred_y: Array, y_one_hot: Array, pad_mas
     n = jnp.repeat(n[:, None], loss.shape[1], axis=-1)
     k = jnp.repeat(k[:, None], loss.shape[1], axis=-1)
 
-    loss = (loss * (n + k)).sum(-1) # across the sequence
+    loss = (loss * k).sum(-1) # across the sequence
     
     return loss.mean() # across all the batches
     
