@@ -1,5 +1,4 @@
-#FROM ubuntu:latest
-FROM python:3.11
+FROM python:3.10
 
 ENV WANDB_API_KEY=78c7285b02548bf0c06dca38776c08bb6018593f
 
