@@ -26,44 +26,41 @@ def n_k_loop(model: eqx.Module, input_arr: Array, pad_mask: Array, n: int, k: in
     key1, key2 = jax.random.split(key, 2)
     
     # forward pass the model without tracking grads
-    _, intermediate_array = model(
-        input_arr, n,
-        pad_mask=pad_mask,
-        prev_thought=None,
-        key=key1)
+    #_, intermediate_array = model(
+        #input_arr, n,
+        #pad_mask=pad_mask,
+        #prev_thought=None,
+        #key=key1)
     
-    intermediate_array = jax.lax.stop_gradient(intermediate_array)
+    #intermediate_array = jax.lax.stop_gradient(intermediate_array)
     
     # n-k passes, but track the gradient this time
-    output_k, _ = model(input_arr, k, pad_mask=pad_mask, prev_thought=None, key=key2)
-    output_n_k, _ = model(input_arr, k, pad_mask=pad_mask, prev_thought=intermediate_array, key=key2)
+    output, _ = model(input_arr, n, pad_mask=pad_mask, prev_thought=None, key=key2)
 
-    return output_k, output_n_k
+    return output
 
 @eqx.filter_value_and_grad
 def compute_loss(model: eqx.Module, x: Array, y: Array, pad_mask: Array,
                  n: int, k: int, num_classes: int = 2, keys: PRNGKeyArray = None):
     
-    pred_y, pred_y_n_k = jax.vmap(n_k_loop, in_axes=(None, 0, 0, 0, 0, 0))(model, x, pad_mask, n, k, keys) # (batch_size, seqlen, num_classes)
+    pred_y = jax.vmap(n_k_loop, in_axes=(None, 0, 0, 0, 0, 0))(model, x, pad_mask, n, k, keys) # (batch_size, seqlen, num_classes)
     
     y_one_hot = jax.nn.one_hot(y, num_classes=num_classes) # (batch_size, seqlen, num_classes)
     
-    loss = _compute_softmax_cross_entropy_loss(pred_y, pred_y_n_k, y_one_hot, pad_mask, n, k)
+    loss = _compute_softmax_cross_entropy_loss(pred_y, y_one_hot, pad_mask, n, k)
     
     return loss
 
 @jax.jit
-def _compute_softmax_cross_entropy_loss(pred_y: Array, pred_y_n_k: Array, y_one_hot: Array,
+def _compute_softmax_cross_entropy_loss(pred_y: Array, y_one_hot: Array,
                                         pad_mask: Array, n: Array, k: Array) -> Array:
     
     loss = -jnp.sum(jax.nn.log_softmax(pred_y, axis=-1) * y_one_hot, axis=-1)
-    loss_n_k = -jnp.sum(jax.nn.log_softmax(pred_y_n_k, axis=-1) * y_one_hot, axis=-1)
     
     n = jnp.repeat(n[:, None], loss.shape[1], axis=-1)
     k = jnp.repeat(k[:, None], loss.shape[1], axis=-1)
 
-    cum_loss = loss_n_k * 0.25 + loss
-    loss = (cum_loss * k).sum(-1) # across the sequence
+    loss = (loss * k).sum(-1) # across the sequence
     
     return loss.mean() # across all the batches
 
