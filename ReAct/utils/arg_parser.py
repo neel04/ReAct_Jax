@@ -25,8 +25,8 @@ def parse_args():
     parser.add_argument('--max_iters', type=int, default=10,
                         help='Number of iterations. Default: 10')
 
-    parser.add_argument('--seqlen', type=int, default=32,
-                        help='Sequence length. Default: 32')
+    parser.add_argument('--seqlen', type=int, default=196,
+                        help='Sequence length. Default: 196')
 
     parser.add_argument('--batch_size', type=int, default=208,
                         help='Batch size. Default: 208')
@@ -46,8 +46,8 @@ def parse_args():
     parser.add_argument('--epochs', type=int, default=1,
                         help='Number of epochs. Default: 1')
 
-    parser.add_argument('--save_interval', type=int, default=1000,
-                        help='Save interval. Default: 1000')
+    parser.add_argument('--save_interval', type=int, default=2500,
+                        help='Save interval. Default: 2500')
     
     parser.add_argument('--log_interval', type=int, default=1000,
                         help='Log interval. Default: 1000')
@@ -57,6 +57,9 @@ def parse_args():
 
     parser.add_argument('--debug', action='store_true', default=False,
                         help='Debug mode - disables JIT. Default: False')
+    
+    parser.add_argument('--bf16', action='store_true', default=False,
+                        help='Enable mixed precision training. Default: False')
     
     parser.add_argument('--wandb', action='store_const', const='online', default='disabled',
                     help='Enable wandb logging. Default: disabled')
@@ -69,7 +72,7 @@ def parse_args():
     
     parser.add_argument('--resume', type=str, default=None,
                         help='Obtain WandB run_path from Overview tab and append the'
-                             'epoch number. \nExample arg: "neel/ReAct_Jax/6ktmhalt/ + 200"')
+                             'step number. \nExample arg: "neel/ReAct_Jax/6ktmhalt/ + 200"')
 
     args = parser.parse_args()
     return args

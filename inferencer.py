@@ -1,17 +1,21 @@
 import os
 
-import equinox as eqx
 import jax
 from jaxtyping import PRNGKeyArray
+from icecream import ic
 
+from ReAct.data.tinystories import TinyStoriesDataset
 from ReAct.model.react import React
 from ReAct.utils.arg_parser import parse_args
 from ReAct.utils.helpers import convert_to_jax, count_params, load_eqx_obj
 from ReAct.utils.logger import UnifiedLogger
-
+from ReAct.utils.trainer import Trainer
 
 class Inferencer:
     def __init__(self, args, logger):
+        self.dummy_dataset = TinyStoriesDataset(split='train', max_length=args.seqlen, bsz=args.batch_size)
+        self.trainer = Trainer(args, logger, self.dummy_dataset.tok.decode, self.dummy_dataset.shift_tokens)
+        
         self.key = jax.random.PRNGKey(69)
         self.logger = logger.my_logger()
         
@@ -19,29 +23,20 @@ class Inferencer:
             setattr(self, k, v)
 
     def skeleton_model(self, key: PRNGKeyArray):
-        model = React(
-            self.seqlen, self.max_iters, self.num_blocks, self.width,
-            self.drop_rate, self.num_classes, key
-        )
+        model = React(self.n_heads, self.seqlen, self.max_iters, self.num_blocks,
+                      self.width, self.drop_rate, self.num_classes, key)
         
         return model
     
     def encode_input(self, my_input: str):
-        encoded = [int(i) for i in my_input]
-        
-        if len(encoded) < self.seqlen:
-            self.logger.info('Input is too short, padding with 0s')
-            encoded = encoded + [0] * (self.seqlen - len(encoded))
-        
-        assert all([i in [0, 1] for i in encoded]), "Input must be binary"
-        assert len(encoded) == self.seqlen, "BUG: Input must be of length --seqlen"
-        
+        encoded = self.dummy_dataset.tok.encode(my_input).ids[:-1]
+        # Remove all 0 and 2 elements, which are padding and EOS tokens
+        encoded = [i for i in encoded if i not in [0, 2]]
         return encoded
-        
     
-    def inference(self, my_input: str):
+    def inference(self, my_input: str, num_tokens: int = 32):
         model = self.skeleton_model(self.key)
-        model = load_eqx_obj(self.checkpoint_path)
+        model = load_eqx_obj(self.checkpoint_path, model)
         
         count_params(model)
         
@@ -49,10 +44,10 @@ class Inferencer:
         my_input = convert_to_jax(my_input)
         
         # Make prediction
-        prediction = model(my_input, self.max_iters, None, False).argmax(-1)
+        output = self.trainer.generate(model, my_input, num_tokens, temperature=0.35)
         
-        return [i.item() for i in prediction]
-
+        return output
+    
 if __name__ == '__main__':
     
     args = parse_args()
@@ -77,6 +72,4 @@ if __name__ == '__main__':
     print(f"\n{'~' * 50}\n")
     print(f'Input:          {prompt}')
     print(f'Model Output:   {output}')
-    print(f'Correct Output: {prompt[::-1]}')
-    print(f'\nAccuracy: {sum([1 for i, j in zip(prompt[::-1], output) if i == j]) / len(prompt) * 100}%')
     print(f"\n{'~' * 50}\n")
