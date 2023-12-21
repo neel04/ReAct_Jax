@@ -3,22 +3,48 @@ ReAct architecture and training loop - now in Jax!
 
 ### Docker
 
+This is the runner script for the Docker container. It pulls the latest version of the code from the `dev` branch, and runs `train_model.py` with the arguments specified in `TRAIN_ARGS`.
+
+Thus you can easily modify the arguments in the below codeblock, and save the updated file somewhere. Everytime you run it, it would pull the latest git version on `BRANCH`.
+
+> **Run below script with elevated permissions! `sudo`**
+
 ```bash
-sudo docker run -it --rm --privileged -e WANDB_API_KEY=78c7285b02548bf0c06dca38776c08bb6018593f --entrypoint /bin/bash neel04/react_image:latest
-git clone -b dev https://github.com/neel04/ReAct_Jax.git
+#!/bin/bash
+# Setting up preliminaries
+BRANCH="dev"
+IMAGE_NAME="docker.io/neel04/react_image:latest"
+CONTAINER_NAME="main_container"
 
-export jax_threefry_partitionable=1
-export WANDB_API_KEY=78c7285b02548bf0c06dca38776c08bb6018593f 
-cd ./ReAct_Jax
-
-# Training
-python3 train_model.py \
---save_dir ./ReAct_Jax/ReAct/outputs/ --epochs 2 --warmup_steps 250 \
+# arguments for train_model.py
+TRAIN_ARGS="
+--save_dir ./ReAct/outputs/ --epochs 2 --warmup_steps 250 \
 --lr 1.5e-3 --num_blocks 2 \
---width 96 --batch_size 256 --n_heads 2 --max_iters 1 \
+--width 96 --batch_size 256 --n_heads 2 --max_iters 5 \
 --weight_decay 1e-4 --drop_rate 0.02  \
 --log_interval 1000 --save_interval 1000 --seqlen 192  \
 --bf16 --wandb
+"
+
+git clone -b $BRANCH https://github.com/neel04/ReAct_Jax.git
+git pull --all
+
+# Stop all running Docker containers
+echo "Stopping all running Docker containers..."
+docker stop $(docker ps -a -q)
+
+# Run the Docker container
+echo "Running Docker container..."
+docker run --pull 'always' -v $(pwd)/ReAct_Jax/:/ReAct_Jax/ --privileged --rm --net=host --name $CONTAINER_NAME -it -d $IMAGE_NAME
+
+# Get docker container ID to copy files
+CONTAINER_ID=$(docker ps -aqf "name=$CONTAINER_NAME")
+docker cp $(pwd)/ReAct_Jax $CONTAINER_ID:/
+export JAX_TRACEBACK_FILTERING=off
+
+# Execute train_model.py inside the Docker container
+echo "Executing train_model.py inside Docker container..."
+docker exec --privileged $CONTAINER_NAME python3 train_model.py $TRAIN_ARGS
 ```
 
 ## Inferencing
