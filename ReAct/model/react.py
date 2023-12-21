@@ -192,20 +192,16 @@ class React(eqx.Module):
 
     @partial(jax.jit, static_argnames=['training'])
     def __call__(self, input: Array, iters_to_do: int, pad_mask: Array,
-                 prev_thought: Tuple, training: bool = True,
+                 prev_thought: Optional[Array] = None, training: bool = True,
                  key: Optional[PRNGKeyArray] = None) -> Array:
         
         input_arr = jax.vmap(self.embed_layer)(input) + self.pos_enc # (batch, seqlen, bottleneck)
         input_arr = input_arr.astype(jnp.bfloat16)
         
-        prev_thought, cond = prev_thought # unpack the tuple where cond indicates whether we have a previous thought
-    
-        x = jax.lax.cond(
-            cond,
-            lambda x: prev_thought, # we continue from the previous thought
-            lambda x: input_arr, # no previous thought, so we use the input
-            input_arr
-        )
+        if eqx.is_array(prev_thought):
+            x = prev_thought
+        else:
+            x = input_arr
         
         interim_thought = self.iterate_for_steps(x, pad_mask, iters_to_do, input_arr, key) # (batch, seqlen, bottleneck)
         

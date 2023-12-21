@@ -15,8 +15,7 @@ from ReAct.utils.helpers import (
     convert_to_jax,
     count_params,
     load_eqx_obj,
-    save_eqx_obj,
-    get_dummy_thought
+    save_eqx_obj
 )
 from ReAct.utils.logger import UnifiedLogger
 
@@ -24,48 +23,47 @@ from .helpers import get_rand_nums, half_precision
 
 @jax.jit
 def n_k_loop(model: eqx.Module, input_arr: Array, pad_mask: Array, n: int, k: int, key: PRNGKeyArray) -> Array:
-    # dummy thought mimicking intermediate shape in model forward pass
-    dummy_thought = get_dummy_thought(input_arr, model.bottleneck)
     key1, key2 = jax.random.split(key, 2)
     
     # forward pass the model without tracking grads
     _, intermediate_array = model(
         input_arr, n,
         pad_mask=pad_mask,
-        prev_thought=dummy_thought,
+        prev_thought=None,
         key=key1)
     
-    p = 0.25 # probability of doing n+k
-    cond = jax.random.uniform(key, ()) >= (1 - p) # flag that disables n+k when True
-    
-    intermediate_array, cond = jax.lax.stop_gradient(intermediate_array), jax.lax.stop_gradient(cond)
+    intermediate_array = jax.lax.stop_gradient(intermediate_array)
     
     # n-k passes, but track the gradient this time
-    output, _ = model(input_arr, k, pad_mask=pad_mask, prev_thought=(intermediate_array, cond), key=key2)
+    output_k, _ = model(input_arr, k, pad_mask=pad_mask, prev_thought=None, key=key2)
+    output_n_k, _ = model(input_arr, k, pad_mask=pad_mask, prev_thought=intermediate_array, key=key2)
 
-    return output
+    return output_k, output_n_k
 
 @eqx.filter_value_and_grad
 def compute_loss(model: eqx.Module, x: Array, y: Array, pad_mask: Array,
                  n: int, k: int, num_classes: int = 2, keys: PRNGKeyArray = None):
     
-    pred_y = jax.vmap(n_k_loop, in_axes=(None, 0, 0, 0, 0, 0))(model, x, pad_mask, n, k, keys) # (batch_size, seqlen, num_classes)
+    pred_y, pred_y_n_k = jax.vmap(n_k_loop, in_axes=(None, 0, 0, 0, 0, 0))(model, x, pad_mask, n, k, keys) # (batch_size, seqlen, num_classes)
     
     y_one_hot = jax.nn.one_hot(y, num_classes=num_classes) # (batch_size, seqlen, num_classes)
     
-    loss = _compute_softmax_cross_entropy_loss(pred_y, y_one_hot, pad_mask, n, k)
+    loss = _compute_softmax_cross_entropy_loss(pred_y, pred_y_n_k, y_one_hot, pad_mask, n, k)
     
     return loss
 
 @jax.jit
-def _compute_softmax_cross_entropy_loss(pred_y: Array, y_one_hot: Array, pad_mask: Array,
-                                        n: Array, k: Array) -> Array:
+def _compute_softmax_cross_entropy_loss(pred_y: Array, pred_y_n_k: Array, y_one_hot: Array,
+                                        pad_mask: Array, n: Array, k: Array) -> Array:
+    
     loss = -jnp.sum(jax.nn.log_softmax(pred_y, axis=-1) * y_one_hot, axis=-1)
+    loss_n_k = -jnp.sum(jax.nn.log_softmax(pred_y_n_k, axis=-1) * y_one_hot, axis=-1)
     
     n = jnp.repeat(n[:, None], loss.shape[1], axis=-1)
     k = jnp.repeat(k[:, None], loss.shape[1], axis=-1)
 
-    loss = (loss * k).sum(-1) # across the sequence
+    cum_loss = loss_n_k * 0.25 + loss
+    loss = (cum_loss * k).sum(-1) # across the sequence
     
     return loss.mean() # across all the batches
 
@@ -195,10 +193,9 @@ class Trainer:
         
         input_arr = batch[0]
         pad_mask = batch[2]
-        dummy_thought = get_dummy_thought(input_arr[0], model.bottleneck)
         
         pred_y = jax.vmap(model, in_axes=(0, 0, 0, None, None, 0))(
-            input_arr, eval_iters, pad_mask, dummy_thought, False, keys)
+            input_arr, eval_iters, pad_mask, None, False, keys)
         
         # compute accuracy
         y_hat = jax.nn.softmax(pred_y, axis=-1).argmax(-1) * pad_mask
@@ -336,8 +333,7 @@ class Trainer:
             except IndexError:
                 zero_idx = self.seqlen
             
-            dummy_thought = get_dummy_thought(padded_array, model.bottleneck)
-            logits = inference_model(padded_array, self.max_iters, pad_mask, dummy_thought, True, jax.random.PRNGKey(0))[1]
+            logits = inference_model(padded_array, self.max_iters, pad_mask, None, True, jax.random.PRNGKey(0))[1]
             logits = logits[zero_idx - 1, :] # chose the last token representation
             
             gen = inference_model.out_head(logits) / temperature
