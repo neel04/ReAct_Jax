@@ -6,38 +6,40 @@ import equinox as eqx
 import jax
 import jax.numpy as jnp
 import optax
+from jax.experimental.compilation_cache import compilation_cache
 from jaxtyping import Array, PRNGKeyArray
 from torch.utils.data import DataLoader
 from tqdm.auto import tqdm
 
 from ReAct.model.react import React
-from ReAct.utils.helpers import (
-    convert_to_jax,
-    count_params,
-    load_eqx_obj,
-    save_eqx_obj
-)
+from ReAct.utils.helpers import convert_to_jax, count_params, load_eqx_obj, save_eqx_obj
 from ReAct.utils.logger import UnifiedLogger
 
 from .helpers import get_rand_nums, half_precision
 
+compilation_cache.initialize_cache('./compilation_cache')
+
 @jax.jit
 def n_k_loop(model: eqx.Module, input_arr: Array, pad_mask: Array, n: int, k: int, key: PRNGKeyArray) -> Array:
     key1, key2 = jax.random.split(key, 2)
+    p: float = 0.15 # probability of using (n+k) vs (k)
+    idx = jax.random.uniform(key1, shape=()) <= p
     
-    # forward pass the model without tracking grads
-    #_, intermediate_array = model(
-        #input_arr, n,
-        #pad_mask=pad_mask,
-        #prev_thought=None,
-        #key=key1)
+    # Only k passes, but track the gradient
+    output_k, _ = model(input_arr, k, pad_mask=pad_mask, key=key1) # only do k passes with the input
     
-    #intermediate_array = jax.lax.stop_gradient(intermediate_array)
+    # n+k mechanism - forward pass the model without tracking grads
+    _, intermediate_array = model(
+        input_arr, n,
+        pad_mask=pad_mask,
+        key=key1)
     
-    # n-k passes, but track the gradient this time
-    output, _ = model(input_arr, n, pad_mask=pad_mask, prev_thought=None, key=key2)
+    intermediate_array = jax.lax.stop_gradient(intermediate_array)
+    
+    # k passes, but track the gradient this time
+    output, _ = model(intermediate_array, k, pad_mask=pad_mask, prev_thought=True, key=key2)
 
-    return output
+    return output * idx + output_k * (1 - idx)
 
 @eqx.filter_value_and_grad
 def compute_loss(model: eqx.Module, x: Array, y: Array, pad_mask: Array,
@@ -192,7 +194,7 @@ class Trainer:
         pad_mask = batch[2]
         
         pred_y = jax.vmap(model, in_axes=(0, 0, 0, None, None, 0))(
-            input_arr, eval_iters, pad_mask, None, False, keys)
+            input_arr, eval_iters, pad_mask, False, False, keys)
         
         # compute accuracy
         y_hat = jax.nn.softmax(pred_y, axis=-1).argmax(-1) * pad_mask
@@ -330,7 +332,7 @@ class Trainer:
             except IndexError:
                 zero_idx = self.seqlen
             
-            logits = inference_model(padded_array, self.max_iters, pad_mask, None, True, jax.random.PRNGKey(0))[1]
+            logits = inference_model(padded_array, self.max_iters, pad_mask, False, True, jax.random.PRNGKey(0))[1]
             logits = logits[zero_idx - 1, :] # chose the last token representation
             
             gen = inference_model.out_head(logits) / temperature

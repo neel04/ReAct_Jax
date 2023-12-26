@@ -57,14 +57,14 @@ class AttentionBlock(eqx.Module):
         
         return mask
 
-    def __call__(self, x: Array, key: PRNGKeyArray, mask: Optional[Array] = None):
+    def __call__(self, x: Array, input_arr: Array, key: PRNGKeyArray, mask: Optional[Array] = None):
         # x: (seqlen, bottleneck)
         key_1, key_2 = jax.random.split(key, 2)
         
         mask = jnp.zeros_like(x) if mask is None else mask
         x = jax.vmap(self.ln1)(x.astype(jnp.bfloat16))
         
-        x += self.attn_gate(x, x, x,
+        x += self.attn_gate(x, input_arr, input_arr,
                             mask=self._make_self_attention_mask(mask),
                             key=key_1, inference=False)
         #x += self.attn_gate(x, mask=self._make_mixer_mask(mask), key=key)
@@ -79,7 +79,6 @@ class RecurrentModule(eqx.Module):
     Bunch of AttentionBlocks
     '''
     attention_blocks: List[AttentionBlock]
-    reshape_layer: eqx.Module
 
     def __init__(self, seqlen: int, drop_rate: float, n_heads: int,
                  num_blocks: int, bottleneck: int, key: PRNGKeyArray):  # noqa: E501
@@ -90,17 +89,18 @@ class RecurrentModule(eqx.Module):
         
         for key in keys:
             self.attention_blocks.append(
-                AttentionBlock(seqlen, n_heads, drop_rate, bottleneck * 2, key))
+                AttentionBlock(seqlen, n_heads, drop_rate, bottleneck, key))
         
-        self.reshape_layer = LinearProj(bottleneck * 2, bottleneck, key=key)
+    def __call__(self, x: Float[Array, ' seqlen in_dim'], input_arr: Array,
+                 pad_mask: Array, key: PRNGKeyArray) -> Float[Array, ' seqlen out_dim']:
         
-    def __call__(self, x: Float[Array, ' seqlen in_dim'], pad_mask: Array,
-                 key: PRNGKeyArray) -> Float[Array, ' seqlen out_dim']:
-        
-        for block in self.attention_blocks:
-            x = block(x, key, pad_mask).astype(jnp.bfloat16)
-        
-        x = self.reshape_layer(x)
+        for idx, block in enumerate(self.attention_blocks):
+            if idx == 0:
+                # cross attention with input_arr
+                x = block(x, input_arr, key, pad_mask).astype(jnp.bfloat16)
+            else:
+                # self attention
+                x = block(x, x, key, pad_mask).astype(jnp.bfloat16)
         
         return x
 
@@ -179,33 +179,31 @@ class React(eqx.Module):
         def body_fun(carry):
             thought, mask, i = carry
             
-            latent = jnp.concatenate([thought, input_arr], axis=-1).astype(jnp.bfloat16)
-            latent = self.main_block(latent, mask, key).astype(jnp.bfloat16)
+            #latent = jnp.concatenate([thought, input_arr], axis=-1).astype(jnp.bfloat16)
+            latent = thought.astype(jnp.bfloat16)
+            latent = self.main_block(latent, input_arr, mask, key).astype(jnp.bfloat16)
             
             latent = jax.vmap(self.post_ln)(latent).astype(jnp.bfloat16) # LN to keep scales tidy
             
             return (latent, mask, i + 1)
         
-        final_thought = eqx.internal.while_loop(cond_fun, body_fun, (interim_thought, mask, 1), max_steps=self.max_iters, kind='checkpointed')
+        final_thought = eqx.internal.while_loop(cond_fun, body_fun, (interim_thought, mask, 1), max_steps=self.max_iters, kind='bounded')
         
         return final_thought[0] # only get the latent vector
 
-    @partial(jax.jit, static_argnames=['training'])
-    def __call__(self, input: Array, iters_to_do: int, pad_mask: Array,
-                 prev_thought: Optional[Array] = None, training: bool = True,
+    @partial(jax.jit, static_argnames=['training', 'prev_thought'])
+    def __call__(self, input_arr: Array, iters_to_do: int, pad_mask: Array,
+                 prev_thought: bool = False, training: bool = True,
                  key: Optional[PRNGKeyArray] = None) -> Array:
         
-        input_arr = jax.vmap(self.embed_layer)(input) + self.pos_enc # (batch, seqlen, bottleneck)
-        input_arr = input_arr.astype(jnp.bfloat16)
+        if not prev_thought:
+            input_arr = jax.vmap(self.embed_layer)(input_arr) + self.pos_enc # (batch, seqlen, bottleneck)
         
-        if eqx.is_array(prev_thought):
-            x = prev_thought
-        else:
-            x = input_arr
+        interim_thought = input_arr.astype(jnp.bfloat16)
         
-        interim_thought = self.iterate_for_steps(x, pad_mask, iters_to_do, input_arr, key) # (batch, seqlen, bottleneck)
+        output = self.iterate_for_steps(interim_thought, pad_mask, iters_to_do, input_arr, key) # (batch, seqlen, bottleneck)
         
         if training:
-            return self.out_head(interim_thought), interim_thought
+            return self.out_head(output), output
         else:
-            return self.out_head(interim_thought)
+            return self.out_head(output)
