@@ -13,7 +13,7 @@ Thus you can easily modify the arguments in the below codeblock, and save the up
 #!/bin/bash
 BRANCH="dev"
 IMAGE_NAME="docker.io/neel04/react_image:latest"
-CONTAINER_NAME="main_container"
+CONTAINER_NAME="react_container"
 
 # arguments for train_model.py
 TRAIN_ARGS="--save_dir ./ReAct/outputs/ --epochs 2 --warmup_steps 250 \
@@ -26,24 +26,22 @@ TRAIN_ARGS="--save_dir ./ReAct/outputs/ --epochs 2 --warmup_steps 250 \
 git clone -b $BRANCH https://github.com/neel04/ReAct_Jax.git
 git pull --all
 
-sudo -s <<EOF
 # Stop all running Docker containers
 echo "Stopping all running Docker containers..."
-docker stop $(docker ps -a -q)
+sudo docker stop $(sudo docker ps -a -q)
 
 # Run the Docker container
 echo "Running Docker container..."
-docker run --pull 'always' -v $(pwd)/ReAct_Jax/:/ReAct_Jax/ -e JAX_TRACEBACK_FILTERING=off --privileged --rm --net=host --name $CONTAINER_NAME -it -d $IMAGE_NAME
+sudo docker run --pull 'always' -v $(pwd)/ReAct_Jax/:/ReAct_Jax/ -e JAX_TRACEBACK_FILTERING=off --privileged --rm --net=host --name $CONTAINER_NAME -it -d $IMAGE_NAME
 
 # Get docker container ID to copy files
-CONTAINER_ID=$(docker ps -aqf "name=$CONTAINER_NAME")
-docker cp $(pwd)/ReAct_Jax $CONTAINER_ID:/
+CONTAINER_ID=$(sudo docker ps -aqf "name=$CONTAINER_NAME")
+sudo docker cp $(pwd)/ReAct_Jax $CONTAINER_ID:/
 export JAX_TRACEBACK_FILTERING=off
 
 # Execute train_model.py inside the Docker container
 echo "Executing train_model.py inside Docker container..."
-docker exec --privileged $CONTAINER_NAME python3 train_model.py $TRAIN_ARGS
-EOF
+sudo docker exec --privileged $CONTAINER_NAME python3 train_model.py $TRAIN_ARGS
 
 echo "Finished training!"
 ```

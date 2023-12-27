@@ -64,7 +64,7 @@ class AttentionBlock(eqx.Module):
         mask = jnp.zeros_like(x) if mask is None else mask
         x = jax.vmap(self.ln1)(x.astype(jnp.bfloat16))
         
-        x += self.attn_gate(x, input_arr, input_arr,
+        x += self.attn_gate(input_arr, x, x,
                             mask=self._make_self_attention_mask(mask),
                             key=key_1, inference=False)
         #x += self.attn_gate(x, mask=self._make_mixer_mask(mask), key=key)
