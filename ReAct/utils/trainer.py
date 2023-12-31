@@ -22,7 +22,7 @@ compilation_cache.initialize_cache('./compilation_cache')
 @jax.jit
 def n_k_loop(model: eqx.Module, input_arr: Array, pad_mask: Array, n: int, k: int, key: PRNGKeyArray) -> Array:
     key1, key2 = jax.random.split(key, 2)
-    p: float = 0.15 # probability of using (n+k) vs (k)
+    p: float = 0. # probability of using (n+k) vs (k)
     idx = jax.random.uniform(key1, shape=()) <= p
     
     # Only k passes, but track the gradient
@@ -202,12 +202,12 @@ class Trainer:
         
         # compute loss
         y_one_hot = jax.nn.one_hot(batch[1], num_classes=num_classes) # (batch_size, seqlen, num_classes)
-        loss = optax.softmax_cross_entropy(pred_y, y_one_hot)
+        loss = optax.softmax_cross_entropy(pred_y, y_one_hot).mean()
         
         # compute perplexity
         perplexity = jnp.exp(loss)
         
-        return accuracy, loss.mean(), perplexity
+        return accuracy, loss, perplexity
     
     def train(self, epochs: int, trainloader: DataLoader, valloader: DataLoader, 
               key: PRNGKeyArray):

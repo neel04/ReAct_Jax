@@ -79,13 +79,15 @@ class RecurrentModule(eqx.Module):
     Bunch of AttentionBlocks
     '''
     attention_blocks: List[AttentionBlock]
+    reshape_layer: eqx.Module
 
     def __init__(self, seqlen: int, drop_rate: float, n_heads: int,
                  num_blocks: int, bottleneck: int, key: PRNGKeyArray):  # noqa: E501
         
         keys = jax.random.split(key, num_blocks)
-
+        
         self.attention_blocks = []
+        self.reshape_layer = LinearProj(bottleneck * 2, bottleneck, key=key)
         
         for key in keys:
             self.attention_blocks.append(
@@ -93,6 +95,8 @@ class RecurrentModule(eqx.Module):
         
     def __call__(self, x: Float[Array, ' seqlen in_dim'], input_arr: Array,
                  pad_mask: Array, key: PRNGKeyArray) -> Float[Array, ' seqlen out_dim']:
+        
+        x = self.reshape_layer(x) # (batch, seqlen, bottleneck)
         
         for idx, block in enumerate(self.attention_blocks):
             if idx == 0:
@@ -119,6 +123,9 @@ class output_head(eqx.Module):
         return x
 
 class React(eqx.Module):
+    '''
+    The core ReAct model that holds utilities for performing recursive iterations
+    '''
     max_iters: int = eqx.field(static=True)
     bottleneck: int = eqx.field(static=True)
     SEQLEN: int = eqx.field(static=True)
@@ -179,15 +186,14 @@ class React(eqx.Module):
         def body_fun(carry):
             thought, mask, i = carry
             
-            #latent = jnp.concatenate([thought, input_arr], axis=-1).astype(jnp.bfloat16)
-            latent = thought.astype(jnp.bfloat16)
+            latent = jnp.concatenate([thought, input_arr], axis=-1).astype(jnp.bfloat16)
             latent = self.main_block(latent, input_arr, mask, key).astype(jnp.bfloat16)
             
             latent = jax.vmap(self.post_ln)(latent).astype(jnp.bfloat16) # LN to keep scales tidy
             
             return (latent, mask, i + 1)
         
-        final_thought = eqx.internal.while_loop(cond_fun, body_fun, (interim_thought, mask, 1), max_steps=self.max_iters, kind='bounded')
+        final_thought = eqx.internal.while_loop(cond_fun, body_fun, (interim_thought, mask, 1), max_steps=self.max_iters, kind='checkpointed')
         
         return final_thought[0] # only get the latent vector
 
