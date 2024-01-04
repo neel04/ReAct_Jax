@@ -41,8 +41,11 @@ class TinyStoriesDataset:
         # Simply batch the data stream
         return {k: [v] for k, v in batch.items()}
     
-    def create_dataloader(self):
-        dataset = self.dataset.select(range(2048))
+    def create_dataloader(self, debug: bool = False):
+        dataset = self.dataset
+        
+        if debug:
+            dataset = dataset.select(range(2048))
         
         dataset = dataset.map(self.tokenize_and_pad, batched=True, batch_size=self.bsz,
                               keep_in_memory=True, drop_last_batch=True)
