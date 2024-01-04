@@ -12,7 +12,7 @@ from torch.utils.data import DataLoader
 from tqdm.auto import tqdm
 
 from ReAct.model.react import React
-from ReAct.utils.helpers import convert_to_jax, count_params, load_eqx_obj, save_eqx_obj
+from ReAct.utils.helpers import count_params, load_eqx_obj, save_eqx_obj
 from ReAct.utils.logger import UnifiedLogger
 
 from .helpers import get_rand_nums, half_precision
@@ -21,25 +21,10 @@ compilation_cache.initialize_cache('./compilation_cache')
 
 @jax.jit
 def n_k_loop(model: eqx.Module, input_arr: Array, pad_mask: Array, n: int, k: int, key: PRNGKeyArray) -> Array:
-    key1, key2 = jax.random.split(key, 2)
-    p: float = 0. # probability of using (n+k) vs (k)
-    idx = jax.random.uniform(key1, shape=()) <= p
-    
     # Only k passes, but track the gradient
-    output_k, _ = model(input_arr, k, pad_mask=pad_mask, key=key1) # only do k passes with the input
-    
-    # n+k mechanism - forward pass the model without tracking grads
-    _, intermediate_array = model(
-        input_arr, n,
-        pad_mask=pad_mask,
-        key=key1)
-    
-    intermediate_array = jax.lax.stop_gradient(intermediate_array)
-    
-    # k passes, but track the gradient this time
-    output, _ = model(intermediate_array, k, pad_mask=pad_mask, prev_thought=True, key=key2)
-
-    return output * idx + output_k * (1 - idx)
+    output_k, _ = model(input_arr, k, pad_mask=pad_mask, key=key) # only do k passes with the input
+   
+    return output_k
 
 @eqx.filter_value_and_grad
 def compute_loss(model: eqx.Module, x: Array, y: Array, pad_mask: Array,
@@ -59,7 +44,6 @@ def _compute_softmax_cross_entropy_loss(pred_y: Array, y_one_hot: Array,
     
     loss = -jnp.sum(jax.nn.log_softmax(pred_y, axis=-1) * y_one_hot, axis=-1)
     
-    n = jnp.repeat(n[:, None], loss.shape[1], axis=-1)
     k = jnp.repeat(k[:, None], loss.shape[1], axis=-1)
 
     loss = (loss * k).sum(-1) # across the sequence
@@ -78,13 +62,11 @@ def make_step(model: eqx.Module, x: Array, y: Array, pad_mask: Array, n: int, k:
     return loss, model, opt_state
 
 class Trainer:
-    def __init__(self, args: dict, logger, decode_fn: Callable, mask_fn: Callable, 
-                 shard: Any = None):
+    def __init__(self, args: dict, logger, decode_fn: Callable, shard: Any = None):
         
         self.shard = shard if shard is not None else None
         self.dataset_length = 2119719
-        self.decode_fn = decode_fn
-        self.mask_fn = mask_fn
+        self.decode_fn = decode_fn # decode the ids to text
         
         logger = UnifiedLogger(args, level='DEBUG')
         self.my_logger = logger.my_logger()
@@ -105,20 +87,21 @@ class Trainer:
                                self.max_iters - rndm_n + 1, self.batch_size,
                                bias_val)
         
+        rndm_k = jnp.ones_like(rndm_n) * self.max_iters
+        rndm_n = rndm_k
+        
         rndm_n, rndm_k = jnp.clip(rndm_n, 1, self.max_iters), jnp.clip(rndm_k, 1, self.max_iters)
         rndm_n, rndm_k = rndm_n.astype(int), rndm_k.astype(int)
         
         return rndm_n, rndm_k
 
-    def evaluate_acc(self, model: eqx.Module, loader: DataLoader, eval_iters: int,
-                     keys: List[PRNGKeyArray], mask_fn: Callable):
+    def evaluate_acc(self, model: eqx.Module, loader: DataLoader, eval_iters: int, keys: List[PRNGKeyArray]):
         
         metric = []
 
         for step, batch in enumerate(loader):
-            batch = mask_fn(batch["text"])
-            seq, label, pad_mask = convert_to_jax(batch)
-            seq, label, pad_mask = jax.device_put((seq, label, pad_mask), self.shard)
+            batch = batch['text']
+            seq, label, pad_mask = jax.device_put(batch, self.shard)
             
             acc, loss, ppl = self.compute_metrics(model, (seq, label, pad_mask), eval_iters, self.num_classes, keys)
             
@@ -187,11 +170,9 @@ class Trainer:
         '''
         Computes the accuracy, perplexity, loss of the model w.r.t batch
         '''
+        input_arr, _, pad_mask = batch
         # make an array of size of batch[0] with each element as eval_iters
-        eval_iters = jnp.ones_like(batch[0][:, 0]) * eval_iters
-        
-        input_arr = batch[0]
-        pad_mask = batch[2]
+        eval_iters = jnp.ones_like(input_arr[:, 0]) * eval_iters
         
         pred_y = jax.vmap(model, in_axes=(0, 0, 0, None, None, 0))(
             input_arr, eval_iters, pad_mask, False, False, keys)
@@ -234,20 +215,19 @@ class Trainer:
                 # n k bias schedule
                 step += step_done # for multiple epochs
                 
-                batch = self.mask_fn(batch["text"])
-                seq, label, pad_mask = convert_to_jax(batch)
-                seq, label, pad_mask = jax.device_put((seq, label, pad_mask), self.shard)
-                
+                batch = batch['text']
+                seq, label, pad_mask = jax.device_put(batch, self.shard)
+            
                 loss, model, opt_state = make_step(model, seq, label, pad_mask, rndm_n, rndm_k,
                                                    optim, opt_state, self.num_classes, keys)
                 
                 if step % 25 == 0:
                     # cycling through keys to get new n and k
-                    rndm_n, rndm_k = self.get_n_k(key=keys[step % self.batch_size])
+                    #rndm_n, rndm_k = self.get_n_k(key=keys[step % self.batch_size])
                     
-                    accuracy, loss, perplexity = self.compute_metrics(model, (seq, label, pad_mask),
-                                                                self.max_iters, self.num_classes,
-                                                                keys)
+                    accuracy, loss, perplexity = self.compute_metrics(model, batch, self.max_iters,
+                                                                      self.num_classes, keys)
+                    
                     train_acc.append(accuracy)
                     train_loss.append(loss)
                     train_ppl.append(perplexity.mean())
@@ -271,7 +251,7 @@ class Trainer:
                     train_acc, train_loss, train_ppl = [], [], []
                     
                     ## Validation
-                    val_metrics, val_sample = self.evaluate_acc(model, valloader, self.max_iters, keys, self.mask_fn)
+                    val_metrics, val_sample = self.evaluate_acc(model, valloader, self.max_iters, keys)
                     
                     self.wandb_logger.log(
                         {
@@ -343,21 +323,3 @@ class Trainer:
         self.my_logger.info(f'model generation: {self.decode_fn(input_arr[-max_new_tokens:-1])}\n')
             
         return input_arr
-
-if __name__ == '__main__':
-    x = jnp.ones((32)).astype(int)
-    y = jnp.ones((32)).astype(int)
-    y_one_hot = jax.nn.one_hot(y, num_classes=2)
-    
-    key = jax.random.PRNGKey(0)
-    
-    model = React(32, 15, 3, 128, 0.1, 2, key=key)
-    model = n_k_loop(model)
-    
-    @eqx.filter_value_and_grad
-    def loss(model, x, y, n, k):
-        pred_y = jax.vmap(model)(x, n, k)
-        return -jnp.sum(jax.nn.log_softmax(pred_y) * y_one_hot, axis=-1).mean()
-    
-    output, grads = loss(model, x, y, 10, 5)
-    print(output, grads)

@@ -64,7 +64,7 @@ class AttentionBlock(eqx.Module):
         mask = jnp.zeros_like(x) if mask is None else mask
         x = jax.vmap(self.ln1)(x.astype(jnp.bfloat16))
         
-        x += self.attn_gate(input_arr, x, x,
+        x += self.attn_gate(x, input_arr, input_arr,
                             mask=self._make_self_attention_mask(mask),
                             key=key_1, inference=False)
         #x += self.attn_gate(x, mask=self._make_mixer_mask(mask), key=key)
@@ -103,7 +103,7 @@ class RecurrentModule(eqx.Module):
                 # cross attention with input_arr
                 x = block(x, input_arr, key, pad_mask).astype(jnp.bfloat16)
             else:
-                # self attention
+                # self attention with input_arr
                 x = block(x, x, key, pad_mask).astype(jnp.bfloat16)
         
         return x
@@ -179,23 +179,19 @@ class React(eqx.Module):
     def iterate_for_steps(self, interim_thought: Array, mask: Array, iters_to_do: int, input_arr: Array,
                           key: PRNGKeyArray) -> Array:
         
-        def cond_fun(carry):
-            arr, mask, i = carry
-            return i <= iters_to_do
-
-        def body_fun(carry):
-            thought, mask, i = carry
+        def body_fun(i: int, carry: Tuple):
+            thought, mask = carry
             
             latent = jnp.concatenate([thought, input_arr], axis=-1).astype(jnp.bfloat16)
             latent = self.main_block(latent, input_arr, mask, key).astype(jnp.bfloat16)
-            
             latent = jax.vmap(self.post_ln)(latent).astype(jnp.bfloat16) # LN to keep scales tidy
             
-            return (latent, mask, i + 1)
+            return (latent, mask)
         
-        final_thought = eqx.internal.while_loop(cond_fun, body_fun, (interim_thought, mask, 1), max_steps=self.max_iters, kind='checkpointed')
+        init_val = (interim_thought, mask)
+        final_thought = jax.lax.fori_loop(0, self.max_iters, body_fun, init_val) # recursive over depth = max_iters
         
-        return final_thought[0] # only get the latent vector
+        return final_thought[0]
 
     @partial(jax.jit, static_argnames=['training', 'prev_thought'])
     def __call__(self, input_arr: Array, iters_to_do: int, pad_mask: Array,
