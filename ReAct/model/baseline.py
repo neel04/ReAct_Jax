@@ -49,7 +49,7 @@ class GPT(eqx.Module):
     embed_layer: eqx.Module
     pos_enc: Array
     main_block: eqx.Module
-    lm_head: eqx.Module
+    out_head: eqx.Module
     
     def __init__(self,
                  n_heads: int,
@@ -68,7 +68,7 @@ class GPT(eqx.Module):
 
         self.main_block = main_block(seqlen, width, n_heads, drop_rate, num_blocks, key=keys[1])
         
-        self.lm_head = LinearProj(width, vocab_size, key=key)
+        self.out_head = LinearProj(width, vocab_size, key=key)
     
     def positional_encoding(self, seq_len: int, d_model: int):
         '''
@@ -96,7 +96,7 @@ class GPT(eqx.Module):
         
         output = self.main_block(input_arr, pad_mask, key)
         
-        return self.lm_head(output)
+        return self.out_head(output)
 
 if __name__ == '__main__':
     # Testing the model
@@ -116,4 +116,3 @@ if __name__ == '__main__':
     
     output = jax.vmap(mygpt, (0, 0, None))(input_arr, pad_mask, key)
     print(f'Output shape: {output.shape}')
-    

@@ -1,5 +1,4 @@
 import os
-from functools import partial
 from typing import Any, Callable, List, Optional, Tuple
 
 import equinox as eqx
@@ -48,7 +47,7 @@ def compute_loss(model: eqx.Module, x: Array, y: Array, pad_mask: Array,
     
     return loss
 
-@jax.jit
+@eqx.filter_jit
 def _compute_softmax_cross_entropy_loss(pred_y: Array, y_one_hot: Array,
                                         pad_mask: Array, n: Array, k: Array) -> Array:
     
@@ -105,6 +104,7 @@ class Trainer:
         
         return rndm_n, rndm_k
 
+    @eqx.filter_jit
     def evaluate_acc(self, model: eqx.Module, loader: DataLoader, eval_iters: int, keys: List[PRNGKeyArray]):
         
         metric = []
@@ -228,7 +228,7 @@ class Trainer:
             
             keys = jax.random.split(epoch_key, self.batch_size)
             
-            for step, batch in tqdm(enumerate(trainloader)):
+            for step, batch in tqdm(enumerate(trainloader), total=len(trainloader) // self.batch_size, desc=f'Epoch {epoch}'):
                 # n k bias schedule
                 step += step_done # for multiple epochs
                 
@@ -238,7 +238,7 @@ class Trainer:
                 loss, model, opt_state = make_step(model, seq, label, pad_mask, rndm_n, rndm_k,
                                                    optim, opt_state, self.num_classes, keys)
                 
-                if step % 25 == 0:
+                if step % 50 == 0:
                     # cycling through keys to get new n and k
                     #rndm_n, rndm_k = self.get_n_k(key=keys[step % self.batch_size])
                     
@@ -314,6 +314,7 @@ class Trainer:
         '''
         self.my_logger.info(f'Prompt: {self.decode_fn(input_arr)}')
         inference_model = eqx.tree_inference(model, value=True) # switching to inferencing
+        key = jax.random.PRNGKey(0)
         
         for _ in range(max_new_tokens):
             if input_arr.shape[0] < self.seqlen:
@@ -329,10 +330,14 @@ class Trainer:
             except IndexError:
                 zero_idx = self.seqlen
             
-            logits = inference_model(padded_array, self.max_iters, pad_mask, False, True, jax.random.PRNGKey(0))[1]
-            logits = logits[zero_idx - 1, :] # chose the last token representation
-            
-            gen = inference_model.out_head(logits) / temperature
+            if self.baseline:
+                logits = inference_model(padded_array, pad_mask, key)
+                gen = logits[zero_idx - 1, :] / temperature # chose the last token representation
+            else:
+                logits = inference_model(padded_array, self.max_iters, pad_mask, False, True, key)[1]
+                logits = logits[zero_idx - 1, :] # chose the last token representation
+                gen = inference_model.out_head(logits) / temperature
+                
             # greedy decoding
             gen = gen.argmax()
             input_arr = jnp.concatenate([input_arr, gen.reshape(-1)])
