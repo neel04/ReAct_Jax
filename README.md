@@ -16,9 +16,9 @@ IMAGE_NAME="docker.io/neel04/react_image:latest"
 CONTAINER_NAME="react_container"
 
 # arguments for train_model.py
-TRAIN_ARGS="--save_dir ./ReAct/outputs/ --epochs 2 --warmup_steps 250 \
---lr 1.5e-3 --num_blocks 4 \
---width 128 --batch_size 256 --n_heads 4 --max_iters 5 \
+TRAIN_ARGS="--save_dir ./ReAct/outputs/ --epochs 4 --warmup_steps 250 \
+--lr 3.5e-3 --num_blocks 4 \
+--width 128 --batch_size 512 --n_heads 4 --max_iters 5 \
 --weight_decay 1e-4 --drop_rate 0.02  \
 --log_interval 1000 --save_interval 1000 --seqlen 192  \
 --bf16 --wandb"

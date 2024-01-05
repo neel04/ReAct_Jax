@@ -45,7 +45,7 @@ class TinyStoriesDataset:
         dataset = self.dataset
         
         if debug:
-            dataset = dataset.select(range(2048))
+            dataset = dataset.select(range(2048)) # only use 2048 samples
         
         dataset = dataset.map(self.tokenize_and_pad, batched=True, batch_size=self.bsz,
                               keep_in_memory=True, drop_last_batch=True)

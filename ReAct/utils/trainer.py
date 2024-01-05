@@ -12,6 +12,7 @@ from torch.utils.data import DataLoader
 from tqdm.auto import tqdm
 
 from ReAct.model.react import React
+from ReAct.model.baseline import GPT
 from ReAct.utils.helpers import count_params, load_eqx_obj, save_eqx_obj
 from ReAct.utils.logger import UnifiedLogger
 
@@ -19,18 +20,27 @@ from .helpers import get_rand_nums, half_precision
 
 compilation_cache.initialize_cache('./compilation_cache')
 
-@jax.jit
+@eqx.filter_jit
 def n_k_loop(model: eqx.Module, input_arr: Array, pad_mask: Array, n: int, k: int, key: PRNGKeyArray) -> Array:
     # Only k passes, but track the gradient
-    output_k, _ = model(input_arr, k, pad_mask=pad_mask, key=key) # only do k passes with the input
+    output_k, _ = model(input_arr, k, pad_mask=pad_mask, key=key)
    
     return output_k
+
+@eqx.filter_jit
+def vanilla_fwd(model: eqx.Module, input_arr: Array, pad_mask: Array, n: int, k: int, key: PRNGKeyArray) -> Array:
+    return model(input_arr, pad_mask, key=key)
 
 @eqx.filter_value_and_grad
 def compute_loss(model: eqx.Module, x: Array, y: Array, pad_mask: Array,
                  n: int, k: int, num_classes: int = 2, keys: PRNGKeyArray = None):
     
-    pred_y = jax.vmap(n_k_loop, in_axes=(None, 0, 0, 0, 0, 0))(model, x, pad_mask, n, k, keys) # (batch_size, seqlen, num_classes)
+    if model.__name__ == 'ReAct':
+        forward = n_k_loop
+    else:
+        forward = vanilla_fwd
+    
+    pred_y = jax.vmap(forward, in_axes=(None, 0, 0, 0, 0, 0))(model, x, pad_mask, n, k, keys) # (batch_size, seqlen, num_classes)
     
     y_one_hot = jax.nn.one_hot(y, num_classes=num_classes) # (batch_size, seqlen, num_classes)
     
@@ -101,9 +111,9 @@ class Trainer:
 
         for step, batch in enumerate(loader):
             batch = batch['text']
-            seq, label, pad_mask = jax.device_put(batch, self.shard)
+            batch = jax.device_put(batch, self.shard)
             
-            acc, loss, ppl = self.compute_metrics(model, (seq, label, pad_mask), eval_iters, self.num_classes, keys)
+            acc, loss, ppl = self.compute_metrics(model, batch, eval_iters, self.num_classes, keys)
             
             metric.extend([acc, loss, ppl])
         
@@ -112,7 +122,7 @@ class Trainer:
         cum_loss = sum(metric[1::3]) / len(metric[1::3])
         cum_ppl = sum(metric[2::3]) / len(metric[2::3])
         
-        return (cum_acc, cum_loss, cum_ppl), seq[0] # return one sample for viz
+        return (cum_acc, cum_loss, cum_ppl), batch[0][0] # return one sample for viz
     
     def set_optim_and_scheduler(self, model: eqx.Module):
         assert isinstance(model, eqx.Module), 'Model is not initialized'
@@ -133,12 +143,16 @@ class Trainer:
         return optim, opt_state, model
     
     def init_model(self, key: PRNGKeyArray):
-        # Initialize the model
-        model = React(self.n_heads, self.seqlen, self.max_iters, self.num_blocks, self.width,
+        
+        if self.baseline:
+            model = GPT(self.n_heads, self.seqlen, self.num_blocks, self.width,
+                        self.drop_rate, self.num_classes, key)
+        else:
+            model = React(self.n_heads, self.seqlen, self.max_iters, self.num_blocks, self.width,
                            self.drop_rate, self.num_classes, key)
         
         optim, opt_state, model = self.set_optim_and_scheduler(model)
-        count_params(model)
+        count_params(model) # prints to stdout
         
         # switch to half precision
         if self.bf16:
@@ -164,9 +178,8 @@ class Trainer:
         
         return model, opt_state, step
     
-    @staticmethod
-    @partial(jax.jit, static_argnums=3)
-    def compute_metrics(model: eqx.Module, batch: Tuple, eval_iters: int, num_classes: int, keys: List[PRNGKeyArray]):
+    @eqx.filter_jit
+    def compute_metrics(self, model: eqx.Module, batch: Tuple, eval_iters: int, num_classes: int, keys: List[PRNGKeyArray]):
         '''
         Computes the accuracy, perplexity, loss of the model w.r.t batch
         '''
@@ -174,8 +187,12 @@ class Trainer:
         # make an array of size of batch[0] with each element as eval_iters
         eval_iters = jnp.ones_like(input_arr[:, 0]) * eval_iters
         
-        pred_y = jax.vmap(model, in_axes=(0, 0, 0, None, None, 0))(
-            input_arr, eval_iters, pad_mask, False, False, keys)
+        if self.baseline:
+            pred_y = jax.vmap(model)(input_arr, pad_mask, keys)
+        else:
+            pred_y = jax.vmap(model,
+                              in_axes=(0, 0, 0, None, None, 0))(
+                                  input_arr, eval_iters, pad_mask, False, False, keys)
         
         # compute accuracy
         y_hat = jax.nn.softmax(pred_y, axis=-1).argmax(-1) * pad_mask
