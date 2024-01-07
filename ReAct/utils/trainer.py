@@ -157,10 +157,6 @@ class Trainer:
         if self.bf16:
             model = half_precision(model)
         
-        # switch to half precision
-        if self.bf16:
-            model = half_precision(model)
-        
         return optim, opt_state, model
     
     def resume_training(self, model: eqx.Module, opt_state: eqx.Module):
