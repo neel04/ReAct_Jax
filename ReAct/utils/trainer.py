@@ -104,12 +104,11 @@ class Trainer:
         
         return rndm_n, rndm_k
 
-    @eqx.filter_jit
     def evaluate_acc(self, model: eqx.Module, loader: DataLoader, eval_iters: int, keys: List[PRNGKeyArray]):
         
         metric = []
 
-        for step, batch in enumerate(loader):
+        for step, batch in tqdm(enumerate(loader), total=len(loader), desc='Validating'):
             batch = batch['text']
             batch = jax.device_put(batch, self.shard)
             
@@ -228,7 +227,7 @@ class Trainer:
             
             keys = jax.random.split(epoch_key, self.batch_size)
             
-            for step, batch in tqdm(enumerate(trainloader), total=len(trainloader) // self.batch_size, desc=f'Epoch {epoch}'):
+            for step, batch in tqdm(enumerate(trainloader), total=len(trainloader), desc=f'Epoch {epoch}'):
                 # n k bias schedule
                 step += step_done # for multiple epochs
                 
