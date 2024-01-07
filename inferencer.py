@@ -7,7 +7,7 @@ from icecream import ic
 from ReAct.data.tinystories import TinyStoriesDataset
 from ReAct.model.react import React
 from ReAct.utils.arg_parser import parse_args
-from ReAct.utils.helpers import convert_to_jax, count_params, load_eqx_obj
+from ReAct.utils.helpers import count_params, load_eqx_obj
 from ReAct.utils.logger import UnifiedLogger
 from ReAct.utils.trainer import Trainer
 
@@ -39,9 +39,6 @@ class Inferencer:
         model = load_eqx_obj(self.checkpoint_path, model)
         
         count_params(model)
-        
-        # Convert to JAX
-        my_input = convert_to_jax(my_input)
         
         # Make prediction
         output = self.trainer.generate(model, my_input, num_tokens, temperature=0.35)

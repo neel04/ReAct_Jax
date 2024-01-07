@@ -7,7 +7,68 @@ import jax.numpy as jnp
 from jaxtyping import Array, BFloat16, PRNGKeyArray
 
 # ruff: noqa: F722
+class AttentionBlock(eqx.Module):
+    """Basic Block for LiteAttention"""
 
+    seqlen: int = eqx.field(static=True)
+    n_heads: int = eqx.field(static=True)
+    bottleneck: int = eqx.field(static=True)
+    
+    attn_gate: eqx.Module
+    ln1: eqx.Module
+    ln2: eqx.Module
+    mlp: eqx.Module
+
+    def __init__(self, seqlen: int, n_heads: int, drop_rate: float, bottleneck: int, key: PRNGKeyArray):
+        key1, key2 = jax.random.split(key, 2)
+
+        self.seqlen = seqlen
+        self.n_heads = n_heads
+        self.bottleneck = bottleneck
+
+        self.attn_gate = eqx.nn.MultiheadAttention(num_heads=n_heads, query_size=bottleneck,
+                                                   use_query_bias=True, use_key_bias=True,
+                                                   use_value_bias=True, use_output_bias=True, 
+                                                   dropout_p=drop_rate, key=key1)
+
+        self.ln1 = eqx.nn.LayerNorm(self.bottleneck)
+        self.ln2 = eqx.nn.LayerNorm(self.bottleneck)
+
+        self.mlp = MLP(self.bottleneck, self.bottleneck, drop_rate, key2)
+
+    def _make_self_attention_mask(self, pad_mask: Array) -> Array:
+        """Create self-attention mask from sequence-level mask."""
+        
+        # merge with pad_mask in the end
+        mask = jnp.ones((self.seqlen, self.seqlen), dtype=jnp.bfloat16)
+        mask = jnp.tril(mask)
+        mask = jnp.expand_dims(mask, 0)
+        return jnp.repeat(mask, self.n_heads, axis=0)
+    
+    def _make_mixer_mask(self, pad_mask: Array):
+        # Almost same, but we triu instead of tril
+        # and we don't need to merge with pad_mask
+        mask = jnp.ones((self.seqlen, self.seqlen)) * pad_mask
+        mask = jnp.triu(mask)
+        
+        return mask
+
+    def __call__(self, x: Array, input_arr: Array, mask: Array, key: PRNGKeyArray = jax.random.PRNGKey(0)):
+        # x: (seqlen, bottleneck)
+        key_1, key_2 = jax.random.split(key, 2)
+        
+        x = jax.vmap(self.ln1)(x.astype(jnp.bfloat16))
+        
+        x += self.attn_gate(x, input_arr, input_arr,
+                            mask=self._make_self_attention_mask(mask),
+                            key=key_1, inference=False)
+        
+        x = jax.vmap(self.ln2)(x)
+        x += self.mlp(x, key=key_2)
+
+        return x.astype(jnp.bfloat16)
+    
+    
 class NewGELU(eqx.Module):
     def __call__(self, x: jax.Array, *args) -> jax.Array:
         c: float = math.sqrt(2.0 / math.pi)

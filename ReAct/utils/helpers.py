@@ -33,22 +33,6 @@ def count_params(model: eqx.Module):
     
     print(f"\nModel # of parameters: {num_params:.2f}M\n# of recurrent parameters: {non_embed_params:.2f}M\n")
 
-def process_seq(seq):
-    return [list(map(jnp.array, subseq)) for subseq in seq]
-
-def convert_to_jax(x: torch.Tensor) -> Array:
-    
-    if isinstance(x, torch.Tensor):
-        return jnp.array(x.detach().cpu().numpy())
-    elif isinstance(x, list) and isinstance(x[0], tuple):
-        # i.e, x is a list of tuples
-        output = process_seq(x)
-        output_x, output_y, output_z = zip(*output)
-        
-        return [jnp.array(i) for i in [output_x, output_y, output_z]]
-    else:
-        return jnp.array(x)
-
 def get_rand_nums(key: PRNGKeyArray, lower_bound: int, upper_bound: int, bsz: int, bias_val: Optional[int] = None) -> Array:
     if bias_val is None:
         dist = jax.random.randint(key, shape=(bsz,), minval=lower_bound, maxval=upper_bound)

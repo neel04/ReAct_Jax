@@ -73,6 +73,9 @@ def parse_args():
     parser.add_argument('--resume', type=str, default=None,
                         help='Obtain WandB run_path from Overview tab and append the'
                              'step number. \nExample arg: "neel/ReAct_Jax/6ktmhalt/ + 200"')
+    
+    parser.add_argument('--baseline', action='store_true', default=False,
+                        help='Train baseline vanilla transformer model. Default: False')
 
     args = parser.parse_args()
     return args
