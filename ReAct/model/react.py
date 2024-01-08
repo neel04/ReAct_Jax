@@ -89,19 +89,22 @@ class React(eqx.Module):
     def iterate_for_steps(self, interim_thought: Array, mask: Array, iters_to_do: int, input_arr: Array,
                           key: PRNGKeyArray) -> Array:
         
-        def body_fun(i: int, carry: Tuple):
+        @jax.checkpoint
+        def body_fun(carry: Tuple):
             thought, mask = carry
             
             latent = jnp.concatenate([thought, input_arr], axis=-1).astype(jnp.bfloat16)
             latent = self.main_block(latent, input_arr, mask, key).astype(jnp.bfloat16)
             latent = jax.vmap(self.post_ln)(latent).astype(jnp.bfloat16) # LN to keep scales tidy
             
-            return (latent, mask)
+            return latent, mask
         
         init_val = (interim_thought, mask)
-        final_thought = jax.lax.fori_loop(0, self.max_iters, body_fun, init_val) # recursive over depth = max_iters
         
-        return final_thought[0]
+        for iteration in range(self.max_iters):
+            init_val = body_fun(init_val)
+        
+        return init_val[0]
 
     @eqx.filter_jit
     def __call__(self,

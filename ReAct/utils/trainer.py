@@ -77,9 +77,9 @@ class Trainer:
         self.dataset_length = 2119719
         self.decode_fn = decode_fn # decode the ids to text
         
-        logger = UnifiedLogger(args, level='DEBUG')
-        self.my_logger = logger.my_logger()
-        self.wandb_logger = logger.wandb_logger(args)
+        self.logger = UnifiedLogger(args, level='DEBUG')
+        self.my_logger = self.logger.my_logger()
+        self.wandb_logger = self.logger.wandb_logger(args)
         
         # Setup hyperparams. args is Namespace object
         # set each attribute as a class attribute
@@ -128,13 +128,13 @@ class Trainer:
         
         total_steps = self.epochs * self.dataset_length // self.batch_size
         
-        schedule_fn = optax.warmup_cosine_decay_schedule(self.lr, self.lr, self.warmup_steps,
-                                                         total_steps, self.lr // 10)
+        self.schedule_fn = optax.warmup_cosine_decay_schedule(init_value=self.lr, peak_value=self.lr,
+                                                              warmup_steps=self.warmup_steps, decay_steps=total_steps)
 
         # AdamW optimizer with weight decay
         optim = optax.chain(
             optax.clip(self.grad_clip),
-            optax.adamw(learning_rate=schedule_fn, weight_decay=self.weight_decay, b1=0.95, b2=0.99)
+            optax.adamw(learning_rate=self.schedule_fn, weight_decay=self.weight_decay, b1=0.95, b2=0.99)
         )
         
         opt_state = optim.init(eqx.filter(model, eqx.is_array))
@@ -253,10 +253,11 @@ class Trainer:
                     self.wandb_logger.log(
                         {
                             'Train/loss': loss,
+                            'Train/Lr': self.schedule_fn(epoch + 1 * step).item(),
                         },
                         step=step
                     )
-                                
+                
                 if (step + 1) % self.log_interval == 0:
                     # Compute cumulatives
                     cum_train_acc = sum(train_acc) / len(train_acc)
