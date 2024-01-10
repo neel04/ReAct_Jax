@@ -134,7 +134,7 @@ class Trainer:
         # AdamW optimizer with weight decay
         optim = optax.chain(
             optax.clip(self.grad_clip),
-            optax.adamw(learning_rate=self.schedule_fn, weight_decay=self.weight_decay, b1=0.95, b2=0.99)
+            optax.lion(learning_rate=self.schedule_fn, weight_decay=self.weight_decay)
         )
         
         opt_state = optim.init(eqx.filter(model, eqx.is_array))

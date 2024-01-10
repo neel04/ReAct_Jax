@@ -16,24 +16,23 @@ IMAGE_NAME="docker.io/neel04/react_image:latest"
 CONTAINER_NAME="react_container"
 
 # arguments for train_model.py
-TRAIN_ARGS="--save_dir ./ReAct/outputs/ --epochs 4 --warmup_steps 250 \
---lr 3.5e-3 --num_blocks 4 \
---width 128 --batch_size 512 --n_heads 4 --max_iters 5 \
---weight_decay 1e-4 --drop_rate 0.02  \
+TRAIN_ARGS="--save_dir ./ReAct/outputs/ --epochs 4 --warmup_steps 200 \
+--lr 1e-3 --num_blocks 4 \
+--width 256 --batch_size 512 --n_heads 4 --max_iters 5 \
+--weight_decay 1e-3 --drop_rate 0.01  \
 --log_interval 1000 --save_interval 1000 --seqlen 192  \
 --bf16 --wandb"
-
-git clone -b $BRANCH https://github.com/neel04/ReAct_Jax.git
-git config --global safe.directory '*'
-git pull --all
 
 # Stop all running Docker containers
 echo "Stopping all running Docker containers..."
 sudo docker stop $(sudo docker ps -a -q)
 
 sudo -s <<EOF
+
 # Git stuff
+git clone -b $BRANCH https://github.com/neel04/ReAct_Jax.git
 git config --global safe.directory '*'
+cd ReAct_Jax/; git pull --all; cd ..
 
 # Run the Docker container
 echo "Running Docker container..."
