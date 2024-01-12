@@ -53,20 +53,20 @@ class AttentionBlock(eqx.Module):
         
         return mask
 
-    def __call__(self, x: Array, input_arr: Array, mask: Array, key: PRNGKeyArray = jax.random.PRNGKey(0)):
+    def __call__(self, inp: Array, input_arr: Array, mask: Array, key: PRNGKeyArray = jax.random.PRNGKey(0)):
         # x: (seqlen, bottleneck)
         key_1, key_2 = jax.random.split(key, 2)
+        inp = inp.astype(jnp.bfloat16)
         
-        x = jax.vmap(self.ln1)(x.astype(jnp.bfloat16))
-        
-        x += self.attn_gate(x, input_arr, input_arr,
+        x = jax.vmap(self.ln1)(inp)
+        inp += self.attn_gate(x, input_arr, input_arr,
                             mask=self._make_self_attention_mask(mask),
                             key=key_1, inference=False)
         
-        x = jax.vmap(self.ln2)(x)
-        x += self.mlp(x, key=key_2)
+        x = jax.vmap(self.ln2)(inp)
+        inp += self.mlp(x, key=key_2)
 
-        return x.astype(jnp.bfloat16)
+        return inp.astype(jnp.bfloat16)
     
     
 class NewGELU(eqx.Module):

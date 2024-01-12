@@ -89,7 +89,6 @@ class React(eqx.Module):
     def iterate_for_steps(self, interim_thought: Array, mask: Array, iters_to_do: int, input_arr: Array,
                           key: PRNGKeyArray) -> Array:
         
-        @jax.checkpoint
         def body_fun(carry: Tuple):
             thought, mask = carry
             

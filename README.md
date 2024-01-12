@@ -18,7 +18,7 @@ CONTAINER_NAME="react_container"
 # arguments for train_model.py
 TRAIN_ARGS="--save_dir ./ReAct/outputs/ --epochs 4 --warmup_steps 200 \
 --lr 1e-3 --num_blocks 4 \
---width 256 --batch_size 512 --n_heads 4 --max_iters 5 \
+--width 256 --batch_size 2048 --n_heads 4 --max_iters 5 \
 --weight_decay 1e-3 --drop_rate 0.01  \
 --log_interval 1000 --save_interval 1000 --seqlen 192  \
 --bf16 --wandb"
