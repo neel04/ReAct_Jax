@@ -10,10 +10,10 @@ from jaxtyping import Array, PRNGKeyArray
 from torch.utils.data import DataLoader
 from tqdm.auto import tqdm
 
-from ReAct.model.react import React
+import wandb
 from ReAct.model.baseline import GPT
+from ReAct.model.react import React
 from ReAct.utils.helpers import count_params, load_eqx_obj, save_eqx_obj
-from ReAct.utils.logger import UnifiedLogger
 
 from .helpers import get_rand_nums, half_precision
 
@@ -71,21 +71,24 @@ def make_step(model: eqx.Module, x: Array, y: Array, pad_mask: Array, n: int, k:
     return loss, model, opt_state
 
 class Trainer:
-    def __init__(self, args: dict, logger, decode_fn: Callable, shard: Any = None):
+    def __init__(self, args: dict, logger: Tuple, loaders: Tuple, decode_fn: Callable,
+                 shard: Any = None, key: PRNGKeyArray = jax.random.PRNGKey(69)):
         
         self.shard = shard if shard is not None else None
         self.dataset_length = 2119719
         self.decode_fn = decode_fn # decode the ids to text
+        self.args = args
+        self.key = key
         
-        self.logger = UnifiedLogger(args, level='DEBUG')
-        self.my_logger = self.logger.my_logger()
-        self.wandb_logger = self.logger.wandb_logger(args)
+        # unpacking the loaders & loggers
+        self.my_logger, self.wandb_logger = logger
+        self.trainloader, self.valloader = loaders
         
         # Setup hyperparams. args is Namespace object
         # set each attribute as a class attribute
-        self.my_logger.info(f'Using Args: {args}\n')
+        self.my_logger.info(f'Using Args: {self.args}\n')
         
-        for k, v in vars(args).items():
+        for k, v in vars(self.args).items():
                 setattr(self, k, v)        
     
     def get_n_k(self, key: PRNGKeyArray, bias_val: Optional[int] = None) -> Tuple[Array, Array]:
@@ -128,13 +131,14 @@ class Trainer:
         
         total_steps = self.epochs * self.dataset_length // self.batch_size
         
-        self.schedule_fn = optax.warmup_cosine_decay_schedule(init_value=self.lr, peak_value=self.lr,
+        self.schedule_fn = optax.warmup_cosine_decay_schedule(init_value=self.lr / 2, peak_value=self.lr,
                                                               warmup_steps=self.warmup_steps, decay_steps=total_steps)
 
-        # AdamW optimizer with weight decay
+        # optimizer with weight decay
         optim = optax.chain(
-            optax.clip(self.grad_clip),
-            optax.lion(learning_rate=self.schedule_fn, weight_decay=self.weight_decay)
+            optax.lion(learning_rate=self.schedule_fn, weight_decay=self.weight_decay),
+            optax.clip_by_global_norm(self.grad_clip),
+            optax.apply_every(self.accum_steps)
         )
         
         opt_state = optim.init(eqx.filter(model, eqx.is_array))
@@ -206,29 +210,29 @@ class Trainer:
         
         return accuracy, loss, perplexity
     
-    def train(self, epochs: int, trainloader: DataLoader, valloader: DataLoader, 
-              key: PRNGKeyArray):
-        
+    def train(self):
+        # Initialize everything
         step_done = 0
-        optim, opt_state, model = self.init_model(key)
-        print(f'Model: {model}')
+        optim, opt_state, model = self.init_model(self.key)
         
         if self.resume:
             model, opt_state, epoch_done = self.resume_training(model, opt_state)
         else:
             epoch_done = 0
         
-        rndm_n, rndm_k = self.get_n_k(key=key) # initial n and k
+        print(f'Model: {model}')
         
-        for epoch in range(epoch_done, epochs):
+        rndm_n, rndm_k = self.get_n_k(key=self.key) # initial n and k
+        
+        for epoch in range(epoch_done, self.epochs):
             # init empty metrics
             epoch_key = jnp.array([epoch, epoch + 1]).astype(jnp.uint32)
             train_acc, train_loss, train_ppl = [], [], []
             
             keys = jax.random.split(epoch_key, self.batch_size)
             
-            for step, batch in tqdm(enumerate(trainloader), total=len(trainloader), desc=f'Epoch {epoch}'):
-                # n k bias schedule
+            for step, batch in tqdm(enumerate(self.trainloader), total=len(self.trainloader), desc=f'Epoch {epoch}'):
+                
                 step += step_done # for multiple epochs
                 
                 batch = batch['text']
@@ -268,7 +272,7 @@ class Trainer:
                     train_acc, train_loss, train_ppl = [], [], []
                     
                     ## Validation
-                    val_metrics, val_sample = self.evaluate_acc(model, valloader, self.max_iters, keys)
+                    val_metrics, val_sample = self.evaluate_acc(model, self.valloader, self.max_iters, keys)
                     
                     self.wandb_logger.log(
                         {
@@ -283,16 +287,14 @@ class Trainer:
                     )
                     
                     ## Visualize one sample and model prediction
-                    sample_x = seq[0][:9]
-                    val_sample_x = val_sample[:9]
+                    sample_x, val_sample_x = seq[0][:9], val_sample[:9]
                     
                     self.my_logger.info(f"epoch={epoch}, step={step}, loss={loss}")
                     self.my_logger.info(f'Validation accuracy: {val_metrics[0]} | using {self.max_iters} iterations')
                     self.my_logger.info(f'Cumulative Training accuracy: {cum_train_acc}\n')
                     
-                    self.generate(model, sample_x, max_new_tokens=96)
-                    self.my_logger.info(f'{"=" * 20}\tVal set prompt:\n')
-                    self.generate(model, val_sample_x, max_new_tokens=96)
+                    self.generate(model, sample_x, metadata={'type': 'train', 'step': step}, max_new_tokens=96)
+                    self.generate(model, val_sample_x, metadata={'type': 'val', 'step': step}, max_new_tokens=96)
                     
                 if step % self.save_interval == 0:
                     # Save the model 
@@ -307,14 +309,14 @@ class Trainer:
                 
         return loss, model, opt_state
     
-    def generate(self, model: eqx.Module, input_arr: Array, max_new_tokens: int, temperature: float = 0.35):
+    def generate(self, model: eqx.Module, input_arr: Array, metadata: dict, max_new_tokens: int, temperature: float = 0.35):
         '''
         Take a conditioning sequence , call output_head to obtain a prediction
         and autoregressively complete the sequence max_new_tokens times.
         '''
-        self.my_logger.info(f'Prompt: {self.decode_fn(input_arr)}')
         inference_model = eqx.tree_inference(model, value=True) # switching to inferencing
         key = jax.random.PRNGKey(0)
+        text_table = wandb.Table(columns=["Step", "Prompt", "Model Generation", "Type"])
         
         for _ in range(max_new_tokens):
             if input_arr.shape[0] < self.seqlen:
@@ -341,7 +343,14 @@ class Trainer:
             # greedy decoding
             gen = gen.argmax()
             input_arr = jnp.concatenate([input_arr, gen.reshape(-1)])
-            
-        self.my_logger.info(f'model generation: {self.decode_fn(input_arr[-max_new_tokens:-1])}\n')
-            
+        
+        prompt = f'Prompt: {self.decode_fn(input_arr)}'
+        model_gen = f'model generation: {self.decode_fn(input_arr[-max_new_tokens:-1])}\n'
+        self.my_logger.info(prompt)
+        self.my_logger.info(model_gen)
+        
+        # log to logger as a table
+        text_table.add_data(metadata['step'], prompt, model_gen, metadata['type'])
+        self.wandb_logger.log({'Generated Samples': text_table})
+        
         return input_arr

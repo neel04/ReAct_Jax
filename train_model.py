@@ -1,13 +1,17 @@
+from typing import Callable, Tuple
+
 import jax
 import jax.experimental.mesh_utils as mesh_utils
 import jax.sharding as sharding
 from jax import config
 from jaxtyping import PRNGKeyArray
 
+import wandb
 from ReAct.data.tinystories import TinyStoriesDataset
 from ReAct.utils.arg_parser import parse_args
 from ReAct.utils.logger import UnifiedLogger
 from ReAct.utils.trainer import Trainer
+
 
 def main(key: PRNGKeyArray):
     args = parse_args()
@@ -19,12 +23,7 @@ def main(key: PRNGKeyArray):
         config.update("jax_debug_infs", True)
         config.update("jax_disable_jit", True)
     
-    # ========= Logging =========
-        
-    logger = UnifiedLogger(args, level='DEBUG')
-    
-    _, model_key = jax.random.split(key)
-    
+    # ========= Data =========
     train_dataset = TinyStoriesDataset(split='train', max_length=args.seqlen, bsz=args.batch_size)
     trainloader = train_dataset.create_dataloader(args.debug)
     
@@ -47,8 +46,51 @@ def main(key: PRNGKeyArray):
     devices = mesh_utils.create_device_mesh((num_devices, 1))
     shard = sharding.PositionalSharding(devices)
     
-    trainer = Trainer(args, logger, train_dataset.tok.decode, shard)
-    trainer.train(args.epochs, trainloader, valloader, key)
+    if args.tune_hyperparams:
+        logger = UnifiedLogger(args, level='DEBUG')
+        sweep_id = logger.init_wandb_sweep()
+        
+        wandb.agent(sweep_id=sweep_id, count=50,
+                    function=kickoff_sweeps(
+                        args=args,
+                        loggers=logger,
+                        loaders=(trainloader, valloader),
+                        decode_fn=train_dataset.tok.decode,
+                        shard=shard,
+                        key=key)
+                    )
+    else:
+        logger = UnifiedLogger(args, level='DEBUG')
+        my_logger, wandb_logger = logger.my_logger(), logger.wandb_logger(args)
+        
+        trainer = Trainer(args, logger=(my_logger, wandb_logger),
+                            loaders=(trainloader, valloader),
+                            decode_fn=train_dataset.tok.decode,
+                            shard=shard,
+                            key=key)
+        
+        trainer.train()
+
+def kickoff_sweeps(args: dict, loggers: UnifiedLogger, loaders: Tuple,
+                     decode_fn: Callable, shard: sharding.PositionalSharding,
+                     key: PRNGKeyArray):
+    
+    my_logger = loggers.my_logger()
+    trainloader, valloader = loaders
+    decode_fn = decode_fn
+    
+    with wandb.init(project='ReAct_Jax', config=args, anonymous='allow',
+                    entity='neel', group='Sweeps', mode=args.exp_logging) as wandb_logger:
+        
+        args = loggers.update_args_for_hypertuning(args, wandb)
+        
+        trainer = Trainer(args, logger=(my_logger, wandb_logger),
+                            loaders=(trainloader, valloader),
+                            decode_fn=decode_fn,
+                            shard=shard,
+                            key=key)
+        
+        trainer.train()
 
 if __name__ == '__main__':
     key = jax.random.PRNGKey(69)

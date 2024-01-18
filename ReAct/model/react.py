@@ -86,24 +86,28 @@ class React(eqx.Module):
         return pe
 
     @partial(jax.jit, static_argnums=1)
-    def iterate_for_steps(self, interim_thought: Array, mask: Array, iters_to_do: int, input_arr: Array,
-                          key: PRNGKeyArray) -> Array:
+    def iterate_for_steps(self, interim_thought: Array, mask: Array,
+                          iters_to_do: int, input_arr: Array, key: PRNGKeyArray) -> Array:
         
-        def body_fun(carry: Tuple):
+        def body_fun(carry: Tuple, _):
             thought, mask = carry
             
             latent = jnp.concatenate([thought, input_arr], axis=-1).astype(jnp.bfloat16)
             latent = self.main_block(latent, input_arr, mask, key).astype(jnp.bfloat16)
-            latent = jax.vmap(self.post_ln)(latent).astype(jnp.bfloat16) # LN to keep scales tidy
+            latent = jax.vmap(self.post_ln)(latent).astype(jnp.bfloat16)  # LN to keep scales tidy
             
-            return latent, mask
+            out = (latent, mask)
+            
+            return out, latent
         
         init_val = (interim_thought, mask)
         
-        for iteration in range(self.max_iters):
-            init_val = body_fun(init_val)
+        # Run the scan for self.max_iters iterations
+        final_val, history = jax.lax.scan(body_fun, init_val, None, length=self.max_iters)
         
-        return init_val[0]
+        # Return the final thought after all iterations
+        alpha: float = 0.8
+        return final_val[0] * alpha + sum(history) * (1 - alpha)
 
     @eqx.filter_jit
     def __call__(self,
