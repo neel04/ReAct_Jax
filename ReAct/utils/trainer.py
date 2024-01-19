@@ -317,6 +317,7 @@ class Trainer:
         inference_model = eqx.tree_inference(model, value=True) # switching to inferencing
         key = jax.random.PRNGKey(0)
         text_table = wandb.Table(columns=["Step", "Prompt", "Model Generation", "Type"])
+        prompt = f'Prompt: {self.decode_fn(input_arr)}'
         
         for _ in range(max_new_tokens):
             if input_arr.shape[0] < self.seqlen:
@@ -344,7 +345,6 @@ class Trainer:
             gen = gen.argmax()
             input_arr = jnp.concatenate([input_arr, gen.reshape(-1)])
         
-        prompt = f'Prompt: {self.decode_fn(input_arr)}'
         model_gen = f'model generation: {self.decode_fn(input_arr[-max_new_tokens:-1])}\n'
         self.my_logger.info(prompt)
         self.my_logger.info(model_gen)

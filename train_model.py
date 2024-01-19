@@ -51,7 +51,7 @@ def main(key: PRNGKeyArray):
         sweep_id = logger.init_wandb_sweep()
         
         wandb.agent(sweep_id=sweep_id, count=50,
-                    function=kickoff_sweeps(
+                    function=lambda: kickoff_sweeps(
                         args=args,
                         loggers=logger,
                         loaders=(trainloader, valloader),

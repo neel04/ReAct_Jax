@@ -118,6 +118,7 @@ class UnifiedLogger:
                 "grad_clip": {"max": 1.0, "min": 0.1},
                 "warmup_steps": {"values": list(range(0, 1000, 100))},
             },
+            "early_terminate": {"type": "hyperband", "max_iter": 32, "s": 4}
         }
         
         sweep_id = wandb.sweep(sweep=sweep_configuration, project="ReAct_Jax",
