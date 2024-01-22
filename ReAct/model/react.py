@@ -69,6 +69,7 @@ class React(eqx.Module):
         
         self.post_ln = eqx.nn.LayerNorm(width)
         self.out_head = LinearProj(width, vocab_size, key=key4)
+        self.p_weights = jax.random.uniform(key3, (seqlen * width,), minval=0.0, maxval=1.0, dtype=jnp.bfloat16)
     
     def positional_encoding(self, seq_len, d_model):
         '''
@@ -95,7 +96,7 @@ class React(eqx.Module):
             latent = jnp.concatenate([thought, input_arr], axis=-1).astype(jnp.bfloat16)
             latent = self.main_block(latent, input_arr, mask, key).astype(jnp.bfloat16)
             latent = jax.vmap(self.post_ln)(latent).astype(jnp.bfloat16)  # LN to keep scales tidy
-            
+
             out = (latent, mask)
             
             return out, latent
@@ -106,7 +107,7 @@ class React(eqx.Module):
         final_val, history = jax.lax.scan(body_fun, init_val, None, length=self.max_iters)
         
         # Return the final thought after all iterations
-        alpha: float = 0.8
+        alpha: float = 0.6
         return final_val[0] * alpha + sum(history) * (1 - alpha)
 
     @eqx.filter_jit

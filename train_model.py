@@ -50,7 +50,7 @@ def main(key: PRNGKeyArray):
         logger = UnifiedLogger(args, level='DEBUG')
         sweep_id = logger.init_wandb_sweep()
         
-        wandb.agent(sweep_id=sweep_id, count=50,
+        wandb.agent(sweep_id=sweep_id, count=80,
                     function=lambda: kickoff_sweeps(
                         args=args,
                         loggers=logger,
@@ -74,6 +74,9 @@ def main(key: PRNGKeyArray):
 def kickoff_sweeps(args: dict, loggers: UnifiedLogger, loaders: Tuple,
                      decode_fn: Callable, shard: sharding.PositionalSharding,
                      key: PRNGKeyArray):
+    '''
+    Function to kickoff the sweeps - only called by wandb.agent
+    '''
     
     my_logger = loggers.my_logger()
     trainloader, valloader = loaders
@@ -91,6 +94,10 @@ def kickoff_sweeps(args: dict, loggers: UnifiedLogger, loaders: Tuple,
                             key=key)
         
         trainer.train()
+        
+        wandb.finish()
+    
+    wandb.teardown()
 
 if __name__ == '__main__':
     key = jax.random.PRNGKey(69)

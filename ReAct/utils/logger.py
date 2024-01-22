@@ -1,8 +1,7 @@
 import logging
 import os
-from typing import Callable, Generator
+from typing import Callable
 
-import comet_ml
 import wandb
 
 class UnifiedLogger:
@@ -51,43 +50,6 @@ class UnifiedLogger:
             include_fn=lambda path: path.endswith(".py") or path.endswith(".ipynb") or path.endswith(".sh"))
         
         return wandb
-
-    def comet_ml_logger(self, args: dict):
-        key = os.environ.get('COMET_API_KEY')
-        
-        comet_ml.init(project_name='react-jax')
-        
-        experiment = comet_ml.Experiment(api_key=key, disabled=args.exp_logging,
-                                         auto_metric_step_rate=5, auto_histogram_weight_logging=True,
-                                         auto_histogram_gradient_logging=True, auto_histogram_activation_logging=True)
-        
-        experiment.log_parameters(vars(args))
-        
-        return experiment
-    
-    def init_hypertuning(self, args: dict) -> Generator:
-        config = {"algorithm": "bayes",
-            "spec": {
-                "maxCombo": 0,
-                "metric": "Train/acc",
-                "objective": "maximize",
-            },
-            
-            "parameters": {
-                "lr": {"type": "float", "min": 1e-6, "max": 1e-3},
-                "drop_rate": {"type": "float", "min": 0.0, "max": 0.2},
-                "weight_decay": {"type": "float", "min": 1e-5, "max": 1e-3},
-                "grad_clip": {"type": "float", "min": 0.1, "max": 1.0},
-                "warmup_steps": {"type": "discrete", "values": list(range(0, 1000, 100))},
-            },
-            
-            "name": "My Bayesian Search",
-            "trials": 50,
-        }
-        
-        opt = comet_ml.Optimizer(config, api_key=os.environ.get('COMET_API_KEY'))
-        
-        return opt.get_experiments(project_name="react-jax-sweep")
     
     def update_args_for_hypertuning(self, args: dict, experiment: Callable = None):
         '''
@@ -96,10 +58,9 @@ class UnifiedLogger:
         arglist = ['lr', 'drop_rate', 'weight_decay', 'grad_clip', 'warmup_steps']
         
         for arg_name in arglist:
-            # args.arg_name = experiment.config.arg_name
             setattr(args, arg_name, experiment.config[arg_name])
         
-        args.epochs = 2 # for faster training
+        args.epochs = 1 # for faster training
         
         return args
     
@@ -108,15 +69,15 @@ class UnifiedLogger:
         Setup Wandb Seep configs. Only run after wandb_logger() has been called
         '''
         sweep_configuration = {
-            "method": "random",
+            "method": "bayes",
             "name": "sweep",
-            "metric": {"goal": "maximize", "name": "Train/acc"},
+            "metric": {"goal": "minimize", "name": "Train/loss"},
             "parameters": {
-                "lr": {"max": 1e-2, "min": 1e-5},
+                "lr": {"max": 8e-2, "min": 1e-4},
                 "drop_rate": {"max": 0.2, "min": 0.0},
-                "weight_decay": {"max": 1e-3, "min": 1e-5},
+                "weight_decay": {"max": 1e-3, "min": 1e-4},
                 "grad_clip": {"max": 1.0, "min": 0.1},
-                "warmup_steps": {"values": list(range(0, 1000, 100))},
+                "warmup_steps": {"values": list(range(0, 1000, 150))}
             },
             "early_terminate": {"type": "hyperband", "max_iter": 32, "s": 4}
         }
