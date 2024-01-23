@@ -75,11 +75,11 @@ class UnifiedLogger:
             "parameters": {
                 "lr": {"max": 8e-2, "min": 1e-4},
                 "drop_rate": {"max": 0.2, "min": 0.0},
-                "weight_decay": {"max": 1e-3, "min": 1e-4},
+                "weight_decay": {"max": 1e-3, "min": 1e-5},
                 "grad_clip": {"max": 1.0, "min": 0.1},
-                "warmup_steps": {"values": list(range(0, 1000, 150))}
+                "warmup_steps": {"values": list(range(0, 1000, 100))}
             },
-            "early_terminate": {"type": "hyperband", "max_iter": 32, "s": 4}
+            "early_terminate": {"type": "hyperband", "max_iter": 48, "s": 4}
         }
         
         sweep_id = wandb.sweep(sweep=sweep_configuration, project="ReAct_Jax",
