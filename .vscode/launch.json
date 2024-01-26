@@ -14,8 +14,6 @@
                 "--num_blocks", "4",
                 "--epochs", "1",
                 "--bf16",
-                "--exp_logging",
-                "--tune_hyperparams"
             ],
             "justMyCode": true
         }

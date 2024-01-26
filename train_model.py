@@ -1,12 +1,11 @@
-from typing import Callable, Tuple
-
 import jax
 import jax.experimental.mesh_utils as mesh_utils
 import jax.sharding as sharding
+import optuna
 from jax import config
 from jaxtyping import PRNGKeyArray
+from optuna.integration.wandb import WeightsAndBiasesCallback
 
-import wandb
 from ReAct.data.tinystories import TinyStoriesDataset
 from ReAct.utils.arg_parser import parse_args
 from ReAct.utils.logger import UnifiedLogger
@@ -47,18 +46,39 @@ def main(key: PRNGKeyArray):
     shard = sharding.PositionalSharding(devices)
     
     if args.tune_hyperparams:
-        logger = UnifiedLogger(args, level='DEBUG')
-        sweep_id = logger.init_wandb_sweep()
+        args.group = 'Sweeps'
         
-        wandb.agent(sweep_id=sweep_id, count=80,
-                    function=lambda: kickoff_sweeps(
-                        args=args,
-                        loggers=logger,
-                        loaders=(trainloader, valloader),
-                        decode_fn=train_dataset.tok.decode,
-                        shard=shard,
-                        key=key)
-                    )
+        study = optuna.create_study(direction='minimize',
+                                    study_name='ReAct_Jax',
+                                    load_if_exists=True,
+                                    sampler=optuna.samplers.TPESampler(
+                                        seed=69,
+                                    ))
+        
+        wandb_kwargs = {
+            "project": "ReAct_Jax",
+            "config": args,
+            "anonymous": "allow",
+            "entity": "neel",
+            "magic": True,
+        }
+        
+        trainer_kwargs = {
+            "args": args,
+            "loaders": (trainloader, valloader),
+            "decode_fn": train_dataset.tok.decode,
+            "shard": shard,
+            "key": key
+        }
+        
+        wandbc = WeightsAndBiasesCallback(
+            metric_name='Train/loss',
+            wandb_kwargs=wandb_kwargs,
+            as_multirun=True
+        )
+        
+        study.optimize(lambda trial: kickoff_optuna(trial=trial, **trainer_kwargs), n_trials=50, callbacks=[wandbc])
+
     else:
         logger = UnifiedLogger(args, level='DEBUG')
         my_logger, wandb_logger = logger.my_logger(), logger.wandb_logger(args)
@@ -71,33 +91,27 @@ def main(key: PRNGKeyArray):
         
         trainer.train()
 
-def kickoff_sweeps(args: dict, loggers: UnifiedLogger, loaders: Tuple,
-                     decode_fn: Callable, shard: sharding.PositionalSharding,
-                     key: PRNGKeyArray):
-    '''
-    Function to kickoff the sweeps - only called by wandb.agent
-    '''
+def kickoff_optuna(trial, **trainer_kwargs):
+    args = trainer_kwargs['args']
     
-    my_logger = loggers.my_logger()
-    trainloader, valloader = loaders
-    decode_fn = decode_fn
+    args.epochs = 1
     
-    with wandb.init(project='ReAct_Jax', config=args, anonymous='allow',
-                    entity='neel', group='Sweeps', mode=args.exp_logging) as wandb_logger:
-        
-        args = loggers.update_args_for_hypertuning(args, wandb)
-        
-        trainer = Trainer(args, logger=(my_logger, wandb_logger),
-                            loaders=(trainloader, valloader),
-                            decode_fn=decode_fn,
-                            shard=shard,
-                            key=key)
-        
-        trainer.train()
-        
-        wandb.finish()
+    args.lr = trial.suggest_float('lr', 1e-4, 9e-2, log=True)
+    args.drop_rate = trial.suggest_float('drop_rate', 0.0, 0.2)
+    args.weight_decay = trial.suggest_float('weight_decay', 1e-5, 1e-3, log=True)
+    args.grad_clip = trial.suggest_float('grad_clip', 0.1, 1.0)
+    args.warmup_steps = trial.suggest_int('warmup_steps', 0, 1000, step=100)
     
-    wandb.teardown()
+    args = trainer_kwargs['args']
+     
+    # ========= Logging ========
+    logger = UnifiedLogger(args, level='DEBUG')
+    my_logger, wandb_logger = logger.my_logger(), logger.wandb_logger(args)
+    trainer_kwargs['logger'] = (my_logger, wandb_logger)
+    
+    trainer = Trainer(**trainer_kwargs)
+    
+    return trainer.train() # return the loss
 
 if __name__ == '__main__':
     key = jax.random.PRNGKey(69)

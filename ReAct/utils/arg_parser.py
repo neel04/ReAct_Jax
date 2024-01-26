@@ -67,6 +67,9 @@ def parse_args():
     parser.add_argument('--exp_logging', action='store_const', const='online', default='disabled',
                     help='Enable experiment logging in the cloud. Default: disabled')
     
+    parser.add_argument('--group', type=str, default='TinyStories',
+                        help='WandB group name. Default: TinyStories')
+    
     parser.add_argument('--checkpoint_path', type=str, default=None,
                         help='Path to checkpoint. Default: None')
     

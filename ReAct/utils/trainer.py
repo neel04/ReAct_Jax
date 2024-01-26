@@ -30,6 +30,7 @@ def n_k_loop(model: eqx.Module, input_arr: Array, pad_mask: Array, n: int, k: in
 def vanilla_fwd(model: eqx.Module, input_arr: Array, pad_mask: Array, n: int, k: int, key: PRNGKeyArray) -> Array:
     return model(input_arr, pad_mask, key=key)
 
+@eqx.filter_checkpoint
 @eqx.filter_value_and_grad
 def compute_loss(model: eqx.Module, x: Array, y: Array, pad_mask: Array,
                  n: int, k: int, num_classes: int = 2, keys: PRNGKeyArray = None):
@@ -306,8 +307,8 @@ class Trainer:
                         
             print(f'Epoch {epoch} done!')
             step_done = step # prepare for next epoch
-                
-        return loss, model, opt_state
+        
+        return loss
     
     def generate(self, model: eqx.Module, input_arr: Array, metadata: dict, max_new_tokens: int, temperature: float = 0.35):
         '''

@@ -42,8 +42,8 @@ class UnifiedLogger:
         else:
             id = None
             
-        wandb.init(project='ReAct_Jax', config=args, anonymous='allow', group='TinyStories',
-                   mode=args.exp_logging, resume='allow', id=id)
+        wandb.init(project='ReAct_Jax', config=args, anonymous='allow', group=args.group,
+                   mode=args.exp_logging, resume='allow', id=id, reinit=True)
         
         wandb.run.log_code(
             "../",
