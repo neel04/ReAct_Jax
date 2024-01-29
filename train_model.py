@@ -1,5 +1,6 @@
 import jax
 import jax.experimental.mesh_utils as mesh_utils
+import jax.numpy as jnp
 import jax.sharding as sharding
 import optuna
 from jax import config
@@ -96,10 +97,9 @@ def kickoff_optuna(trial, **trainer_kwargs):
     
     args.epochs = 1
     
-    args.lr = trial.suggest_float('lr', 1e-4, 9e-2, log=True)
+    args.lr = trial.suggest_float('lr', 1e-4, 1e-2)
     args.drop_rate = trial.suggest_float('drop_rate', 0.0, 0.2)
-    args.weight_decay = trial.suggest_float('weight_decay', 1e-5, 1e-3, log=True)
-    args.grad_clip = trial.suggest_float('grad_clip', 0.1, 1.0)
+    args.weight_decay = trial.suggest_float('weight_decay', 1e-5, 1e-3)
     args.warmup_steps = trial.suggest_int('warmup_steps', 0, 1000, step=100)
     
     args = trainer_kwargs['args']
@@ -111,7 +111,7 @@ def kickoff_optuna(trial, **trainer_kwargs):
     
     trainer = Trainer(**trainer_kwargs)
     
-    return trainer.train() # return the loss
+    return jnp.nan_to_num(trainer.train(), nan=9999.0) # return the loss
 
 if __name__ == '__main__':
     key = jax.random.PRNGKey(69)

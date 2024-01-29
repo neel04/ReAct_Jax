@@ -27,10 +27,10 @@ TRAIN_ARGS="--save_dir ./ReAct/outputs/ --epochs 4 --warmup_steps 200 \
 echo "Stopping all running Docker containers..."
 sudo docker stop $(sudo docker ps -a -q)
 
-sudo -s <<EOF
-
 # Git stuff
 git clone -b $BRANCH https://github.com/neel04/ReAct_Jax.git
+
+sudo -s <<EOF
 git config --global safe.directory '*'
 cd ReAct_Jax/; git pull --all; cd ..
 
