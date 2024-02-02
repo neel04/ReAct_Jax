@@ -266,8 +266,6 @@ class Trainer:
                     # Terminate if loss is NaN
                     if jnp.isnan(loss):
                         self.my_logger.info(f'Loss is NaN at step {step}')
-                        self.wandb_logger.finish()
-                        
                         return loss
                 
                 if (step + 1) % self.log_interval == 0:

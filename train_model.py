@@ -54,6 +54,7 @@ def main(key: PRNGKeyArray):
                                     load_if_exists=True,
                                     sampler=optuna.samplers.TPESampler(
                                         seed=69,
+                                        consider_magic_clip=True,
                                     ))
         
         wandb_kwargs = {
@@ -95,12 +96,12 @@ def main(key: PRNGKeyArray):
 def kickoff_optuna(trial, **trainer_kwargs):
     args = trainer_kwargs['args']
     
-    args.epochs = 1
+    args.epochs = 2
     
     args.lr = trial.suggest_float('lr', 1e-4, 1e-2)
     args.drop_rate = trial.suggest_float('drop_rate', 0.0, 0.2)
     args.weight_decay = trial.suggest_float('weight_decay', 1e-5, 1e-3)
-    args.warmup_steps = trial.suggest_int('warmup_steps', 0, 1000, step=100)
+    args.warmup_steps = trial.suggest_int('warmup_steps', 0, 2000, step=100)
     
     args = trainer_kwargs['args']
      
