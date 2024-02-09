@@ -21,6 +21,30 @@ compilation_cache.initialize_cache('./compilation_cache')
 
 @eqx.filter_jit
 def n_k_loop(model: eqx.Module, input_arr: Array, pad_mask: Array, n: int, k: int, key: PRNGKeyArray) -> Array:
+    key1, key2 = jax.random.split(key, 2)
+    
+    # forward pass the model without tracking grads
+    _, intermediate_array = model(
+        input_arr,
+        iters_to_do=n,
+        pad_mask=pad_mask,
+        prev_thought=False,
+        key=key1)
+    
+    intermediate_array = jax.lax.stop_gradient(intermediate_array)
+    
+    # n+1 passes but track the gradient
+    output_n, _ = model(
+        intermediate_array,
+        iters_to_do=1,
+        pad_mask=pad_mask,
+        prev_thought=True,
+        key=key2)
+
+    return output_n
+
+@eqx.filter_jit
+def k_fwd(model: eqx.Module, input_arr: Array, pad_mask: Array, n: int, k: int, key: PRNGKeyArray) -> Array:
     # Only k passes, but track the gradient
     output_k, _ = model(input_arr, k, pad_mask=pad_mask, key=key)
    
@@ -36,7 +60,7 @@ def compute_loss(model: eqx.Module, x: Array, y: Array, pad_mask: Array,
                  n: int, k: int, num_classes: int = 2, keys: PRNGKeyArray = None):
     
     if model.__name__ == 'ReAct':
-        forward = n_k_loop
+        forward = k_fwd
     else:
         forward = vanilla_fwd
     
