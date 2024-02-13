@@ -46,8 +46,9 @@ class TinyStoriesDataset:
         dataset = self.dataset
         
         if debug or jax.default_backend() == 'cpu':
-            print('\nUsing only 4096 samples from the dataset...')
-            dataset = dataset.select(range(8192)) # only use 4096 samples
+            samples = 8_000 
+            print(f'\nUsing only {samples} samples from the dataset...')
+            dataset = dataset.select(range(samples)) # only use some samples
         
         dataset = dataset.map(self.tokenize_and_pad, batched=True, batch_size=self.bsz,
                               keep_in_memory=True, drop_last_batch=True)

@@ -89,25 +89,23 @@ class React(eqx.Module):
     def iterate_for_steps(self, interim_thought: Array, mask: Array,
                           iters_to_do: int, input_arr: Array, key: PRNGKeyArray) -> Array:
         
-        def body_fun(carry: Tuple, _):
-            thought, mask = carry
+        # These are constants
+        input_arr = input_arr.astype(jnp.bfloat16)
+        mask = mask.astype(jnp.bfloat16)
+        
+        def body_fun(carry: Array, _):
+            thought = carry
             
             latent = jnp.concatenate([thought, input_arr], axis=-1).astype(jnp.bfloat16)
             latent = self.main_block(latent, input_arr, mask, key).astype(jnp.bfloat16)
             latent = jax.vmap(self.post_ln)(latent).astype(jnp.bfloat16)  # LN to keep scales tidy
 
-            out = (latent, mask)
-            
-            return out, latent
-        
-        init_val = (interim_thought, mask)
+            return latent, None
         
         # Run the scan for self.max_iters iterations
-        final_val, history = jax.lax.scan(body_fun, init_val, None, length=self.max_iters)
+        final_val, history = jax.lax.scan(body_fun, interim_thought, None, length=self.max_iters)
         
-        # Return the final thought after all iterations
-        alpha: float = 0.8
-        return final_val[0] * alpha + sum(history) * (1 - alpha)
+        return final_val
 
     @eqx.filter_jit
     def __call__(self,
@@ -116,7 +114,7 @@ class React(eqx.Module):
                  pad_mask: Array,
                  prev_thought: bool = False,
                  training: bool = True,
-                 key: Optional[PRNGKeyArray] = None) -> Array:
+                 key: Optional[PRNGKeyArray] = None) -> Tuple[Array]:
         
         if not prev_thought:
             input_arr = jax.vmap(self.embed_layer)(input_arr) + self.pos_enc # (batch, seqlen, bottleneck)

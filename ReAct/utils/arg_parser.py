@@ -40,7 +40,7 @@ def parse_args():
     parser.add_argument('--warmup_steps', type=int, default=100,
                         help='Number of warmup steps. Default: 100')
     
-    parser.add_argument('--accum_steps', type=int, default=3,
+    parser.add_argument('--accum_steps', type=int, default=1,
                         help='Number of gradient accumulation steps. Default: 1')
 
     parser.add_argument('--grad_clip', type=float, default=1.0,

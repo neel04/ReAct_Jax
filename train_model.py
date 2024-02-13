@@ -47,7 +47,7 @@ def main(key: PRNGKeyArray):
     shard = sharding.PositionalSharding(devices)
     
     if args.tune_hyperparams:
-        args.group = 'Sweeps'
+        args.group = 'Sweeps' if args.baseline else 'Sweeps_5i'
         
         study = optuna.create_study(direction='minimize',
                                     study_name='ReAct_Jax',

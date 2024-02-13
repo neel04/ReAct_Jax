@@ -34,21 +34,21 @@ def n_k_loop(model: eqx.Module, input_arr: Array, pad_mask: Array, n: int, k: in
     intermediate_array = jax.lax.stop_gradient(intermediate_array)
     
     # n+1 passes but track the gradient
-    output_n, _ = model(
+    output, _ = model(
         intermediate_array,
         iters_to_do=1,
         pad_mask=pad_mask,
         prev_thought=True,
         key=key2)
 
-    return output_n
+    return output
 
 @eqx.filter_jit
-def k_fwd(model: eqx.Module, input_arr: Array, pad_mask: Array, n: int, k: int, key: PRNGKeyArray) -> Array:
-    # Only k passes, but track the gradient
-    output_k, _ = model(input_arr, k, pad_mask=pad_mask, key=key)
+def iters_fwd(model: eqx.Module, input_arr: Array, pad_mask: Array, n: int, k: int, key: PRNGKeyArray) -> Array:
+    # Only n passes, but track the gradient
+    output, _ = model(input_arr, n, pad_mask=pad_mask, key=key)
    
-    return output_k
+    return output
 
 @eqx.filter_jit
 def vanilla_fwd(model: eqx.Module, input_arr: Array, pad_mask: Array, n: int, k: int, key: PRNGKeyArray) -> Array:
@@ -57,10 +57,10 @@ def vanilla_fwd(model: eqx.Module, input_arr: Array, pad_mask: Array, n: int, k:
 @eqx.filter_checkpoint
 @eqx.filter_value_and_grad
 def compute_loss(model: eqx.Module, x: Array, y: Array, pad_mask: Array,
-                 n: int, k: int, num_classes: int = 2, keys: PRNGKeyArray = None):
+                 n: int, k: int, num_classes: int, keys: PRNGKeyArray = None):
     
     if model.__name__ == 'ReAct':
-        forward = k_fwd
+        forward = n_k_loop #iters_fwd
     else:
         forward = vanilla_fwd
     
@@ -123,9 +123,6 @@ class Trainer:
         rndm_k = get_rand_nums(k_key, jnp.ones(self.batch_size), 
                                self.max_iters - rndm_n + 1, self.batch_size,
                                bias_val)
-        
-        rndm_k = jnp.ones_like(rndm_n) * self.max_iters
-        rndm_n = rndm_k
         
         rndm_n, rndm_k = jnp.clip(rndm_n, 1, self.max_iters), jnp.clip(rndm_k, 1, self.max_iters)
         rndm_n, rndm_k = rndm_n.astype(int), rndm_k.astype(int)
@@ -266,9 +263,9 @@ class Trainer:
                 loss, model, opt_state = make_step(model, seq, label, pad_mask, rndm_n, rndm_k,
                                                    optim, opt_state, self.num_classes, keys)
                 
-                if step % 50 == 0:
+                if step % 25 == 0:
                     # cycling through keys to get new n and k
-                    #rndm_n, rndm_k = self.get_n_k(key=keys[step % self.batch_size])
+                    rndm_n, rndm_k = self.get_n_k(key=keys[step % self.batch_size])
                     
                     accuracy, loss, perplexity = self.compute_metrics(model, batch, self.max_iters,
                                                                       self.num_classes, keys)
@@ -289,7 +286,7 @@ class Trainer:
                     
                     # Terminate if loss is NaN
                     if jnp.isnan(loss):
-                        self.my_logger.info(f'Loss is NaN at step {step}')
+                        self.my_logger.warning(f'\nLoss is NaN at step {step}')
                         return loss
                 
                 if (step + 1) % self.log_interval == 0:
