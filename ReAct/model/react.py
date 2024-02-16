@@ -1,5 +1,4 @@
-from functools import partial
-from typing import Optional, List, Tuple
+from typing import Optional, List, Tuple, Union
 
 import equinox as eqx
 import jax
@@ -85,13 +84,13 @@ class React(eqx.Module):
 
         return pe
 
-    @partial(jax.jit, static_argnums=1)
+    @eqx.filter_jit
     def iterate_for_steps(self, interim_thought: Array, mask: Array,
                           iters_to_do: int, input_arr: Array, key: PRNGKeyArray) -> Array:
         
         # These are constants
         input_arr = input_arr.astype(jnp.bfloat16)
-        mask = mask.astype(jnp.bfloat16)
+        interim_thought = interim_thought.astype(jnp.bfloat16)
         
         def body_fun(carry: Array, _):
             thought = carry
@@ -109,17 +108,18 @@ class React(eqx.Module):
 
     @eqx.filter_jit
     def __call__(self,
-                 input_arr: Array,
+                 input_arr: Union[Array, Tuple[Array]],
                  iters_to_do: int,
                  pad_mask: Array,
                  prev_thought: bool = False,
                  training: bool = True,
                  key: Optional[PRNGKeyArray] = None) -> Tuple[Array]:
         
-        if not prev_thought:
-            input_arr = jax.vmap(self.embed_layer)(input_arr) + self.pos_enc # (batch, seqlen, bottleneck)
+        if prev_thought:
+            input_arr, interim_thought = input_arr
         
-        interim_thought = input_arr.astype(jnp.bfloat16)
+        input_arr = jax.vmap(self.embed_layer)(input_arr) + self.pos_enc # (batch, seqlen, bottleneck)
+        interim_thought = input_arr.copy()
         
         output = self.iterate_for_steps(interim_thought, pad_mask, iters_to_do, input_arr, key) # (batch, seqlen, bottleneck)
         

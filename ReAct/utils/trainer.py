@@ -35,7 +35,7 @@ def n_k_loop(model: eqx.Module, input_arr: Array, pad_mask: Array, n: int, k: in
     
     # n+1 passes but track the gradient
     output, _ = model(
-        intermediate_array,
+        (input_arr, intermediate_array),
         iters_to_do=1,
         pad_mask=pad_mask,
         prev_thought=True,
@@ -54,7 +54,6 @@ def iters_fwd(model: eqx.Module, input_arr: Array, pad_mask: Array, n: int, k: i
 def vanilla_fwd(model: eqx.Module, input_arr: Array, pad_mask: Array, n: int, k: int, key: PRNGKeyArray) -> Array:
     return model(input_arr, pad_mask, key=key)
 
-@eqx.filter_checkpoint
 @eqx.filter_value_and_grad
 def compute_loss(model: eqx.Module, x: Array, y: Array, pad_mask: Array,
                  n: int, k: int, num_classes: int, keys: PRNGKeyArray = None):
@@ -78,9 +77,9 @@ def _compute_softmax_cross_entropy_loss(pred_y: Array, y_one_hot: Array,
     
     loss = -jnp.sum(jax.nn.log_softmax(pred_y, axis=-1) * y_one_hot, axis=-1)
     
-    k = jnp.repeat(k[:, None], loss.shape[1], axis=-1)
+    n = jnp.repeat(n[:, None], loss.shape[1], axis=-1)
 
-    loss = (loss * k).sum(-1) # across the sequence
+    loss = (loss * n).sum(-1) # across the sequence
     
     return loss.mean() # across all the batches
 
@@ -263,7 +262,7 @@ class Trainer:
                 loss, model, opt_state = make_step(model, seq, label, pad_mask, rndm_n, rndm_k,
                                                    optim, opt_state, self.num_classes, keys)
                 
-                if step % 25 == 0:
+                if step % 50 == 0:
                     # cycling through keys to get new n and k
                     rndm_n, rndm_k = self.get_n_k(key=keys[step % self.batch_size])
                     
@@ -289,7 +288,7 @@ class Trainer:
                         self.my_logger.warning(f'\nLoss is NaN at step {step}')
                         return loss
                 
-                if (step + 1) % self.log_interval == 0:
+                if (step + 1) % self.log_interval == 0 and len(train_acc) > 0:
                     # Compute cumulatives
                     cum_train_acc = sum(train_acc) / len(train_acc)
                     cum_train_loss = sum(train_loss) / len(train_loss)
