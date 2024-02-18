@@ -55,8 +55,15 @@ class React(eqx.Module):
     post_ln: eqx.nn.LayerNorm
     out_head: eqx.Module
 
-    def __init__(self, n_heads: int, seqlen: int, max_iters: int, num_blocks: int, width: int,
-                 drop_rate: float, vocab_size: int, key: PRNGKeyArray):
+    def __init__(self,
+                 n_heads: int, 
+                 seqlen: int, 
+                 max_iters: int, 
+                 num_blocks: int, 
+                 width: int,
+                 drop_rate: float, 
+                 vocab_size: int, 
+                 key: PRNGKeyArray):
         
         key1, key2, key3, key4 = jax.random.split(key, 4)
 
@@ -85,24 +92,32 @@ class React(eqx.Module):
         return pe
 
     @eqx.filter_jit
-    def iterate_for_steps(self, interim_thought: Array, mask: Array,
-                          iters_to_do: int, input_arr: Array, key: PRNGKeyArray) -> Array:
+    def iterate_for_steps(self,
+                          interim_thought: Array, 
+                          mask: Array,
+                          iters_to_do: int, 
+                          input_arr: Array, 
+                          key: PRNGKeyArray) -> Array:
         
         # These are constants
         input_arr = input_arr.astype(jnp.bfloat16)
         interim_thought = interim_thought.astype(jnp.bfloat16)
         
-        def body_fun(carry: Array, _):
-            thought = carry
+        def cond_fun(carry: Tuple[Array, int]) -> bool:
+            _, i = carry
+            
+            return i <= iters_to_do
+        
+        def body_fun(carry: Tuple[Array, int]) -> Tuple[Array, int]:
+            thought, i = carry
             
             latent = jnp.concatenate([thought, input_arr], axis=-1).astype(jnp.bfloat16)
             latent = self.main_block(latent, input_arr, mask, key).astype(jnp.bfloat16)
             latent = jax.vmap(self.post_ln)(latent).astype(jnp.bfloat16)  # LN to keep scales tidy
 
-            return latent, None
+            return latent, i + 1
         
-        # Run the scan for self.max_iters iterations
-        final_val, history = jax.lax.scan(body_fun, interim_thought, None, length=self.max_iters)
+        final_val, _ = eqx.internal.while_loop(cond_fun, body_fun, (interim_thought, 0), kind='checkpointed', max_steps=self.max_iters)
         
         return final_val
 

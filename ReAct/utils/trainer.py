@@ -36,7 +36,7 @@ def n_k_loop(model: eqx.Module, input_arr: Array, pad_mask: Array, n: int, k: in
     # n+1 passes but track the gradient
     output, _ = model(
         (input_arr, intermediate_array),
-        iters_to_do=1,
+        iters_to_do=k,
         pad_mask=pad_mask,
         prev_thought=True,
         key=key2)
@@ -77,9 +77,9 @@ def _compute_softmax_cross_entropy_loss(pred_y: Array, y_one_hot: Array,
     
     loss = -jnp.sum(jax.nn.log_softmax(pred_y, axis=-1) * y_one_hot, axis=-1)
     
-    n = jnp.repeat(n[:, None], loss.shape[1], axis=-1)
+    k = jnp.repeat(k[:, None], loss.shape[1], axis=-1)
 
-    loss = (loss * n).sum(-1) # across the sequence
+    loss = (loss * k).sum(-1) # across the sequence
     
     return loss.mean() # across all the batches
 
