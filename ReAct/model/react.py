@@ -14,8 +14,13 @@ class RecurrentModule(eqx.Module):
     attention_blocks: List[AttentionBlock]
     reshape_layer: eqx.Module
 
-    def __init__(self, seqlen: int, drop_rate: float, n_heads: int,
-                 num_blocks: int, bottleneck: int, key: PRNGKeyArray):  # noqa: E501
+    def __init__(self,
+                 seqlen: int,
+                 drop_rate: float,
+                 n_heads: int,
+                 num_blocks: int, 
+                 bottleneck: int, 
+                 key: PRNGKeyArray):  # noqa: E501
         
         keys = jax.random.split(key, num_blocks)
         
@@ -26,8 +31,10 @@ class RecurrentModule(eqx.Module):
             self.attention_blocks.append(
                 AttentionBlock(seqlen, n_heads, drop_rate, bottleneck, key))
         
-    def __call__(self, x: Array, input_arr: Array,
-                 pad_mask: Array, key: PRNGKeyArray) -> Array:
+    def __call__(self, x: Array,
+                 input_arr: Array,
+                 pad_mask: Array, 
+                 key: PRNGKeyArray) -> Array:
         
         x = self.reshape_layer(x) # (batch, seqlen, bottleneck)
         

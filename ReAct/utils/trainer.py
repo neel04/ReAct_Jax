@@ -15,7 +15,7 @@ from ReAct.model.baseline import GPT
 from ReAct.model.react import React
 from ReAct.utils.helpers import count_params, load_eqx_obj, save_eqx_obj
 
-from .helpers import get_rand_nums, half_precision
+from .helpers import broad_to_bsz, half_precision
 
 compilation_cache.initialize_cache('./compilation_cache')
 
@@ -46,7 +46,7 @@ def n_k_loop(model: eqx.Module, input_arr: Array, pad_mask: Array, n: int, k: in
 @eqx.filter_jit
 def iters_fwd(model: eqx.Module, input_arr: Array, pad_mask: Array, n: int, k: int, key: PRNGKeyArray) -> Array:
     # Only n passes, but track the gradient
-    output, _ = model(input_arr, n, pad_mask=pad_mask, key=key)
+    output, _ = model(input_arr, k, pad_mask=pad_mask, key=key)
    
     return output
 
@@ -59,7 +59,7 @@ def compute_loss(model: eqx.Module, x: Array, y: Array, pad_mask: Array,
                  n: int, k: int, num_classes: int, keys: PRNGKeyArray = None):
     
     if model.__name__ == 'ReAct':
-        forward = n_k_loop #iters_fwd
+        forward = iters_fwd #n_k_loop
     else:
         forward = vanilla_fwd
     
@@ -118,15 +118,13 @@ class Trainer:
     def get_n_k(self, key: PRNGKeyArray, bias_val: Optional[int] = None) -> Tuple[Array, Array]:
         n_key, k_key = jax.random.split(key, 2)
         
-        rndm_n = get_rand_nums(n_key, 1, self.max_iters, self.batch_size, bias_val)
-        rndm_k = get_rand_nums(k_key, jnp.ones(self.batch_size), 
-                               self.max_iters - rndm_n + 1, self.batch_size,
-                               bias_val)
+        rndm_n = jax.random.randint(n_key, shape=(1,), minval=1, maxval=self.max_iters)
+        rndm_k = jax.random.randint(k_key, shape=(1,), minval=rndm_n.item(), maxval=self.max_iters - rndm_n.item() + 1)
         
+        rndm_n, rndm_k = broad_to_bsz(rndm_n, (self.batch_size,)), broad_to_bsz(rndm_k, (self.batch_size,))
         rndm_n, rndm_k = jnp.clip(rndm_n, 1, self.max_iters), jnp.clip(rndm_k, 1, self.max_iters)
-        rndm_n, rndm_k = rndm_n.astype(int), rndm_k.astype(int)
         
-        return rndm_n, rndm_k
+        return rndm_n.astype(int), rndm_k.astype(int)
 
     def evaluate_acc(self, model: eqx.Module, loader: DataLoader, eval_iters: int, keys: List[PRNGKeyArray]):
         

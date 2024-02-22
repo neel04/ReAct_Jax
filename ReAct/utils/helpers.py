@@ -20,6 +20,9 @@ def load_eqx_obj(filepath: str, obj: tuple) -> tuple:
     return eqx.tree_deserialise_leaves(path_or_file=filepath,
                                        like=obj)
 
+def broad_to_bsz(arr: Array, shape: tuple) -> Array:
+    return jnp.broadcast_to(arr, shape)
+
 def count_params(model: eqx.Module) -> int:
     params_fn = lambda model: sum(x.size for x in jax.tree_util.tree_leaves(eqx.filter(model, eqx.is_array)))  # noqa: E731
     num_params, non_embed_params = params_fn(model), params_fn(model.main_block)
