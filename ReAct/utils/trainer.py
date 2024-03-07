@@ -1,5 +1,5 @@
 import os
-from typing import Any, Callable, List, Optional, Tuple
+from typing import Callable, List, Optional, Tuple
 
 import equinox as eqx
 import jax
@@ -59,7 +59,7 @@ def compute_loss(model: eqx.Module, x: Array, y: Array, pad_mask: Array,
                  n: int, k: int, num_classes: int, keys: PRNGKeyArray = None):
     
     if model.__name__ == 'ReAct':
-        forward = iters_fwd #n_k_loop
+        forward = n_k_loop
     else:
         forward = vanilla_fwd
     
@@ -96,9 +96,9 @@ def make_step(model: eqx.Module, x: Array, y: Array, pad_mask: Array, n: int, k:
 
 class Trainer:
     def __init__(self, args: dict, logger: Tuple, loaders: Tuple, decode_fn: Callable,
-                 shard: Any = None, key: PRNGKeyArray = jax.random.PRNGKey(69)):
+                 shard_fn: Callable, key: PRNGKeyArray = jax.random.PRNGKey(69)):
         
-        self.shard = shard if shard is not None else None
+        self.shard_fn = shard_fn
         self.dataset_length = 2119719
         self.decode_fn = decode_fn # decode the ids to text
         self.args = args
@@ -121,6 +121,8 @@ class Trainer:
         rndm_n = jax.random.randint(n_key, shape=(1,), minval=1, maxval=self.max_iters)
         rndm_k = jax.random.randint(k_key, shape=(1,), minval=rndm_n.item(), maxval=self.max_iters - rndm_n.item() + 1)
         
+        rndm_k = jax.random.choice(k_key, jnp.array([1, 2, 3]), p=jnp.array([0.7, 0.2, 0.1]))
+        
         rndm_n, rndm_k = broad_to_bsz(rndm_n, (self.batch_size,)), broad_to_bsz(rndm_k, (self.batch_size,))
         rndm_n, rndm_k = jnp.clip(rndm_n, 1, self.max_iters), jnp.clip(rndm_k, 1, self.max_iters)
         
@@ -132,7 +134,7 @@ class Trainer:
 
         for step, batch in tqdm(enumerate(loader), total=len(loader), desc='Validating'):
             batch = batch['text']
-            batch = jax.device_put(batch, self.shard)
+            batch = tuple(map(self.shard_fn, batch))
             
             acc, loss, ppl = self.compute_metrics(model, batch, eval_iters, self.num_classes, keys)
             
@@ -155,7 +157,7 @@ class Trainer:
 
         # optimizer with weight decay
         optim = optax.chain(
-            optax.lion(learning_rate=self.schedule_fn, weight_decay=self.weight_decay),
+            optax.adamw(learning_rate=self.schedule_fn, weight_decay=self.weight_decay),
             optax.clip_by_global_norm(self.grad_clip),
             optax.apply_every(self.accum_steps)
         )
@@ -255,7 +257,7 @@ class Trainer:
                 step += step_done # for multiple epochs
                 
                 batch = batch['text']
-                seq, label, pad_mask = jax.device_put(batch, self.shard)
+                seq, label, pad_mask = tuple(map(self.shard_fn, batch))
             
                 loss, model, opt_state = make_step(model, seq, label, pad_mask, rndm_n, rndm_k,
                                                    optim, opt_state, self.num_classes, keys)

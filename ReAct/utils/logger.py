@@ -1,5 +1,7 @@
 import logging
 import os
+import jax
+
 from typing import Callable
 
 import wandb
@@ -42,8 +44,13 @@ class UnifiedLogger:
         else:
             id = None
             
-        wandb.init(project='ReAct_Jax', config=args, anonymous='allow', group=args.group,
-                   mode=args.exp_logging, resume='allow', id=id, reinit=True)
+        wandb.init(project='ReAct_Jax',
+                   config=args,
+                   group=args.group,
+                   mode=args.exp_logging and jax.process_index() == 0,
+                   resume='allow',
+                   id=id,
+                   reinit=True)
         
         wandb.run.log_code(
             "../",

@@ -1,10 +1,15 @@
+from typing import Any, Callable, Tuple
+
 import jax
+jax.distributed.initialize()
+
 import jax.experimental.mesh_utils as mesh_utils
 import jax.numpy as jnp
-import jax.sharding as sharding
 import optuna
 from jax import config
-from jaxtyping import PRNGKeyArray
+from jax.sharding import Mesh, NamedSharding
+from jax.sharding import PartitionSpec as P
+from jaxtyping import Array, PRNGKeyArray
 from optuna.integration.wandb import WeightsAndBiasesCallback
 
 from ReAct.data.tinystories import TinyStoriesDataset
@@ -40,11 +45,38 @@ def main(key: PRNGKeyArray):
     valloader = list(valloader)
     valloader = jax.tree_map(lambda x: shift_fn(x), valloader)
     
-    num_devices = jax.local_device_count()
-    print(f'Number of devices: {num_devices}')
+    # ========= Distributed setup =========
     
-    devices = mesh_utils.create_device_mesh((num_devices, 1))
-    shard = sharding.PositionalSharding(devices)
+    test_arr = jnp.arange(32 * 32).reshape(32, 32)
+    num_devices = jax.device_count() # global devices
+    mesh_shape = (num_devices, 1)
+    
+    axis_names = ('a', 'b')
+    partition_spec = ('a',)
+    
+    print(f'Number of global devices: {num_devices}')
+    
+    devices = mesh_utils.create_device_mesh(mesh_shape)
+    mesh = Mesh(devices, axis_names=axis_names)
+    
+    def _shard_fn_spawn(local_devices: list, mesh: Any, partition_spec: Tuple) -> Callable:
+        '''
+        Create the shard function with embedded objects
+        sharding_strat and local_devices
+        '''
+        sharding_strat = NamedSharding(mesh, P(*partition_spec))
+        
+        def shard_fn(arr: Array) -> Array:
+            return jax.make_array_from_callback(
+                arr.shape,
+                sharding=sharding_strat,
+                data_callback=lambda idx: arr[idx]
+            )
+        
+        return shard_fn
+
+    shard_fn = _shard_fn_spawn(mesh.local_devices, mesh, partition_spec)
+    jax.debug.visualize_array_sharding(shard_fn(test_arr))
     
     if args.tune_hyperparams:
         args.group = 'Sweeps' if args.baseline else 'Sweeps_5i'
@@ -69,7 +101,7 @@ def main(key: PRNGKeyArray):
             "args": args,
             "loaders": (trainloader, valloader),
             "decode_fn": train_dataset.tok.decode,
-            "shard": shard,
+            "shard": shard_fn,
             "key": key
         }
         
@@ -88,10 +120,11 @@ def main(key: PRNGKeyArray):
         trainer = Trainer(args, logger=(my_logger, wandb_logger),
                             loaders=(trainloader, valloader),
                             decode_fn=train_dataset.tok.decode,
-                            shard=shard,
+                            shard_fn=shard_fn,
                             key=key)
         
-        trainer.train()
+        with jax.spmd_mode('allow_all'):
+            trainer.train()
 
 def kickoff_optuna(trial, **trainer_kwargs):
     args = trainer_kwargs['args']
