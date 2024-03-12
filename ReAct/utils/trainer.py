@@ -1,4 +1,5 @@
 import os
+from functools import partial
 from typing import Callable, List, Optional, Tuple
 
 import equinox as eqx
@@ -6,7 +7,9 @@ import jax
 import jax.numpy as jnp
 import optax
 from jax.experimental.compilation_cache import compilation_cache
-from jaxtyping import Array, PRNGKeyArray
+from jaxtyping import Array, PRNGKeyArray, PyTree
+from scalax.sharding import MeshShardingHelper
+from scalax.sharding import PartitionSpec as P
 from torch.utils.data import DataLoader
 from tqdm.auto import tqdm
 
@@ -18,9 +21,10 @@ from ReAct.utils.helpers import count_params, load_eqx_obj, save_eqx_obj
 from .helpers import broad_to_bsz, half_precision
 
 compilation_cache.initialize_cache('./compilation_cache')
+mesh = MeshShardingHelper(axis_dims=[-1], axis_names=['data'])
 
 @eqx.filter_jit
-def n_k_loop(model: eqx.Module, input_arr: Array, pad_mask: Array, n: int, k: int, key: PRNGKeyArray) -> Array:
+def n_k_loop(model: eqx.Module, input_arr: Array, pad_mask: Array, n: Array, k: Array, key: PRNGKeyArray) -> Array:
     key1, key2 = jax.random.split(key, 2)
     
     # forward pass the model without tracking grads
@@ -46,13 +50,13 @@ def n_k_loop(model: eqx.Module, input_arr: Array, pad_mask: Array, n: int, k: in
 @eqx.filter_jit
 def iters_fwd(model: eqx.Module, input_arr: Array, pad_mask: Array, n: int, k: int, key: PRNGKeyArray) -> Array:
     # Only n passes, but track the gradient
-    output, _ = model(input_arr, k, pad_mask=pad_mask, key=key)
+    output, _ = model(input_arr, k, pad_mask=pad_mask, enable_dropout=True, key=key)
    
     return output
 
 @eqx.filter_jit
 def vanilla_fwd(model: eqx.Module, input_arr: Array, pad_mask: Array, n: int, k: int, key: PRNGKeyArray) -> Array:
-    return model(input_arr, pad_mask, key=key)
+    return model(input_arr, pad_mask, enable_dropout=True, key=key)
 
 @eqx.filter_value_and_grad
 def compute_loss(model: eqx.Module, x: Array, y: Array, pad_mask: Array,
@@ -83,9 +87,31 @@ def _compute_softmax_cross_entropy_loss(pred_y: Array, y_one_hot: Array,
     
     return loss.mean() # across all the batches
 
-@eqx.filter_jit
-def make_step(model: eqx.Module, x: Array, y: Array, pad_mask: Array, n: int, k: int,
-              optim, opt_state, num_classes: int, keys: List[PRNGKeyArray]):  # noqa: F821
+@partial(
+    mesh.sjit,
+    in_shardings=None, # Model and data are replicated in the input
+    out_shardings=None, # Model and metrics are replicated in the output
+    # Inside the function, the data should be sharded according to the `data` axis
+    args_sharding_constraint=(None,
+                              P('data'),
+                              P('data'), 
+                              P('data'), 
+                              None, 
+                              None, 
+                              P(), 
+                              None),
+    static_argnums=(6, 8)
+)
+def make_step(model: eqx.Module,
+              x: Array,
+              y: Array,
+              pad_mask: Array,
+              n: Array,
+              k: Array,
+              optim: Callable, # static
+              opt_state: Tuple[PyTree], 
+              num_classes: int, # static
+              keys: List[PRNGKeyArray]):
     
     loss, grads = compute_loss(model, x, y, pad_mask, n, k, num_classes, keys)
     updates, opt_state = optim.update(grads, opt_state, model)
@@ -134,7 +160,6 @@ class Trainer:
 
         for step, batch in tqdm(enumerate(loader), total=len(loader), desc='Validating'):
             batch = batch['text']
-            batch = tuple(map(self.shard_fn, batch))
             
             acc, loss, ppl = self.compute_metrics(model, batch, eval_iters, self.num_classes, keys)
             
@@ -148,7 +173,7 @@ class Trainer:
         return (cum_acc, cum_loss, cum_ppl), batch[0][0] # return one sample for viz
     
     def set_optim_and_scheduler(self, model: eqx.Module):
-        assert isinstance(model, eqx.Module), 'Model is not initialized'
+        assert model is not None, 'Model is not initialized'
         
         total_steps = self.epochs * self.dataset_length // self.batch_size
         
@@ -162,11 +187,13 @@ class Trainer:
             optax.apply_every(self.accum_steps)
         )
         
-        opt_state = optim.init(eqx.filter(model, eqx.is_array))
+        opt_state = optim.init(eqx.filter(model, eqx.is_array_like))
         
         return optim, opt_state, model
     
-    def init_model(self, key: PRNGKeyArray):
+    def init_model(self,
+                   key: PRNGKeyArray,
+                   enable_dropout: bool = True):
         
         if self.baseline:
             model = GPT(self.n_heads, self.seqlen, self.num_blocks, self.width,
@@ -257,7 +284,7 @@ class Trainer:
                 step += step_done # for multiple epochs
                 
                 batch = batch['text']
-                seq, label, pad_mask = tuple(map(self.shard_fn, batch))
+                seq, label, pad_mask = batch
             
                 loss, model, opt_state = make_step(model, seq, label, pad_mask, rndm_n, rndm_k,
                                                    optim, opt_state, self.num_classes, keys)
@@ -333,6 +360,7 @@ class Trainer:
             print(f'Epoch {epoch} done!')
             step_done = step # prepare for next epoch
         
+        self.wandb_logger.finish()
         return loss
     
     def generate(self, model: eqx.Module, input_arr: Array, metadata: dict, max_new_tokens: int, temperature: float = 0.35):
@@ -340,8 +368,9 @@ class Trainer:
         Take a conditioning sequence , call output_head to obtain a prediction
         and autoregressively complete the sequence max_new_tokens times.
         '''
-        inference_model = eqx.tree_inference(model, value=True) # switching to inferencing
         key = jax.random.PRNGKey(0)
+        inference_model = eqx.nn.inference_mode(model)
+        
         text_table = wandb.Table(columns=["Step", "Prompt", "Model Generation", "Type"])
         prompt = f'Prompt: {self.decode_fn(input_arr)}'
         

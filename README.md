@@ -19,9 +19,9 @@ CONTAINER_NAME="react_container"
 TRAIN_ARGS="--save_dir ./ReAct/outputs/ --epochs 4 --warmup_steps 200 \
 --lr 3e-4 --num_blocks 4 \
 --width 384 --batch_size 512 --n_heads 4 --max_iters 5 \
- --weight_decay 1e-3 --drop_rate 0.01  \
- --log_interval 1000 --save_interval 1000 --seqlen 192  \
- --bf16 --accum_steps 1 --exp_logging" #--tune_hyperparams"
+--weight_decay 1e-3 --drop_rate 0.01 \
+--log_interval 1000 --save_interval 1000 --seqlen 192 \
+--bf16 --accum_steps 1 --exp_logging" #--tune_hyperparams"
 
 # Stop all running Docker containers
 echo "Stopping all running Docker containers..."
@@ -73,13 +73,17 @@ gcloud alpha compute tpus queued-resources create node-v4 \
 --best-effort
 ```
 
-Setup TPU pod slice
+Setup TPU pod slice - and ensure you have `run.sh` in the same directory as this command.
 
 ```bash
+gcloud compute tpus tpu-vm scp run.sh node-v4: \
+  --worker=all \
+  --zone=us-central2-b
+
 gcloud compute tpus tpu-vm ssh node-v4 \
 --zone=us-central2-b --worker=all --command='\
     sudo apt-get update; \
-    sudo apt-get install neovim; \
+    sudo apt-get install neovim -y; \
     wget https://gist.github.com/neel04/3bfc7e4d9cd746829b7e72f1b6fac5de -O ./run.sh; \
     bash run.sh;'
 ```

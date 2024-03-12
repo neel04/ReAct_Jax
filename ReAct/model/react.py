@@ -33,7 +33,8 @@ class RecurrentModule(eqx.Module):
         
     def __call__(self, x: Array,
                  input_arr: Array,
-                 pad_mask: Array, 
+                 pad_mask: Array,
+                 enable_dropout: bool,
                  key: PRNGKeyArray) -> Array:
         
         x = self.reshape_layer(x) # (batch, seqlen, bottleneck)
@@ -41,10 +42,10 @@ class RecurrentModule(eqx.Module):
         for idx, block in enumerate(self.attention_blocks):
             if idx == 0:
                 # cross attention with input_arr
-                x = block(x, input_arr, pad_mask, key).astype(jnp.bfloat16)
+                x = block(x, input_arr, pad_mask, enable_dropout, key).astype(jnp.bfloat16)
             else:
                 # self attention with input_arr
-                x = block(x, x, pad_mask, key).astype(jnp.bfloat16)
+                x = block(x, x, pad_mask, enable_dropout, key).astype(jnp.bfloat16)
         
         return x
 
@@ -103,7 +104,8 @@ class React(eqx.Module):
                           interim_thought: Array, 
                           mask: Array,
                           iters_to_do: int, 
-                          input_arr: Array, 
+                          input_arr: Array,
+                          enable_dropout: bool,
                           key: PRNGKeyArray) -> Array:
         
         # These are constants
@@ -119,7 +121,7 @@ class React(eqx.Module):
             thought, i = carry
             
             latent = jnp.concatenate([thought, input_arr], axis=-1).astype(jnp.bfloat16)
-            latent = self.main_block(latent, input_arr, mask, key).astype(jnp.bfloat16)
+            latent = self.main_block(latent, input_arr, mask, enable_dropout, key).astype(jnp.bfloat16)
             latent = jax.vmap(self.post_ln)(latent).astype(jnp.bfloat16)  # LN to keep scales tidy
 
             return latent, i + 1
@@ -134,7 +136,7 @@ class React(eqx.Module):
                  iters_to_do: int,
                  pad_mask: Array,
                  prev_thought: bool = False,
-                 training: bool = True,
+                 is_training: bool = True,
                  key: Optional[PRNGKeyArray] = None) -> Tuple[Array]:
         
         if prev_thought:
@@ -143,9 +145,9 @@ class React(eqx.Module):
         input_arr = jax.vmap(self.embed_layer)(input_arr) + self.pos_enc # (batch, seqlen, bottleneck)
         interim_thought = input_arr.copy()
         
-        output = self.iterate_for_steps(interim_thought, pad_mask, iters_to_do, input_arr, key) # (batch, seqlen, bottleneck)
+        output = self.iterate_for_steps(interim_thought, pad_mask, iters_to_do, input_arr, is_training, key) # (batch, seqlen, bottleneck)
         
-        if training:
+        if is_training:
             return self.out_head(output), output
         else:
             return self.out_head(output)

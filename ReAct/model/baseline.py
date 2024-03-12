@@ -89,6 +89,7 @@ class GPT(eqx.Module):
     def __call__(self,
                  input_arr: Array,
                  pad_mask: Array,
+                 enable_dropout: bool,
                  key: PRNGKeyArray) -> Array:
         
         input_arr = jax.vmap(self.embed_layer)(input_arr) + self.pos_enc

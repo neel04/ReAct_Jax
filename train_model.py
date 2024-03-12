@@ -1,15 +1,10 @@
-from typing import Any, Callable, Tuple
-
 import jax
 jax.distributed.initialize()
 
-import jax.experimental.mesh_utils as mesh_utils
 import jax.numpy as jnp
 import optuna
 from jax import config
-from jax.sharding import Mesh, NamedSharding
-from jax.sharding import PartitionSpec as P
-from jaxtyping import Array, PRNGKeyArray
+from jaxtyping import PRNGKeyArray
 from optuna.integration.wandb import WeightsAndBiasesCallback
 
 from ReAct.data.tinystories import TinyStoriesDataset
@@ -26,7 +21,7 @@ def main(key: PRNGKeyArray):
     if args.debug:
         config.update("jax_debug_nans", True)
         config.update("jax_debug_infs", True)
-        config.update("jax_disable_jit", True)
+        config.update("jax_disable_jit", False)
     
     # ========= Data =========
     train_dataset = TinyStoriesDataset(split='train', max_length=args.seqlen, bsz=args.batch_size)
@@ -47,36 +42,7 @@ def main(key: PRNGKeyArray):
     
     # ========= Distributed setup =========
     
-    test_arr = jnp.arange(32 * 32).reshape(32, 32)
-    num_devices = jax.device_count() # global devices
-    mesh_shape = (num_devices, 1)
-    
-    axis_names = ('a', 'b')
-    partition_spec = ('a',)
-    
-    print(f'Number of global devices: {num_devices}')
-    
-    devices = mesh_utils.create_device_mesh(mesh_shape)
-    mesh = Mesh(devices, axis_names=axis_names)
-    
-    def _shard_fn_spawn(local_devices: list, mesh: Any, partition_spec: Tuple) -> Callable:
-        '''
-        Create the shard function with embedded objects
-        sharding_strat and local_devices
-        '''
-        sharding_strat = NamedSharding(mesh, P(*partition_spec))
-        
-        def shard_fn(arr: Array) -> Array:
-            return jax.make_array_from_callback(
-                arr.shape,
-                sharding=sharding_strat,
-                data_callback=lambda idx: arr[idx]
-            )
-        
-        return shard_fn
-
-    shard_fn = _shard_fn_spawn(mesh.local_devices, mesh, partition_spec)
-    jax.debug.visualize_array_sharding(shard_fn(test_arr))
+    shard_fn = 0 #TODO: Remove legacy components
     
     if args.tune_hyperparams:
         args.group = 'Sweeps' if args.baseline else 'Sweeps_5i'
@@ -101,7 +67,7 @@ def main(key: PRNGKeyArray):
             "args": args,
             "loaders": (trainloader, valloader),
             "decode_fn": train_dataset.tok.decode,
-            "shard": shard_fn,
+            "shard_fn": shard_fn,
             "key": key
         }
         
@@ -122,6 +88,9 @@ def main(key: PRNGKeyArray):
                             decode_fn=train_dataset.tok.decode,
                             shard_fn=shard_fn,
                             key=key)
+        
+        my_logger.info(f"All devices: {jax.device_count()}")
+        my_logger.info(f"# of hosts: {jax.process_count()}")
         
         with jax.spmd_mode('allow_all'):
             trainer.train()
@@ -145,7 +114,10 @@ def kickoff_optuna(trial, **trainer_kwargs):
     
     trainer = Trainer(**trainer_kwargs)
     
-    return jnp.nan_to_num(trainer.train(), nan=9999.0) # return the loss
+    with jax.spmd_mode('allow_all'):
+        loss = trainer.train()
+        
+    return jnp.nan_to_num(loss, nan=9999.0) # return the loss
 
 if __name__ == '__main__':
     key = jax.random.PRNGKey(69)

@@ -19,7 +19,13 @@ class AttentionBlock(eqx.Module):
     ln2: eqx.Module
     mlp: eqx.Module
 
-    def __init__(self, seqlen: int, n_heads: int, drop_rate: float, bottleneck: int, key: PRNGKeyArray):
+    def __init__(self,
+                 seqlen: int,
+                 n_heads: int,
+                 drop_rate: float,
+                 bottleneck: int,
+                 key: PRNGKeyArray):
+        
         key1, key2 = jax.random.split(key, 2)
 
         self.seqlen = seqlen
@@ -36,7 +42,9 @@ class AttentionBlock(eqx.Module):
 
         self.mlp = MLP(self.bottleneck, self.bottleneck, drop_rate, key2)
 
-    def _make_self_attention_mask(self, pad_mask: Array) -> Array:
+    def _make_self_attention_mask(self,
+                                  pad_mask: Array) -> Array:
+        
         """Create self-attention mask from sequence-level mask."""
         
         # merge with pad_mask in the end
@@ -45,7 +53,9 @@ class AttentionBlock(eqx.Module):
         mask = jnp.expand_dims(mask, 0)
         return jnp.repeat(mask, self.n_heads, axis=0)
     
-    def _make_mixer_mask(self, pad_mask: Array):
+    def _make_mixer_mask(self,
+                         pad_mask: Array):
+        
         # Almost same, but we triu instead of tril
         # and we don't need to merge with pad_mask
         mask = jnp.ones((self.seqlen, self.seqlen)) * pad_mask
@@ -53,18 +63,23 @@ class AttentionBlock(eqx.Module):
         
         return mask
 
-    def __call__(self, inp: Array, input_arr: Array, mask: Array, key: PRNGKeyArray = jax.random.PRNGKey(0)):
-        # x: (seqlen, bottleneck)
+    def __call__(self,
+                 inp: BFloat16[Array, 'seqlen bottleneck'],
+                 input_arr: Array,
+                 mask: Array,
+                 enable_dropout: bool,
+                 key: PRNGKeyArray):
+        
         key_1, key_2 = jax.random.split(key, 2)
         inp = inp.astype(jnp.bfloat16)
         
         x = jax.vmap(self.ln1)(inp)
         inp += self.attn_gate(x, input_arr, input_arr,
                             mask=self._make_self_attention_mask(mask),
-                            key=key_1, inference=False)
+                            key=key_1, inference=enable_dropout)
         
         x = jax.vmap(self.ln2)(inp)
-        inp += self.mlp(x, key=key_2)
+        inp += self.mlp(x, enable_dropout=True, key=key_2)
 
         return inp.astype(jnp.bfloat16)
     
@@ -80,7 +95,12 @@ class MLP(eqx.Module):
     layers: eqx.nn.Sequential
     dropout: eqx.nn.Dropout
 
-    def __init__(self, input_dim: int, output_dim: int, p: float, key: PRNGKeyArray):
+    def __init__(self,
+                 input_dim: int,
+                 output_dim: int,
+                 p: float,
+                 key: PRNGKeyArray):
+        
         key1, key2 = jax.random.split(key, 2)
 
         self.layers = [
@@ -91,11 +111,15 @@ class MLP(eqx.Module):
 
         self.dropout = eqx.nn.Dropout(p=p)
 
-    def __call__(self, x: Array, key: PRNGKeyArray):
+    def __call__(self,
+                 x: Array,
+                 enable_dropout: bool,
+                 key: PRNGKeyArray):
+        
         for layer in self.layers:
             x = layer(x).astype(jnp.bfloat16)
         
-        return self.dropout(x, key=key, inference=False)
+        return self.dropout(x, key=key, inference=enable_dropout)
 
 class LinearProj(eqx.Module):
     bias: Optional[jax.Array]
@@ -105,7 +129,12 @@ class LinearProj(eqx.Module):
     output_dim: int = eqx.field(static=True)
     use_bias: bool = eqx.field(static=True)
 
-    def __init__(self, input_dim, output_dim, key: PRNGKeyArray, use_bias=True):
+    def __init__(self,
+                 input_dim: int,
+                 output_dim: int,
+                 key: PRNGKeyArray,
+                 use_bias=True):
+        
         assert input_dim >= 1 or output_dim >= 1, f'input_dim: {input_dim} | output_dim: {output_dim} are too small'
         wkey, bkey = jax.random.split(key, 2)
 
@@ -121,7 +150,10 @@ class LinearProj(eqx.Module):
         else:
             self.bias = jnp.zeros((output_dim,))
     
-    def __call__(self, input: BFloat16[Array, 'batch in_dim'], **kwargs):
+    def __call__(self,
+                 input: BFloat16[Array, 'batch in_dim'],
+                 **kwargs):
+        
         mask = kwargs.get('mask', None)
         mask = jnp.ones_like(self.weight) if mask is None else mask
         output = input @ (self.weight * mask.astype(input.dtype)) + self.bias
