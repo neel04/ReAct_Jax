@@ -89,7 +89,7 @@ def main(key: PRNGKeyArray):
                             shard_fn=shard_fn,
                             key=key)
         
-        my_logger.info(f"All devices: {jax.device_count()}")
+        my_logger.info(f"\nAll devices: {jax.device_count()}")
         my_logger.info(f"# of hosts: {jax.process_count()}")
         
         with jax.spmd_mode('allow_all'):

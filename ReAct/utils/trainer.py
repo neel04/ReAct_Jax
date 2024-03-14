@@ -289,7 +289,7 @@ class Trainer:
                 loss, model, opt_state = make_step(model, seq, label, pad_mask, rndm_n, rndm_k,
                                                    optim, opt_state, self.num_classes, keys)
                 
-                if step % 50 == 0:
+                if step % 75 == 0:
                     # cycling through keys to get new n and k
                     rndm_n, rndm_k = self.get_n_k(key=keys[step % self.batch_size])
                     
