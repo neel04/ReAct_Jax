@@ -147,8 +147,6 @@ class Trainer:
         rndm_n = jax.random.randint(n_key, shape=(1,), minval=1, maxval=self.max_iters)
         rndm_k = jax.random.randint(k_key, shape=(1,), minval=rndm_n.item(), maxval=self.max_iters - rndm_n.item() + 1)
         
-        rndm_k = jax.random.choice(k_key, jnp.array([1, 2, 3]), p=jnp.array([0.7, 0.2, 0.1]))
-        
         rndm_n, rndm_k = broad_to_bsz(rndm_n, (self.batch_size,)), broad_to_bsz(rndm_k, (self.batch_size,))
         rndm_n, rndm_k = jnp.clip(rndm_n, 1, self.max_iters), jnp.clip(rndm_k, 1, self.max_iters)
         

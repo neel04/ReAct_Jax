@@ -76,10 +76,6 @@ gcloud alpha compute tpus queued-resources create node-v4 \
 Setup TPU pod slice - and ensure you have `run.sh` in the same directory as this command.
 
 ```bash
-gcloud compute tpus tpu-vm scp run.sh node-v4: \
-  --worker=all \
-  --zone=us-central2-b
-
 gcloud compute tpus tpu-vm ssh node-v4 \
 --zone=us-central2-b --worker=all --command='\
     sudo apt-get update; \
