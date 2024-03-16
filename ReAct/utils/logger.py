@@ -47,7 +47,7 @@ class UnifiedLogger:
         wandb.init(project='ReAct_Jax',
                    config=args,
                    group=args.group,
-                   mode='online' if jax.process_index() == 0 and args.exp_logging else 'disabled',
+                   mode='online' if jax.process_index() == 0 and args.exp_logging else 'offline',
                    resume='allow',
                    id=id,
                    reinit=True)

@@ -32,11 +32,12 @@ class main_block(eqx.Module):
     def __call__(self,
                  input_arr: Array,
                  pad_mask: Array,
+                 enable_dropout: bool,
                  key: PRNGKeyArray) -> Array:
         
         for block in self.attention_blocks:
             # repeated input_arr --> self attention
-            input_arr = block(input_arr, input_arr, pad_mask, key)
+            input_arr = block(input_arr, input_arr, pad_mask, enable_dropout, key)
         
         return input_arr
         
@@ -95,7 +96,7 @@ class GPT(eqx.Module):
         input_arr = jax.vmap(self.embed_layer)(input_arr) + self.pos_enc
         input_arr = input_arr.astype(jnp.bfloat16)
         
-        output = self.main_block(input_arr, pad_mask, key)
+        output = self.main_block(input_arr, pad_mask, enable_dropout, key)
         
         return self.out_head(output)
 

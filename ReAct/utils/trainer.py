@@ -33,6 +33,7 @@ def n_k_loop(model: eqx.Module, input_arr: Array, pad_mask: Array, n: Array, k: 
         iters_to_do=n,
         pad_mask=pad_mask,
         prev_thought=False,
+        is_training=True,
         key=key1)
     
     intermediate_array = jax.lax.stop_gradient(intermediate_array)
@@ -43,6 +44,7 @@ def n_k_loop(model: eqx.Module, input_arr: Array, pad_mask: Array, n: Array, k: 
         iters_to_do=k,
         pad_mask=pad_mask,
         prev_thought=True,
+        is_training=True,
         key=key2)
 
     return output
@@ -50,7 +52,7 @@ def n_k_loop(model: eqx.Module, input_arr: Array, pad_mask: Array, n: Array, k: 
 @eqx.filter_jit
 def iters_fwd(model: eqx.Module, input_arr: Array, pad_mask: Array, n: int, k: int, key: PRNGKeyArray) -> Array:
     # Only n passes, but track the gradient
-    output, _ = model(input_arr, k, pad_mask=pad_mask, enable_dropout=True, key=key)
+    output, _ = model(input_arr, k, enable_dropout=True, key=key)
    
     return output
 
@@ -189,9 +191,7 @@ class Trainer:
         
         return optim, opt_state, model
     
-    def init_model(self,
-                   key: PRNGKeyArray,
-                   enable_dropout: bool = True):
+    def init_model(self, key: PRNGKeyArray):
         
         if self.baseline:
             model = GPT(self.n_heads, self.seqlen, self.num_blocks, self.width,
@@ -237,11 +237,9 @@ class Trainer:
         eval_iters = jnp.ones_like(input_arr[:, 0]) * eval_iters
         
         if self.baseline:
-            pred_y = jax.vmap(model)(input_arr, pad_mask, keys)
+            pred_y = jax.vmap(model, in_axes=(0, 0, None, 0))(input_arr, pad_mask, False, keys)
         else:
-            pred_y = jax.vmap(model,
-                              in_axes=(0, 0, 0, None, None, 0))(
-                                  input_arr, eval_iters, pad_mask, False, False, keys)
+            pred_y = jax.vmap(model, in_axes=(0, 0, 0, None, None, 0))(input_arr, eval_iters, pad_mask, False, False, keys)
         
         # compute accuracy
         y_hat = jax.nn.softmax(pred_y, axis=-1).argmax(-1) * pad_mask
@@ -387,10 +385,10 @@ class Trainer:
                 zero_idx = self.seqlen
             
             if self.baseline:
-                logits = inference_model(padded_array, pad_mask, key)
+                logits = inference_model(padded_array, pad_mask, False, key)
                 gen = logits[zero_idx - 1, :] / temperature # chose the last token representation
             else:
-                logits = inference_model(padded_array, self.max_iters, pad_mask, False, True, key)[1]
+                logits = inference_model(padded_array, self.max_iters, pad_mask, False, False, key)[1]
                 logits = logits[zero_idx - 1, :] # chose the last token representation
                 gen = inference_model.out_head(logits) / temperature
                 
