@@ -77,10 +77,11 @@ Setup TPU pod slice - and ensure you have `run.sh` in the same directory as this
 
 ```bash
 gcloud compute tpus tpu-vm ssh node-v4 \
---zone=us-central2-b --worker=all --command='\
+--zone=us-central2-b --worker=all --command="\
     sudo apt-get update; \
     sudo apt-get install neovim -y; \
     sudo snap install nvim --classic; \
-    wget https://gist.githubusercontent.com/neel04/3bfc7e4d9cd746829b7e72f1b6fac5de/raw/f1aa80c4a84affec84c9a70568764ea4f177091a/run.sh -O ./run.sh; \
-    bash run.sh;'
+    rm run.sh && wget https://gist.githubusercontent.com/neel04/3bfc7e4d9cd746829b7e72f1b6fac5de/raw/f1aa80c4a84affec84c9a70568764ea4f177091a/run.sh -O ./run.sh; \
+    tmux kill-server \
+    tmux new-session -d -s mysession 'bash run.sh;'"
 ```

@@ -147,7 +147,4 @@ class React(eqx.Module):
         
         output = self.iterate_for_steps(interim_thought, pad_mask, iters_to_do, input_arr, is_training, key) # (batch, seqlen, bottleneck)
         
-        if is_training:
-            return self.out_head(output), output
-        else:
-            return self.out_head(output)
+        return self.out_head(output), output

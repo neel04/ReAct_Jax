@@ -239,7 +239,7 @@ class Trainer:
         if self.baseline:
             pred_y = jax.vmap(model, in_axes=(0, 0, None, 0))(input_arr, pad_mask, False, keys)
         else:
-            pred_y = jax.vmap(model, in_axes=(0, 0, 0, None, None, 0))(input_arr, eval_iters, pad_mask, False, False, keys)
+            pred_y = jax.vmap(model, in_axes=(0, 0, 0, None, None, 0))(input_arr, eval_iters, pad_mask, False, False, keys)[0]
         
         # compute accuracy
         y_hat = jax.nn.softmax(pred_y, axis=-1).argmax(-1) * pad_mask
