@@ -3,55 +3,16 @@ ReAct architecture and training loop - now in Jax!
 
 ### Docker
 
-This is the runner script for the Docker container. It pulls the latest version of the code from the `dev` branch, and runs `train_model.py` with the arguments specified in `TRAIN_ARGS`.
+`run.sh` is the runner script for the Docker container. It pulls the latest version of the code from the `dev` branch, and runs `train_model.py` with the arguments specified in `TRAIN_ARGS`.
 
-Thus you can easily modify the arguments in the below codeblock, and save the updated file somewhere. Everytime you run it, it would pull the latest git version on `BRANCH`.
+In the commands below, I download the script off a GitHub gist. You're better off forking this repo and changing the repo to directly `wget` from your fork.
 
-> **Run below script with elevated permissions! `sudo`**
+The script takes care of actually pulling the `docker` container, the repo, and running the training loop across a TPU Pod slice automagically.
 
-```bash
-#!/bin/bash
-BRANCH="dev"
-IMAGE_NAME="docker.io/neel04/react_image:latest"
-CONTAINER_NAME="react_container"
+> **Make sure to modify the script with your own API tokens for WandB as well as fill the other flags at the top**
 
-# arguments for train_model.py
-TRAIN_ARGS="--save_dir ./ReAct/outputs/ --epochs 4 --warmup_steps 250 \
---lr 3.5e-3 --num_blocks 4 \
---width 128 --batch_size 512 --n_heads 4 --max_iters 5 \
---weight_decay 1e-4 --drop_rate 0.02  \
---log_interval 1000 --save_interval 1000 --seqlen 192  \
---bf16 --wandb"
-
-git clone -b $BRANCH https://github.com/neel04/ReAct_Jax.git
-git config --global safe.directory '*'
-git pull --all
-
-# Stop all running Docker containers
-echo "Stopping all running Docker containers..."
-sudo docker stop $(sudo docker ps -a -q)
-
-sudo -s <<EOF
-# Git stuff
-git config --global safe.directory '*'
-
-# Run the Docker container
-echo "Running Docker container..."
-docker run --pull 'always' -v $(pwd)/ReAct_Jax/:/ReAct_Jax/ -e EQX_ON_ERROR=nan --privileged --rm --net=host --name $CONTAINER_NAME -it -d $IMAGE_NAME
-
-# Get docker container ID to copy files
-CONTAINER_ID=$(docker ps -aqf "name=$CONTAINER_NAME")
-docker cp $(pwd)/ReAct_Jax $CONTAINER_ID:/
-export JAX_TRACEBACK_FILTERING=off
-
-# Execute train_model.py inside the Docker container
-echo "Executing train_model.py inside Docker container..."
-docker exec --privileged $CONTAINER_NAME git config --global safe.directory '*'
-docker exec --privileged $CONTAINER_NAME python3 train_model.py $TRAIN_ARGS
-EOF
-
-echo "Finished training!"
-```
+1. Run `run.sh` on your TPU pod slice (tested extensively with TPUv4-32)
+2. Enjoy
 
 ## Inferencing
 
@@ -61,7 +22,7 @@ python3 inferencer.py --checkpoint_path '/Users/neel/Documents/research/ReAct_Ja
 
 ## Other commands
 
-Getting a preemptible TPUv4-8 node
+First, get a preemptible TPUv4-8 node as a queued resource:
 
 ```bash
 gcloud alpha compute tpus queued-resources create node-v4 \
@@ -72,4 +33,25 @@ gcloud alpha compute tpus queued-resources create node-v4 \
 --runtime-version tpu-vm-v4-base \
 --metadata-from-file startup-script=./run.sh \
 --best-effort
+```
+
+Setup the TPU pod slice with basics:
+
+```bash
+gcloud compute tpus tpu-vm ssh node-v4 \
+--zone=us-central2-b --worker=all --command="\
+    sudo apt-get update; \
+    sudo apt-get install neovim -y; \
+    sudo snap install nvim --classic; \
+    echo 'Setup done!"
+```
+
+And then actually kickoff the training by downloading the script and running it:
+
+```bash
+gcloud compute tpus tpu-vm ssh node-v4 \
+--zone=us-central2-b --worker=all --command="\
+    tmux kill-server; sudo rm -rf *; \
+    wget https://gist.githubusercontent.com/neel04/3bfc7e4d9cd746829b7e72f1b6fac5de/raw/run.sh; \
+    tmux new-session -d 'bash run.sh'"
 ```

@@ -2,6 +2,7 @@ import os
 from typing import List, Tuple
 
 import equinox as eqx
+import jax
 import jax.numpy as jnp
 from datasets import load_dataset
 from jaxtyping import Array
@@ -44,8 +45,10 @@ class TinyStoriesDataset:
     def create_dataloader(self, debug: bool = False):
         dataset = self.dataset
         
-        if debug:
-            dataset = dataset.select(range(2048)) # only use 2048 samples
+        if debug or jax.default_backend() == 'cpu':
+            samples = 8_000 
+            print(f'\nUsing only {samples} samples from the dataset...')
+            dataset = dataset.select(range(samples)) # only use some samples
         
         dataset = dataset.map(self.tokenize_and_pad, batched=True, batch_size=self.bsz,
                               keep_in_memory=True, drop_last_batch=True)

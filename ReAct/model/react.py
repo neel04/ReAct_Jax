@@ -1,5 +1,4 @@
-from functools import partial
-from typing import Optional, List, Tuple
+from typing import Optional, List, Tuple, Union
 
 import equinox as eqx
 import jax
@@ -15,8 +14,13 @@ class RecurrentModule(eqx.Module):
     attention_blocks: List[AttentionBlock]
     reshape_layer: eqx.Module
 
-    def __init__(self, seqlen: int, drop_rate: float, n_heads: int,
-                 num_blocks: int, bottleneck: int, key: PRNGKeyArray):  # noqa: E501
+    def __init__(self,
+                 seqlen: int,
+                 drop_rate: float,
+                 n_heads: int,
+                 num_blocks: int, 
+                 bottleneck: int, 
+                 key: PRNGKeyArray):  # noqa: E501
         
         keys = jax.random.split(key, num_blocks)
         
@@ -27,18 +31,21 @@ class RecurrentModule(eqx.Module):
             self.attention_blocks.append(
                 AttentionBlock(seqlen, n_heads, drop_rate, bottleneck, key))
         
-    def __call__(self, x: Array, input_arr: Array,
-                 pad_mask: Array, key: PRNGKeyArray) -> Array:
+    def __call__(self, x: Array,
+                 input_arr: Array,
+                 pad_mask: Array,
+                 enable_dropout: bool,
+                 key: PRNGKeyArray) -> Array:
         
         x = self.reshape_layer(x) # (batch, seqlen, bottleneck)
         
         for idx, block in enumerate(self.attention_blocks):
             if idx == 0:
                 # cross attention with input_arr
-                x = block(x, input_arr, pad_mask, key).astype(jnp.bfloat16)
+                x = block(x, input_arr, pad_mask, enable_dropout, key).astype(jnp.bfloat16)
             else:
                 # self attention with input_arr
-                x = block(x, x, pad_mask, key).astype(jnp.bfloat16)
+                x = block(x, x, pad_mask, enable_dropout, key).astype(jnp.bfloat16)
         
         return x
 
@@ -56,8 +63,15 @@ class React(eqx.Module):
     post_ln: eqx.nn.LayerNorm
     out_head: eqx.Module
 
-    def __init__(self, n_heads: int, seqlen: int, max_iters: int, num_blocks: int, width: int,
-                 drop_rate: float, vocab_size: int, key: PRNGKeyArray):
+    def __init__(self,
+                 n_heads: int, 
+                 seqlen: int, 
+                 max_iters: int, 
+                 num_blocks: int, 
+                 width: int,
+                 drop_rate: float, 
+                 vocab_size: int, 
+                 key: PRNGKeyArray):
         
         key1, key2, key3, key4 = jax.random.split(key, 4)
 
@@ -85,41 +99,52 @@ class React(eqx.Module):
 
         return pe
 
-    @partial(jax.jit, static_argnums=1)
-    def iterate_for_steps(self, interim_thought: Array, mask: Array, iters_to_do: int, input_arr: Array,
+    @eqx.filter_jit
+    def iterate_for_steps(self,
+                          interim_thought: Array, 
+                          mask: Array,
+                          iters_to_do: int, 
+                          input_arr: Array,
+                          enable_dropout: bool,
                           key: PRNGKeyArray) -> Array:
         
-        def body_fun(i: int, carry: Tuple):
-            thought, mask = carry
+        # These are constants
+        input_arr = input_arr.astype(jnp.bfloat16)
+        interim_thought = interim_thought.astype(jnp.bfloat16)
+        
+        def cond_fun(carry: Tuple[Array, int]) -> bool:
+            _, i = carry
+            
+            return i <= iters_to_do
+        
+        def body_fun(carry: Tuple[Array, int]) -> Tuple[Array, int]:
+            thought, i = carry
             
             latent = jnp.concatenate([thought, input_arr], axis=-1).astype(jnp.bfloat16)
-            latent = self.main_block(latent, input_arr, mask, key).astype(jnp.bfloat16)
-            latent = jax.vmap(self.post_ln)(latent).astype(jnp.bfloat16) # LN to keep scales tidy
-            
-            return (latent, mask)
+            latent = self.main_block(latent, input_arr, mask, enable_dropout, key).astype(jnp.bfloat16)
+            latent = jax.vmap(self.post_ln)(latent).astype(jnp.bfloat16)  # LN to keep scales tidy
+
+            return latent, i + 1
         
-        init_val = (interim_thought, mask)
-        final_thought = jax.lax.fori_loop(0, self.max_iters, body_fun, init_val) # recursive over depth = max_iters
+        final_val, _ = eqx.internal.while_loop(cond_fun, body_fun, (interim_thought, 0), kind='checkpointed', max_steps=self.max_iters)
         
-        return final_thought[0]
+        return final_val
 
     @eqx.filter_jit
     def __call__(self,
-                 input_arr: Array,
+                 input_arr: Union[Array, Tuple[Array]],
                  iters_to_do: int,
                  pad_mask: Array,
                  prev_thought: bool = False,
-                 training: bool = True,
-                 key: Optional[PRNGKeyArray] = None) -> Array:
+                 is_training: bool = True,
+                 key: Optional[PRNGKeyArray] = None) -> Tuple[Array]:
         
-        if not prev_thought:
-            input_arr = jax.vmap(self.embed_layer)(input_arr) + self.pos_enc # (batch, seqlen, bottleneck)
+        if prev_thought:
+            input_arr, interim_thought = input_arr
         
-        interim_thought = input_arr.astype(jnp.bfloat16)
+        input_arr = jax.vmap(self.embed_layer)(input_arr) + self.pos_enc # (batch, seqlen, bottleneck)
+        interim_thought = input_arr.copy()
         
-        output = self.iterate_for_steps(interim_thought, pad_mask, iters_to_do, input_arr, key) # (batch, seqlen, bottleneck)
+        output = self.iterate_for_steps(interim_thought, pad_mask, iters_to_do, input_arr, is_training, key) # (batch, seqlen, bottleneck)
         
-        if training:
-            return self.out_head(output), output
-        else:
-            return self.out_head(output)
+        return self.out_head(output), output

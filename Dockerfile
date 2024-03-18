@@ -16,8 +16,8 @@ RUN pip3 install Ipython matplotlib
 RUN pip3 install numpy pandas scipy
 
 RUN pip3 install -U -q jax[tpu] -f https://storage.googleapis.com/jax-releases/libtpu_releases.html
-RUN pip3 install -q datasets icecream tokenizers wandb einops torch tqdm jaxtyping optax equinox rich
-RUN pip3 install tensorboard-plugin-profile
+RUN pip3 install -q datasets scalax icecream tokenizers wandb einops torch tqdm jaxtyping optax equinox rich
+RUN pip3 install tensorboard-plugin-profile comet-ml optuna
 
 WORKDIR /ReAct_Jax
 

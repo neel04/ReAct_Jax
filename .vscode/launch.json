@@ -3,7 +3,7 @@
     "configurations": [
         {
             "name": "Python: Debug train_model.py",
-            "type": "python",
+            "type": "debugpy",
             "request": "launch",
             "program": "${workspaceFolder}/train_model.py",
             "console": "integratedTerminal",
@@ -13,9 +13,10 @@
                 "--batch_size", "128",
                 "--num_blocks", "4",
                 "--epochs", "1",
+                "--max_iters", "5",
                 "--bf16",
             ],
-            "justMyCode": true
+            "justMyCode": false
         }
     ]
 }

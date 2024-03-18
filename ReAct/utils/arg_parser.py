@@ -36,9 +36,12 @@ def parse_args():
     
     parser.add_argument('--weight_decay', type=float, default=1e-5,
                         help='Weight decay. Default: 1e-5')
-
+    
     parser.add_argument('--warmup_steps', type=int, default=100,
                         help='Number of warmup steps. Default: 100')
+    
+    parser.add_argument('--accum_steps', type=int, default=1,
+                        help='Number of gradient accumulation steps. Default: 1')
 
     parser.add_argument('--grad_clip', type=float, default=1.0,
                         help='Gradient clipping. Default: 1.0')
@@ -61,8 +64,11 @@ def parse_args():
     parser.add_argument('--bf16', action='store_true', default=False,
                         help='Enable mixed precision training. Default: False')
     
-    parser.add_argument('--wandb', action='store_const', const='online', default='disabled',
-                    help='Enable wandb logging. Default: disabled')
+    parser.add_argument('--exp_logging', action='store_const', const='online', default='disabled',
+                    help='Enable experiment logging in the cloud. Default: disabled')
+    
+    parser.add_argument('--group', type=str, default='TinyStories',
+                        help='WandB group name. Default: TinyStories')
     
     parser.add_argument('--checkpoint_path', type=str, default=None,
                         help='Path to checkpoint. Default: None')
@@ -76,6 +82,9 @@ def parse_args():
     
     parser.add_argument('--baseline', action='store_true', default=False,
                         help='Train baseline vanilla transformer model. Default: False')
+    
+    parser.add_argument('--tune_hyperparams', action='store_true', default=False,
+                        help='Tune hyperparameters using wandb sweep. Default: False')
 
     args = parser.parse_args()
     return args
