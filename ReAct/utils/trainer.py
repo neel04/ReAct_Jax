@@ -52,7 +52,12 @@ def n_k_loop(model: eqx.Module, input_arr: Array, pad_mask: Array, n: Array, k: 
 @eqx.filter_jit
 def iters_fwd(model: eqx.Module, input_arr: Array, pad_mask: Array, n: int, k: int, key: PRNGKeyArray) -> Array:
     # Only n passes, but track the gradient
-    output, _ = model(input_arr, k, enable_dropout=True, key=key)
+    output, _ = model(input_arr,
+                      iters_to_do=k,
+                      pad_mask=pad_mask,
+                      prev_thought=False,
+                      is_training=True,
+                      key=key)
    
     return output
 
@@ -65,7 +70,7 @@ def compute_loss(model: eqx.Module, x: Array, y: Array, pad_mask: Array,
                  n: int, k: int, num_classes: int, keys: PRNGKeyArray = None):
     
     if model.__name__ == 'ReAct':
-        forward = n_k_loop
+        forward = iters_fwd #n_k_loop
     else:
         forward = vanilla_fwd
     
