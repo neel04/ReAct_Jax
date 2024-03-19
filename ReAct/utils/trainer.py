@@ -21,7 +21,7 @@ from ReAct.utils.helpers import count_params, load_eqx_obj, save_eqx_obj
 from .helpers import broad_to_bsz, half_precision
 
 compilation_cache.initialize_cache('./compilation_cache')
-mesh = MeshShardingHelper(axis_dims=[-1], axis_names=['data'])
+mesh = MeshShardingHelper(axis_dims=[-1], axis_names=['data']) # handle DDP over multi-node
 
 @eqx.filter_jit
 def n_k_loop(model: eqx.Module, input_arr: Array, pad_mask: Array, n: Array, k: Array, key: PRNGKeyArray) -> Array:
@@ -38,7 +38,7 @@ def n_k_loop(model: eqx.Module, input_arr: Array, pad_mask: Array, n: Array, k: 
     
     intermediate_array = jax.lax.stop_gradient(intermediate_array)
     
-    # n+1 passes but track the gradient
+    # k passes but track the gradient
     output, _ = model(
         (input_arr, intermediate_array),
         iters_to_do=k,
@@ -70,7 +70,7 @@ def compute_loss(model: eqx.Module, x: Array, y: Array, pad_mask: Array,
                  n: int, k: int, num_classes: int, keys: PRNGKeyArray = None):
     
     if model.__name__ == 'ReAct':
-        forward = iters_fwd #n_k_loop
+        forward = n_k_loop
     else:
         forward = vanilla_fwd
     
@@ -148,12 +148,14 @@ class Trainer:
         for k, v in vars(self.args).items():
                 setattr(self, k, v)        
     
-    def get_n_k(self, key: PRNGKeyArray, bias_val: Optional[int] = None) -> Tuple[Array, Array]:
+    def get_n_k(self, key: PRNGKeyArray) -> Tuple[Array, Array]:
         n_key, k_key = jax.random.split(key, 2)
         
+        # Getting the random n and k
         rndm_n = jax.random.randint(n_key, shape=(1,), minval=1, maxval=self.max_iters)
         rndm_k = jax.random.randint(k_key, shape=(1,), minval=rndm_n.item(), maxval=self.max_iters - rndm_n.item() + 1)
         
+        # Broadcast the (1,) array to batch_size and clip if needed
         rndm_n, rndm_k = broad_to_bsz(rndm_n, (self.batch_size,)), broad_to_bsz(rndm_k, (self.batch_size,))
         rndm_n, rndm_k = jnp.clip(rndm_n, 1, self.max_iters), jnp.clip(rndm_k, 1, self.max_iters)
         

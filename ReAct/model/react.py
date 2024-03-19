@@ -1,4 +1,4 @@
-from typing import Optional, List, Tuple, Union
+from typing import List, Optional, Tuple, Union
 
 import equinox as eqx
 import jax
@@ -140,10 +140,12 @@ class React(eqx.Module):
                  key: Optional[PRNGKeyArray] = None) -> Tuple[Array]:
         
         if prev_thought:
+            assert isinstance(input_arr, tuple), 'prev_thought is True, but input_arr is not a tuple'
             input_arr, interim_thought = input_arr
-        
-        input_arr = jax.vmap(self.embed_layer)(input_arr) + self.pos_enc # (batch, seqlen, bottleneck)
-        interim_thought = input_arr.copy()
+            input_arr = jax.vmap(self.embed_layer)(input_arr) + self.pos_enc # (batch, seqlen, bottleneck)
+        else:
+            input_arr = jax.vmap(self.embed_layer)(input_arr) + self.pos_enc # (batch, seqlen, bottleneck)
+            interim_thought = input_arr.copy() # has to be a copy of the embedded + projected input array
         
         output = self.iterate_for_steps(interim_thought, pad_mask, iters_to_do, input_arr, is_training, key) # (batch, seqlen, bottleneck)
         
