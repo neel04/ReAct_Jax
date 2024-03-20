@@ -70,7 +70,7 @@ def compute_loss(model: eqx.Module, x: Array, y: Array, pad_mask: Array,
                  n: int, k: int, num_classes: int, keys: PRNGKeyArray = None):
     
     if model.__name__ == 'ReAct':
-        forward = n_k_loop
+        forward = iters_fwd
     else:
         forward = vanilla_fwd
     
