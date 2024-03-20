@@ -53,7 +53,7 @@ def n_k_loop(model: eqx.Module, input_arr: Array, pad_mask: Array, n: Array, k: 
 def iters_fwd(model: eqx.Module, input_arr: Array, pad_mask: Array, n: int, k: int, key: PRNGKeyArray) -> Array:
     # Only n passes, but track the gradient
     output, _ = model(input_arr,
-                      iters_to_do=k,
+                      iters_to_do=5,
                       pad_mask=pad_mask,
                       prev_thought=False,
                       is_training=True,
