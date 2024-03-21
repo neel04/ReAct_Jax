@@ -1,6 +1,6 @@
 import os
 from functools import partial
-from typing import Callable, List, Optional, Tuple
+from typing import Callable, List, Tuple
 
 import equinox as eqx
 import jax
@@ -128,10 +128,13 @@ def make_step(model: eqx.Module,
     return loss, model, opt_state
 
 class Trainer:
-    def __init__(self, args: dict, logger: Tuple, loaders: Tuple, decode_fn: Callable,
-                 shard_fn: Callable, key: PRNGKeyArray = jax.random.PRNGKey(69)):
+    def __init__(self,
+                 args: dict,
+                 logger: Tuple,
+                 loaders: Tuple,
+                 decode_fn: Callable,
+                 key: PRNGKeyArray = jax.random.PRNGKey(69)):
         
-        self.shard_fn = shard_fn
         self.dataset_length = 2119719
         self.decode_fn = decode_fn # decode the ids to text
         self.args = args
@@ -343,7 +346,7 @@ class Trainer:
                     )
                     
                     ## Visualize one sample and model prediction
-                    sample_x, val_sample_x = seq[0][:9], val_sample[:9]
+                    sample_x, val_sample_x = seq[0][:32], val_sample[:32]
                     
                     self.my_logger.info(f"epoch={epoch}, step={step}, loss={loss}")
                     self.my_logger.info(f'Validation accuracy: {val_metrics[0]} | using {self.max_iters} iterations')

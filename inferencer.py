@@ -1,8 +1,6 @@
 import os
-
 import jax
 from jaxtyping import PRNGKeyArray
-from icecream import ic
 
 from ReAct.data.tinystories import TinyStoriesDataset
 from ReAct.model.react import React

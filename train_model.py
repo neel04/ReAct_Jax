@@ -1,5 +1,8 @@
+import platform
 import jax
-jax.distributed.initialize()
+
+if platform.processor() != 'arm':
+    jax.distributed.initialize() # don't run on apple sillicon
 
 import jax.numpy as jnp
 import optuna
@@ -7,6 +10,7 @@ from jax import config
 from jaxtyping import PRNGKeyArray
 from optuna.integration.wandb import WeightsAndBiasesCallback
 
+from ReAct.data.owt import OpenWebTextDataset
 from ReAct.data.tinystories import TinyStoriesDataset
 from ReAct.utils.arg_parser import parse_args
 from ReAct.utils.logger import UnifiedLogger
@@ -24,11 +28,16 @@ def main(key: PRNGKeyArray):
         config.update("jax_disable_jit", False)
     
     # ========= Data =========
-    train_dataset = TinyStoriesDataset(split='train', max_length=args.seqlen, bsz=args.batch_size)
-    trainloader = train_dataset.create_dataloader(args.debug)
+    if args.dataset == 'TinyStories':
+        dataset: callable = TinyStoriesDataset
+    else:
+        dataset: callable = OpenWebTextDataset
     
-    valloader = TinyStoriesDataset(
-        split='validation', max_length=args.seqlen, bsz=args.batch_size).create_dataloader()
+    train_dataset = dataset(split='train', max_length=args.seqlen, bsz=args.batch_size)
+    val_dataset = dataset(split='validation', max_length=args.seqlen, bsz=args.batch_size)
+    
+    trainloader = train_dataset.create_dataloader()
+    valloader = val_dataset.create_dataloader()
     
     # preshifting the datasets
     print('\nPre-processing the training dataset...\n')
@@ -40,9 +49,7 @@ def main(key: PRNGKeyArray):
     valloader = list(valloader)
     valloader = jax.tree_map(lambda x: shift_fn(x), valloader)
     
-    # ========= Distributed setup =========
-    
-    shard_fn = 0 #TODO: Remove legacy components
+    # ========= Training/Hypertuning =========
     
     if args.tune_hyperparams:
         args.group = 'Sweeps' if args.baseline else 'Sweeps_5i'
@@ -67,7 +74,6 @@ def main(key: PRNGKeyArray):
             "args": args,
             "loaders": (trainloader, valloader),
             "decode_fn": train_dataset.tok.decode,
-            "shard_fn": shard_fn,
             "key": key
         }
         
@@ -86,10 +92,9 @@ def main(key: PRNGKeyArray):
         trainer = Trainer(args, logger=(my_logger, wandb_logger),
                             loaders=(trainloader, valloader),
                             decode_fn=train_dataset.tok.decode,
-                            shard_fn=shard_fn,
                             key=key)
         
-        my_logger.info(f"\nAll devices: {jax.device_count()}")
+        my_logger.info(f"All devices: {jax.device_count()}")
         my_logger.info(f"# of hosts: {jax.process_count()}")
         
         with jax.spmd_mode('allow_all'):

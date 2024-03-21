@@ -9,6 +9,9 @@ def parse_args():
     # Model
     parser.add_argument('--num_blocks', type=int, default=1,
                         help='Number of attention blocks. Default: 1')
+    
+    parser.add_argument('--dataset', type=str, default='openwebtext',
+                        help='Dataset to use. Default: openwebtext')
 
     parser.add_argument('--width', type=int, default=384,
                         help='Width dimension. Default: 384')
@@ -67,8 +70,8 @@ def parse_args():
     parser.add_argument('--exp_logging', action='store_const', const='online', default='disabled',
                     help='Enable experiment logging in the cloud. Default: disabled')
     
-    parser.add_argument('--group', type=str, default='TinyStories',
-                        help='WandB group name. Default: TinyStories')
+    parser.add_argument('--group', type=str, default='OpenWebText',
+                        help='WandB group name. Default: OWT')
     
     parser.add_argument('--checkpoint_path', type=str, default=None,
                         help='Path to checkpoint. Default: None')

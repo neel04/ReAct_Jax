@@ -1,21 +1,22 @@
-from typing import List
+from typing import List, Optional
 from tokenizers import Tokenizer, normalizers
 from tokenizers.normalizers import NFD, Lowercase, StripAccents
 from tokenizers.processors import TemplateProcessing
 
 class Tok:
-    def __init__(self, vocab_dir: str, max_length: int):
+    def __init__(self, vocab_dir: Optional[str], max_length: int):
         self.vocab_dir = vocab_dir
         self.max_length = max_length
-        self.tokenizer = Tokenizer.from_file(f'{self.vocab_dir}/tinytok.json')
+        
+        if vocab_dir is not None:
+            self.tokenizer = Tokenizer.from_file(f'{self.vocab_dir}/tinytok.json')
+        else:
+            self.tokenizer = Tokenizer.from_pretrained('gpt2')
         
         self.tokenizer.post_processor = TemplateProcessing(
-            single="[SOS] $A [EOS]",
-            pair="[SOS] $A [EOS] $B:1 [EOS]:1",
+            single="$A <|endoftext|>",
             special_tokens=[
-                ("[SOS]", 1),
-                ("[EOS]", 2),
-                ("[MASK]", 3)
+                ("<|endoftext|>", 50526),
             ])
         
         self.tokenizer.normalizer = normalizers.Sequence([
@@ -38,9 +39,9 @@ class Tok:
     def decode(self, ids: list):
         # convert ids to a list of ints
         ids = [int(i) for i in ids]
-        
         decoded = self.tokenizer.decode(ids, skip_special_tokens=False)
-        return decoded.replace('[UNK]', '').replace('[PAD]', '')
+        
+        return decoded.replace('!', '')
     
     def save(self):
         self.tokenizer.save(f'./ReAct/data/{self.dataset}tok.json')
@@ -58,12 +59,12 @@ class Tok:
         return self.max_length
 
 if __name__ == '__main__':
-    tok = Tok('./ReAct/data/', 32)
-    out = tok(['Sam and alice go and stab diana for [MASK]', '[MASK] off'])
+    tok = Tok(None, 32)
+    out = tok(['Sam and alice go and stab diana for no good reason (they are pschyopaths)', 'mask off'])
+    
     print('Vocab size:', tok.tokenizer.get_vocab_size())
     print(dict(zip(out[0].tokens, out[0].ids)))
     
-    # decode [0, 1, 2, 614, 69, 420]
     print(
-        tok.decode([0, 1, 2, 614, 69, 420])
+        tok.decode([13482, 338, 20854])
     )
