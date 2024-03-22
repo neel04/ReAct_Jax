@@ -56,6 +56,7 @@ class React(eqx.Module):
     __name__ = 'ReAct'
     
     max_iters: int = eqx.field(static=True)
+    iters_weights: Array
 
     pos_enc: Array
     embed_layer: eqx.nn.Embedding
@@ -76,6 +77,7 @@ class React(eqx.Module):
         key1, key2, key3, key4 = jax.random.split(key, 4)
 
         self.max_iters = max_iters
+        self.iters_weights = jax.random.normal(key, (5,))
         self.embed_layer = eqx.nn.Embedding(vocab_size, width, key=key1)
         self.pos_enc = jax.lax.stop_gradient(self.positional_encoding(seqlen, width))
 
@@ -112,22 +114,18 @@ class React(eqx.Module):
         input_arr = input_arr.astype(jnp.bfloat16)
         interim_thought = interim_thought.astype(jnp.bfloat16)
         
-        def cond_fun(carry: Tuple[Array, int]) -> bool:
-            _, i = carry
-            
-            return i <= iters_to_do
-        
-        def body_fun(carry: Tuple[Array, int]) -> Tuple[Array, int]:
-            thought, i = carry
+        def body_fun(carry: Array, _: Array) -> Tuple[Array, int]:
+            thought = carry
             
             latent = jnp.concatenate([thought, input_arr], axis=-1).astype(jnp.bfloat16)
             latent = self.main_block(latent, input_arr, mask, enable_dropout, key).astype(jnp.bfloat16)
             latent = jax.vmap(self.post_ln)(latent).astype(jnp.bfloat16)  # LN to keep scales tidy
 
-            return latent, i + 1
+            return latent, latent
+
+        final_val, _ = eqx.internal.scan(body_fun, interim_thought, xs=None, length=iters_to_do, kind='lax')
         
-        final_val, _ = eqx.internal.while_loop(cond_fun, body_fun, (interim_thought, 0), kind='checkpointed', max_steps=self.max_iters)
-        
+        #return jnp.dot(history, self.iters_weights)
         return final_val
 
     @eqx.filter_jit

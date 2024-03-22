@@ -50,10 +50,7 @@ class MiniPileDataset:
         chunk_size = (self.max_length - 1) * 4 #rought approx. for ~512 tokens
         
         for sentence in examples["text"]:
-            if len(sentence) > chunk_size:
-                chunks += [sentence[i:i + chunk_size] for i in range(0, len(sentence), chunk_size)]
-            else:
-                chunks.append(sentence)
+            chunks += [sentence[i:i + chunk_size] for i in range(0, len(sentence), chunk_size)]
             
         return {"text": chunks}
     
