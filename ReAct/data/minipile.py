@@ -9,13 +9,13 @@ from datasets import load_dataset
 from jaxtyping import Array
 from .tokenizer import Tok
 
-class OpenWebTextDataset:
+class MiniPileDataset:
     def __init__(self, split: str = 'train', max_length: int = 512, bsz: int = 256, vocab_dir: str ='./ReAct/data'):
         self.bsz = bsz
         self.max_length = max_length + 1
-        self.split = 'train[:95%]' if split == 'train' else 'train[95%:]'
+        self.split = split
         
-        self.dataset = load_dataset('maxtli/OpenWebText-2M', split=self.split, ignore_verifications=True, 
+        self.dataset = load_dataset('JeanKaddour/minipile', split=self.split, ignore_verifications=True, 
                                     keep_in_memory=True, num_proc=os.cpu_count())
         
         self.dataset.set_format(type='numpy')
@@ -35,7 +35,7 @@ class OpenWebTextDataset:
         pad_mask = jnp.where(seq != 0, 1, 0)
         
         return seq, targets, pad_mask
-    
+
     @staticmethod
     def group_batch(batch: dict) -> dict:
         '''
@@ -62,7 +62,7 @@ class OpenWebTextDataset:
         dataset = self.dataset
         
         if jax.default_backend() == 'cpu':
-            samples = 8_000 
+            samples: int = 8_000 if self.split == 'train' else 500
             print(f'\nUsing only {samples} samples from the dataset...')
             dataset = dataset.select(range(samples)) # only use some samples
         

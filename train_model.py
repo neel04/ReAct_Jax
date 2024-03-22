@@ -12,6 +12,7 @@ from optuna.integration.wandb import WeightsAndBiasesCallback
 
 from ReAct.data.owt import OpenWebTextDataset
 from ReAct.data.tinystories import TinyStoriesDataset
+from ReAct.data.minipile import MiniPileDataset
 from ReAct.utils.arg_parser import parse_args
 from ReAct.utils.logger import UnifiedLogger
 from ReAct.utils.trainer import Trainer
@@ -28,10 +29,15 @@ def main(key: PRNGKeyArray):
         config.update("jax_disable_jit", False)
     
     # ========= Data =========
-    if args.dataset == 'TinyStories':
-        dataset: callable = TinyStoriesDataset
-    else:
-        dataset: callable = OpenWebTextDataset
+    #TODO: Use inheritance to avoid seperate file for each dataset
+    
+    match args.dataset.lower():
+        case 'tinystories':
+            dataset = TinyStoriesDataset
+        case 'owt':
+            dataset = OpenWebTextDataset
+        case 'minipile':
+            dataset = MiniPileDataset
     
     train_dataset = dataset(split='train', max_length=args.seqlen, bsz=args.batch_size)
     val_dataset = dataset(split='validation', max_length=args.seqlen, bsz=args.batch_size)
@@ -41,7 +47,7 @@ def main(key: PRNGKeyArray):
     
     # preshifting the datasets
     print('\nPre-processing the training dataset...\n')
-    shift_fn = train_dataset.shift_tokens
+    shift_fn: callable = dataset.shift_tokens
     trainloader = list(trainloader) # list of dicts -> tuples
     trainloader = jax.tree_map(lambda x: shift_fn(x), trainloader)
     
@@ -94,7 +100,7 @@ def main(key: PRNGKeyArray):
                             decode_fn=train_dataset.tok.decode,
                             key=key)
         
-        my_logger.info(f"All devices: {jax.device_count()}")
+        my_logger.info(f"# of all devices: {jax.device_count()}")
         my_logger.info(f"# of hosts: {jax.process_count()}")
         
         with jax.spmd_mode('allow_all'):
