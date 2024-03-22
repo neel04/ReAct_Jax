@@ -16,7 +16,7 @@ class MiniPileDataset:
         self.split = split
         
         self.dataset = load_dataset('JeanKaddour/minipile', split=self.split, ignore_verifications=True, 
-                                    keep_in_memory=True, num_proc=os.cpu_count())
+                                    keep_in_memory=True, num_proc=os.cpu_count() // 2)
         
         self.dataset.set_format(type='numpy')
         
@@ -27,7 +27,6 @@ class MiniPileDataset:
         
         return {'text': [i.ids for i in encoded]}
     
-    @eqx.filter_jit
     @staticmethod
     def shift_tokens(seq: Array) -> Tuple[Array]:
         targets = jnp.roll(seq, shift=-1)
@@ -62,7 +61,7 @@ class MiniPileDataset:
         dataset = self.dataset
         
         if jax.default_backend() == 'cpu':
-            samples: int = 8_000 if self.split == 'train' else 500
+            samples = 8_000 if self.split == 'train' else 500
             print(f'\nUsing only {samples} samples from the dataset...')
             dataset = dataset.select(range(samples)) # only use some samples
         
