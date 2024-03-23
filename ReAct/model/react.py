@@ -77,7 +77,7 @@ class React(eqx.Module):
         key1, key2, key3, key4 = jax.random.split(key, 4)
 
         self.max_iters = max_iters
-        self.iters_weights = jax.random.normal(key, (5,))
+        self.iters_weights = jnp.ones((5,))
         self.embed_layer = eqx.nn.Embedding(vocab_size, width, key=key1)
         self.pos_enc = jax.lax.stop_gradient(self.positional_encoding(seqlen, width))
 

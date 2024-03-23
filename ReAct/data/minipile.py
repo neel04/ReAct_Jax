@@ -1,7 +1,6 @@
 import os
 from typing import List, Tuple
 
-import equinox as eqx
 import jax
 import jax.numpy as jnp
 
@@ -62,13 +61,13 @@ class MiniPileDataset:
             print(f'\nUsing only {samples} samples from the dataset...')
             dataset = dataset.select(range(samples)) # only use some samples
         
-        dataset = dataset.map(self.chunk_examples, batched=True, batch_size=self.bsz,
-                              keep_in_memory=True, drop_last_batch=True, num_proc=None)
-        
         dataset = dataset.map(self.tokenize_and_pad, batched=True, batch_size=self.bsz,
                               keep_in_memory=True, drop_last_batch=True)
         
         dataset = dataset.map(self.group_batch, batched=True, batch_size=self.bsz,
                               keep_in_memory=True, drop_last_batch=True)
+        
+        dataset = dataset.map(self.chunk_examples, batched=True, batch_size=128,
+                              keep_in_memory=True, drop_last_batch=True, num_proc=None)
         
         return dataset
