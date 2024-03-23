@@ -63,7 +63,7 @@ class MiniPileDataset:
             dataset = dataset.select(range(samples)) # only use some samples
         
         dataset = dataset.map(self.chunk_examples, batched=True, batch_size=self.bsz,
-                              keep_in_memory=True, drop_last_batch=True)
+                              keep_in_memory=True, drop_last_batch=True, num_proc=1)
         
         dataset = dataset.map(self.tokenize_and_pad, batched=True, batch_size=self.bsz,
                               keep_in_memory=True, drop_last_batch=True)
