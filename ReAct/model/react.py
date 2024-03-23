@@ -3,7 +3,7 @@ from typing import List, Optional, Tuple, Union
 import equinox as eqx
 import jax
 import jax.numpy as jnp
-from jaxtyping import Array, PRNGKeyArray
+from jaxtyping import Array, PRNGKeyArray, PyTree
 
 from .blocks import AttentionBlock, LinearProj, LiteAttention
 
@@ -114,19 +114,19 @@ class React(eqx.Module):
         input_arr = input_arr.astype(jnp.bfloat16)
         interim_thought = interim_thought.astype(jnp.bfloat16)
         
-        def body_fun(carry: Array, _: Array) -> Tuple[Array, int]:
-            thought = carry
+        def body_fun(carry: Array, _) -> Tuple[PyTree, Array]:
+            thought, mask = carry
             
             latent = jnp.concatenate([thought, input_arr], axis=-1).astype(jnp.bfloat16)
             latent = self.main_block(latent, input_arr, mask, enable_dropout, key).astype(jnp.bfloat16)
             latent = jax.vmap(self.post_ln)(latent).astype(jnp.bfloat16)  # LN to keep scales tidy
 
-            return latent, latent
+            return (latent, mask), latent
 
-        final_val, _ = eqx.internal.scan(body_fun, interim_thought, xs=None, length=iters_to_do, kind='lax')
+        final_val, _ = eqx.internal.scan(f=body_fun, init=(interim_thought, mask), xs=None, length=5, kind='checkpointed')
         
         #return jnp.dot(history, self.iters_weights)
-        return final_val
+        return final_val[0]
 
     @eqx.filter_jit
     def __call__(self,

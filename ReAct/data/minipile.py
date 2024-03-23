@@ -58,12 +58,12 @@ class MiniPileDataset:
         dataset = self.dataset
         
         if jax.default_backend() == 'cpu':
-            samples = 8_000 if self.split == 'train' else 500
+            samples = 4_000 if self.split == 'train' else 500
             print(f'\nUsing only {samples} samples from the dataset...')
             dataset = dataset.select(range(samples)) # only use some samples
         
         dataset = dataset.map(self.chunk_examples, batched=True, batch_size=self.bsz,
-                              keep_in_memory=True, drop_last_batch=True, num_proc=1)
+                              keep_in_memory=True, drop_last_batch=True, num_proc=None)
         
         dataset = dataset.map(self.tokenize_and_pad, batched=True, batch_size=self.bsz,
                               keep_in_memory=True, drop_last_batch=True)
