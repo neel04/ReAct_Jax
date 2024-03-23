@@ -15,16 +15,16 @@ class MiniPileDataset:
         self.split = split
         
         self.dataset = load_dataset('JeanKaddour/minipile', split=self.split, ignore_verifications=True, 
-                                    keep_in_memory=True, num_proc=os.cpu_count() // 2)
+                                    keep_in_memory=True, num_proc=os.cpu_count())
         
         self.dataset.set_format(type='numpy')
         
         self.tok = Tok(vocab_dir=None, max_length=self.max_length) # vocab_dir is None = GPT2 tokenizer
 
     def tokenize_and_pad(self, text: List[str]) -> dict[str, List[List[int]]]:
-        encoded = self.tok.encode(text['text'])
+        encoded = self.tok.encode(text['text'])['input_ids']
         
-        return {'text': [i.ids for i in encoded]}
+        return {'text': encoded}
     
     @staticmethod
     def shift_tokens(seq: Array) -> Tuple[Array]:
@@ -57,17 +57,17 @@ class MiniPileDataset:
         dataset = self.dataset
         
         if jax.default_backend() == 'cpu':
-            samples = 4_000 if self.split == 'train' else 500
+            samples = 64_000 if self.split == 'train' else 500
             print(f'\nUsing only {samples} samples from the dataset...')
             dataset = dataset.select(range(samples)) # only use some samples
         
-        dataset = dataset.map(self.tokenize_and_pad, batched=True, batch_size=self.bsz,
+        dataset = dataset.map(self.chunk_examples, batched=True, batch_size=self.bsz,
                               keep_in_memory=True, drop_last_batch=True)
         
-        dataset = dataset.map(self.group_batch, batched=True, batch_size=self.bsz,
-                              keep_in_memory=True, drop_last_batch=True)
+        dataset = dataset.map(self.tokenize_and_pad, batched=True, batch_size=512,
+                              keep_in_memory=True, drop_last_batch=True, num_proc=2)
         
-        dataset = dataset.map(self.chunk_examples, batched=True, batch_size=128,
-                              keep_in_memory=True, drop_last_batch=True, num_proc=None)
+        dataset = dataset.map(self.group_batch, batched=True, batch_size=2048,
+                              keep_in_memory=True, drop_last_batch=True, num_proc=4)
         
         return dataset

@@ -1,5 +1,6 @@
-from typing import List, Optional
-from tokenizers import Tokenizer, normalizers
+from typing import List, Optional, Dict
+from tokenizers import normalizers
+from transformers import AutoTokenizer
 from tokenizers.normalizers import NFD, Lowercase, StripAccents
 from tokenizers.processors import TemplateProcessing
 
@@ -9,9 +10,9 @@ class Tok:
         self.max_length = max_length
         
         if vocab_dir is not None:
-            self.tokenizer = Tokenizer.from_file(f'{self.vocab_dir}/tinytok.json')
+            self.tokenizer = AutoTokenizer.from_file(f'{self.vocab_dir}/tinytok.json')
         else:
-            self.tokenizer = Tokenizer.from_pretrained('gpt2')
+            self.tokenizer = AutoTokenizer.from_pretrained('gpt2')
         
         self.tokenizer.post_processor = TemplateProcessing(
             single="$A <|endoftext|>",
@@ -25,16 +26,12 @@ class Tok:
             StripAccents(),
         ])
         
-        self.tokenizer.enable_padding(pad_id=0, pad_token="[PAD]", length=self.max_length)
-        self.tokenizer.enable_truncation(max_length=self.max_length)
-        
-    def encode(self, text: List[str]):
-        if len(text) > 1 and not isinstance(text, str):
-            return self.tokenizer.encode_batch(text)
-        elif isinstance(text, list):
-            return self.tokenizer.encode(text[0])
-        else:
-            return self.tokenizer.encode(text)
+        self.tokenizer.add_special_tokens({'pad_token': '[PAD]'})
+    
+    def encode(self, text: List[str]) -> Dict[str, List]:
+        return self.tokenizer(text.tolist(),
+                              padding='max_length',
+                              max_length=self.max_length)
     
     def decode(self, ids: list):
         # convert ids to a list of ints
