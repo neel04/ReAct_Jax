@@ -31,7 +31,8 @@ class Tok:
     def encode(self, text: List[str]) -> Dict[str, List]:
         return self.tokenizer(text.tolist(),
                               padding='max_length',
-                              max_length=self.max_length)
+                              max_length=self.max_length,
+                              truncation=True)
     
     def decode(self, ids: list):
         # convert ids to a list of ints

@@ -40,20 +40,10 @@ def main(key: PRNGKeyArray):
             dataset = MiniPileDataset
     
     train_dataset = dataset(split='train', max_length=args.seqlen, bsz=args.batch_size)
-    val_dataset = dataset(split='validation', max_length=args.seqlen, bsz=args.batch_size)
+    val_dataset = dataset(split='test', max_length=args.seqlen, bsz=args.batch_size)
     
     trainloader = train_dataset.create_dataloader()
     valloader = val_dataset.create_dataloader()
-    
-    # preshifting the datasets
-    print('\nPre-processing the training dataset...\n')
-    shift_fn: callable = dataset.shift_tokens
-    trainloader = list(trainloader) # list of dicts -> tuples
-    trainloader = jax.tree_map(lambda x: shift_fn(x), trainloader)
-    
-    print('\nPre-processing the validation dataset...\n')
-    valloader = list(valloader)
-    valloader = jax.tree_map(lambda x: shift_fn(x), valloader)
     
     # ========= Training/Hypertuning =========
     

@@ -291,7 +291,6 @@ class Trainer:
                 
                 batch = batch['text']
                 seq, label, pad_mask = batch
-            
                 loss, model, opt_state = make_step(model, seq, label, pad_mask, rndm_n, rndm_k,
                                                    optim, opt_state, self.num_classes, keys)
                 

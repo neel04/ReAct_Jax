@@ -1,11 +1,12 @@
 import os
-from typing import List, Tuple
+from pathlib import Path
+from typing import Dict, List
 
 import jax
-import jax.numpy as jnp
-
-from datasets import load_dataset
+import numpy as np
+from datasets import load_dataset, load_from_disk
 from jaxtyping import Array
+
 from .tokenizer import Tok
 
 class MiniPileDataset:
@@ -21,18 +22,19 @@ class MiniPileDataset:
         
         self.tok = Tok(vocab_dir=None, max_length=self.max_length) # vocab_dir is None = GPT2 tokenizer
 
-    def tokenize_and_pad(self, text: List[str]) -> dict[str, List[List[int]]]:
+    def tokenize_and_pad(self, text: List[str]) -> Dict[str, List[List[int]]]:
         encoded = self.tok.encode(text['text'])['input_ids']
         
         return {'text': encoded}
     
     @staticmethod
-    def shift_tokens(seq: Array) -> Tuple[Array]:
-        targets = jnp.roll(seq, shift=-1)
+    def shift_tokens(seq: Dict[str, Array]) -> Dict[str, List[Array]]:
+        seq = seq['text']
+        targets = np.roll(seq, shift=-1)
         seq, targets = seq[:, :-1], targets[:, :-1]
-        pad_mask = jnp.where(seq != 0, 1, 0)
+        pad_mask = np.where(seq != 0, 1, 0)
         
-        return seq, targets, pad_mask
+        return {'text': [[seq, targets, pad_mask]]}
 
     @staticmethod
     def group_batch(batch: dict) -> dict:
@@ -53,21 +55,46 @@ class MiniPileDataset:
             
         return {"text": chunks}
     
+    def save_data(self, dataset, path: Path) -> None:
+        base_folder = path.parent
+        if not os.path.exists(base_folder):
+            os.makedirs(base_folder)
+        
+        dataset.save_to_disk(
+            dataset_path=path,
+            num_shards=4 if self.split == 'train' else 2,
+            num_proc=os.cpu_count() // 4
+        )
+        
+        print(f'Saved {self.split} dataset to {path}...')
+    
+    def load_data(self, path: Path):
+        return load_from_disk(
+            dataset_path=path,
+            keep_in_memory=True)
+    
     def create_dataloader(self):
         dataset = self.dataset
+        data_path = Path(f'./cached_data/minipile_{self.split}.data')
         
         if jax.default_backend() == 'cpu':
-            samples = 64_000 if self.split == 'train' else 500
+            samples = 16_000 if self.split == 'train' else 10_000
             print(f'\nUsing only {samples} samples from the dataset...')
             dataset = dataset.select(range(samples)) # only use some samples
         
-        dataset = dataset.map(self.chunk_examples, batched=True, batch_size=self.bsz,
-                              keep_in_memory=True, drop_last_batch=True)
-        
-        dataset = dataset.map(self.tokenize_and_pad, batched=True, batch_size=512,
-                              keep_in_memory=True, drop_last_batch=True, num_proc=2)
-        
-        dataset = dataset.map(self.group_batch, batched=True, batch_size=2048,
-                              keep_in_memory=True, drop_last_batch=True, num_proc=4)
-        
-        return dataset
+        if os.path.exists(data_path):
+            print(f'Loading dataset from {data_path}...')
+            dataset = self.load_data(data_path)
+            return dataset
+        else:
+            dataset = dataset.map(self.chunk_examples, batched=True, batch_size=self.bsz,
+                                keep_in_memory=True, drop_last_batch=True)
+            
+            dataset = dataset.map(self.tokenize_and_pad, batched=True, batch_size=self.bsz,
+                                keep_in_memory=True, drop_last_batch=True, num_proc=None)
+            
+            dataset = dataset.map(self.shift_tokens, batched=True, batch_size=self.bsz,
+                                keep_in_memory=True, drop_last_batch=True, num_proc=None)
+            
+            self.save_data(dataset, data_path)
+            return dataset
