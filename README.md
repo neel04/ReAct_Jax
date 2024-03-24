@@ -51,7 +51,7 @@ And then actually kickoff the training by downloading the script and running it:
 ```bash
 gcloud compute tpus tpu-vm ssh node-v4 \
 --zone=us-central2-b --worker=all --command="\
-    tmux kill-server; sudo rm -rf *; \
-    wget https://gist.githubusercontent.com/neel04/3bfc7e4d9cd746829b7e72f1b6fac5de/raw/run.sh; \
+    tmux kill-server; rm run.sh; \
+    sleep 3s && wget https://gist.githubusercontent.com/neel04/3bfc7e4d9cd746829b7e72f1b6fac5de/raw/run.sh; \
     sleep 5s && tmux new-session -d 'bash run.sh'"
 ```

@@ -99,7 +99,7 @@ def main(key: PRNGKeyArray):
 def kickoff_optuna(trial, **trainer_kwargs):
     args = trainer_kwargs['args']
     
-    args.epochs = 2
+    args.epochs = 1
     
     args.lr = trial.suggest_float('lr', 1e-4, 1e-2)
     args.drop_rate = trial.suggest_float('drop_rate', 0.0, 0.2)

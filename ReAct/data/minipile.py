@@ -16,7 +16,7 @@ class MiniPileDataset:
         self.split = split
         
         self.dataset = load_dataset('JeanKaddour/minipile', split=self.split, ignore_verifications=True, 
-                                    keep_in_memory=True, num_proc=os.cpu_count())
+                                    keep_in_memory=True, num_proc=os.cpu_count() // 2)
         
         self.dataset.set_format(type='numpy')
         
@@ -62,7 +62,7 @@ class MiniPileDataset:
         
         dataset.save_to_disk(
             dataset_path=path,
-            num_shards=4 if self.split == 'train' else 2,
+            num_shards=32 if self.split == 'train' else 8,
             num_proc=os.cpu_count() // 4
         )
         
