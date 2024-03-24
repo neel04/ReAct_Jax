@@ -92,6 +92,7 @@ def main(key: PRNGKeyArray):
 
         my_logger.info(f"# of all devices: {jax.device_count()}")
         my_logger.info(f"# of hosts: {jax.process_count()}")
+        my_logger.info(f"Host id: {jax.process_index()}")
 
         with jax.spmd_mode('allow_all'):
             trainer.train()
