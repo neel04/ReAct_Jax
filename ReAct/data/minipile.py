@@ -36,7 +36,7 @@ class MiniPileDataset:
         
         targets = np.roll(seq, shift=-1)
         seq, targets = seq[:, :-1], targets[:, :-1]
-        pad_mask = np.where(seq != 50527 or seq != 50526, 1, 0)
+        pad_mask = np.where(seq != 50527, 1, 0)
 
         return {'text': [[seq, targets, pad_mask]]}
 
