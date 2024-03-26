@@ -296,7 +296,7 @@ class Trainer:
 
                 if step % 75 == 0:
                     # cycling through keys to get new n and k
-                    rndm_n, rndm_k = self.get_n_k(key=keys[step % self.batch_size])
+                    #rndm_n, rndm_k = self.get_n_k(key=keys[step % self.batch_size])
 
                     accuracy, loss, perplexity = self.compute_metrics(model, batch, self.max_iters,
                                                                       self.num_classes, keys)

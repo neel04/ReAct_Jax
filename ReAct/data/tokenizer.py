@@ -29,7 +29,7 @@ class Tok:
         self.tokenizer.add_special_tokens({'pad_token': '[PAD]'})
     
     def encode(self, text: List[str]) -> Dict[str, List]:
-        return self.tokenizer(text.tolist(),
+        return self.tokenizer(text,
                               padding='max_length',
                               max_length=self.max_length,
                               truncation=True)
