@@ -9,7 +9,7 @@ In the commands below, I download the script off a GitHub gist. You're better of
 
 The script takes care of actually pulling the `docker` container, the repo, and running the training loop across a TPU Pod slice automagically.
 
-> **Make sure to modify the script with your own API tokens for WandB as well as fill the other flags at the top**
+> **Make sure to modify the Dockerfile your own API tokens for WandB as well as fill the other flags at the top**
 
 1. Run `run.sh` on your TPU pod slice (tested extensively with TPUv4-32)
 2. Enjoy
@@ -51,7 +51,7 @@ And then actually kickoff the training by downloading the script and running it:
 ```bash
 gcloud compute tpus tpu-vm ssh node-v4 \
 --zone=us-central2-b --worker=all --command="\
-    tmux kill-server; sudo rm -rf *; \
-    wget https://gist.githubusercontent.com/neel04/3bfc7e4d9cd746829b7e72f1b6fac5de/raw/run.sh; \
-    tmux new-session -d 'bash run.sh'"
+    tmux kill-server; rm run.sh; \
+    sleep 3s && wget https://gist.githubusercontent.com/neel04/3bfc7e4d9cd746829b7e72f1b6fac5de/raw/run.sh; \
+    sleep 5s && tmux new-session -d 'bash run.sh'"
 ```

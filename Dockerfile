@@ -2,6 +2,7 @@ FROM python:3.11
 
 # Set environment variables
 ENV WANDB_API_KEY=78c7285b02548bf0c06dca38776c08bb6018593f
+ENV HF_TOKEN=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
 ENV jax_threefry_partitionable=1
 
 # Install base utilities
@@ -16,8 +17,8 @@ RUN pip3 install Ipython matplotlib
 RUN pip3 install numpy pandas scipy
 
 RUN pip3 install -U -q jax[tpu] -f https://storage.googleapis.com/jax-releases/libtpu_releases.html
-RUN pip3 install -q datasets scalax icecream tokenizers wandb einops torch tqdm jaxtyping optax equinox rich
-RUN pip3 install tensorboard-plugin-profile comet-ml optuna
+RUN pip3 install -q transformers datasets scalax tokenizers icecream wandb einops torch tqdm jaxtyping optax optuna equinox rich
+RUN pip3 install tensorboard-plugin-profile comet-ml optuna-integration 
 
 WORKDIR /ReAct_Jax
 

@@ -166,3 +166,4 @@ cython_debug/
 **wandb
 *.wandb
 *.eqx
+*cached_data
