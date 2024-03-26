@@ -243,8 +243,8 @@ class Trainer:
         Computes the accuracy, perplexity, loss of the model w.r.t batch
         '''
         input_arr, _, pad_mask = batch
-        # make an array of size of batch[0] with each element as eval_iters
         eval_iters = jnp.ones_like(input_arr[:, 0]) * eval_iters
+        keys = keys[:input_arr.shape[0], ...] # take a batch_size sized slice of the keys
 
         if self.baseline:
             pred_y = jax.vmap(model, in_axes=(0, 0, None, 0))(input_arr, pad_mask, False, keys)

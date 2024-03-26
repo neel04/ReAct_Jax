@@ -2,6 +2,7 @@ import os
 from pathlib import Path
 from typing import Dict, List
 
+import datasets
 import jax
 import numpy as np
 from datasets import load_dataset, load_from_disk
@@ -10,13 +11,15 @@ from jaxtyping import Array
 from .tokenizer import Tok
 
 class MiniPileDataset:
-    def __init__(self, split: str = 'train', max_length: int = 512, bsz: int = 256, vocab_dir: str ='./ReAct/data'):
+    def __init__(self, split: str = 'train', max_length: int = 512, bsz: int = 256, vocab_dir: str ='./ReAct/data'):    
+        datasets.config.IN_MEMORY_MAX_SIZE = 1e+11
+        
         self.bsz = bsz
         self.max_length = max_length + 1
         self.split = split
 
         self.dataset = load_dataset('Neel-Gupta/minipile-processed', split=self.split, ignore_verifications=True,
-                                    keep_in_memory=True, num_proc=os.cpu_count() // 2)
+                                    keep_in_memory=True, num_proc=None)
 
         self.dataset.set_format(type='numpy')
 
@@ -88,7 +91,7 @@ class MiniPileDataset:
         Take a slice of dataset for debugging purposes
         '''
         if jax.default_backend() == 'cpu':
-            samples = 16_000 if self.split == 'train' else 10_000
+            samples = 100 if self.split == 'train' else 100
             print(f'\nUsing only {samples} samples from the dataset...')
             dataset = dataset.select(range(samples)) # only use some samples
         
@@ -100,7 +103,7 @@ class MiniPileDataset:
 
         dataset = self.take_subset(dataset)
 
-        if self.bsz == 2048:
+        if self.bsz == 2048 or jax.default_backend() == 'cpu':
             return dataset
         elif os.path.exists(data_path):
             print(f'Loading dataset from {data_path}...')
