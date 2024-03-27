@@ -10,7 +10,7 @@
             "args": [
                 "--debug",
                 "--width", "256",
-                "--batch_size", "256",
+                "--batch_size", "128",
                 "--num_blocks", "4",
                 "--epochs", "1",
                 "--max_iters", "5",
