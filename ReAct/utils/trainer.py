@@ -5,8 +5,8 @@ from typing import Callable, List, Tuple
 import equinox as eqx
 import jax
 import jax.numpy as jnp
+import numpy as np
 import optax
-from jax.experimental.compilation_cache import compilation_cache
 from jaxtyping import Array, PRNGKeyArray, PyTree
 from scalax.sharding import MeshShardingHelper
 from scalax.sharding import PartitionSpec as P
@@ -20,7 +20,6 @@ from ReAct.utils.helpers import count_params, load_eqx_obj, save_eqx_obj
 
 from .helpers import broad_to_bsz, half_precision
 
-compilation_cache.initialize_cache('./compilation_cache')
 mesh = MeshShardingHelper(axis_dims=[-1], axis_names=['data']) # handle DDP over multi-node
 
 @eqx.filter_jit
@@ -105,7 +104,7 @@ def _compute_softmax_cross_entropy_loss(pred_y: Array, y_one_hot: Array,
                               P('data'),
                               None,
                               None,
-                              P(),
+                              None,
                               None),
     static_argnums=(6, 8)
 )
@@ -170,7 +169,7 @@ class Trainer:
 
         for step, batch in tqdm(enumerate(loader), total=len(loader), desc='Validating'):
             batch = batch['text']
-            batch = tuple(map(jnp.asarray, batch))
+            batch = tuple(map(np.asarray, batch))
 
             acc, loss, ppl = self.compute_metrics(model, batch, eval_iters, self.num_classes, keys)
 
@@ -290,7 +289,7 @@ class Trainer:
                 step += step_done # for multiple epochs
                 
                 batch = batch['text']
-                batch = tuple(map(jnp.asarray, batch))
+                batch = tuple(map(np.asarray, batch))
                 seq, label, pad_mask = batch
                 
                 loss, model, opt_state = make_step(model, seq, label, pad_mask, rndm_n, rndm_k,

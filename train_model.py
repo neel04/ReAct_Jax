@@ -7,12 +7,13 @@ if platform.processor() != 'arm':
 import jax.numpy as jnp
 import optuna
 from jax import config
+from jax.experimental.compilation_cache import compilation_cache
 from jaxtyping import PRNGKeyArray
 from optuna.integration.wandb import WeightsAndBiasesCallback
 
+from ReAct.data.minipile import MiniPileDataset
 from ReAct.data.owt import OpenWebTextDataset
 from ReAct.data.tinystories import TinyStoriesDataset
-from ReAct.data.minipile import MiniPileDataset
 from ReAct.utils.arg_parser import parse_args
 from ReAct.utils.logger import UnifiedLogger
 from ReAct.utils.trainer import Trainer
@@ -122,5 +123,6 @@ def kickoff_optuna(trial, **trainer_kwargs):
     return jnp.nan_to_num(loss, nan=9999.0) # return the loss
 
 if __name__ == '__main__':
+    compilation_cache.initialize_cache('./compilation_cache')
     key = jax.random.PRNGKey(69)
     main(key)

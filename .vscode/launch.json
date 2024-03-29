@@ -15,7 +15,7 @@
                 "--epochs", "1",
                 "--max_iters", "5",
                 "--dataset", "minipile",
-                "--bf16",
+                "--bf16"
             ],
             "justMyCode": false
         }
