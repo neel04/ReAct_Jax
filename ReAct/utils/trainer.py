@@ -5,7 +5,6 @@ from typing import Callable, List, Tuple
 import equinox as eqx
 import jax
 import jax.numpy as jnp
-import numpy as np
 import optax
 from jaxtyping import Array, PRNGKeyArray, PyTree
 from scalax.sharding import MeshShardingHelper
