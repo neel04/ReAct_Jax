@@ -43,13 +43,13 @@ def main(key: PRNGKeyArray):
     train_dataset = dataset(split='train', max_length=args.seqlen, bsz=args.batch_size)
     val_dataset = dataset(split='test', max_length=args.seqlen, bsz=args.batch_size)
 
-    trainloader = train_dataset.create_dataloader()
-    valloader = val_dataset.create_dataloader()
-
     # ========= Training/Hypertuning =========
 
     if args.tune_hyperparams:
         args.group = 'Sweeps' if args.baseline else 'Sweeps_5i'
+        
+        trainloader = train_dataset.create_dataloader('40%')
+        valloader = val_dataset.create_dataloader('40%')
 
         study = optuna.create_study(direction='minimize',
                                     study_name='ReAct_Jax',
@@ -83,6 +83,9 @@ def main(key: PRNGKeyArray):
         study.optimize(lambda trial: kickoff_optuna(trial=trial, **trainer_kwargs), n_trials=50, callbacks=[wandbc])
 
     else:
+        trainloader = train_dataset.create_dataloader()
+        valloader = val_dataset.create_dataloader()
+
         logger = UnifiedLogger(args, level='DEBUG')
         my_logger, wandb_logger = logger.my_logger(), logger.wandb_logger(args)
 

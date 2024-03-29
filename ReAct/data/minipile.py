@@ -92,11 +92,11 @@ class MiniPileDataset:
         
         return dataset
 
-    def create_dataloader(self):
+    def create_dataloader(self, slice: str = '100%'):
         data_path = Path(f'./cached_data/minipile_{self.split}.data')
         
         try:
-            dataset = load_dataset(f'Neel-Gupta/minipile-processed_{self.bsz}', split=self.split, ignore_verifications=True,
+            dataset = load_dataset(f'Neel-Gupta/minipile-processed_{self.bsz}', split=f'{self.split}[:{slice}]', ignore_verifications=True,
                                    keep_in_memory=True, num_proc=None)
             
             print('Loaded dataset from HuggingFace Hub')
@@ -111,7 +111,7 @@ class MiniPileDataset:
             else:
                 print(f'Building dataset from scratch... [split: {self.split}] | [bsz: {self.bsz}]')
                 
-                dataset = load_dataset('JeanKaddour/minipile', split=self.split, ignore_verifications=True,
+                dataset = load_dataset('JeanKaddour/minipile', split=f'{self.split}[:{slice}]', ignore_verifications=True,
                                         keep_in_memory=True, num_proc=None)
                 
                 dataset = self.take_subset(dataset, 2_000)
