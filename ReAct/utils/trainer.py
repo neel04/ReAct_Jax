@@ -169,7 +169,6 @@ class Trainer:
 
         for step, batch in tqdm(enumerate(loader), total=len(loader), desc='Validating'):
             batch = batch['text']
-            batch = tuple(map(np.asarray, batch))
 
             acc, loss, ppl = self.compute_metrics(model, batch, eval_iters, self.num_classes, keys)
 
@@ -284,12 +283,11 @@ class Trainer:
             train_acc, train_loss, train_ppl = [], [], []
 
             keys = jax.random.split(epoch_key, self.batch_size)
-
+            
             for step, batch in tqdm(enumerate(self.trainloader), total=len(self.trainloader), desc=f'Epoch {epoch}'):
                 step += step_done # for multiple epochs
                 
                 batch = batch['text']
-                batch = tuple(map(np.asarray, batch))
                 seq, label, pad_mask = batch
                 
                 loss, model, opt_state = make_step(model, seq, label, pad_mask, rndm_n, rndm_k,

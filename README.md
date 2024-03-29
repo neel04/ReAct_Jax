@@ -43,7 +43,7 @@ gcloud compute tpus tpu-vm ssh node-v4 \
     sudo apt-get update; \
     sudo apt-get install neovim -y; \
     sudo snap install nvim --classic; \
-    echo 'Setup done!"
+    echo 'Setup done!'"
 ```
 
 And then actually kickoff the training by downloading the script and running it:

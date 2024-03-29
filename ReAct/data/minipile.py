@@ -91,7 +91,7 @@ class MiniPileDataset:
             dataset = dataset.select(range(samples)) # only use some samples
         
         return dataset
-
+    
     def create_dataloader(self, slice: str = '100%'):
         data_path = Path(f'./cached_data/minipile_{self.split}.data')
         
@@ -100,6 +100,8 @@ class MiniPileDataset:
                                    keep_in_memory=True, num_proc=None)
             
             print('Loaded dataset from HuggingFace Hub')
+            
+            dataset.set_format(type='numpy')
             
             return dataset
         
@@ -124,6 +126,8 @@ class MiniPileDataset:
 
                 dataset = dataset.map(self.shift_tokens, batched=True, batch_size=self.bsz,
                                     keep_in_memory=True, drop_last_batch=True, num_proc=None)
+                
+                dataset.set_format(type='numpy')
                 
                 self.upload_dataset(dataset,
                                     hub_path=f'Neel-Gupta/minipile-processed_{self.bsz}') # upload the processed dataset to the Hub
