@@ -30,6 +30,9 @@ class RecurrentModule(eqx.Module):
         for key in keys:
             self.attention_blocks.append(
                 AttentionBlock(seqlen, n_heads, drop_rate, bottleneck, key))
+        
+        make_block: callable = lambda k: AttentionBlock(seqlen, n_heads, drop_rate, bottleneck, k)  # noqa: E731
+        self.attention_blocks = eqx.filter(eqx.filter_vmap(make_block)(keys), eqx.is_array_like)
 
     def __call__(self, x: Array,
                  input_arr: Array,
@@ -37,17 +40,27 @@ class RecurrentModule(eqx.Module):
                  enable_dropout: bool,
                  key: PRNGKeyArray) -> Array:
 
+        enable_dropout: bool = True
+        key: PRNGKeyArray = key
+        
+        dynamic_part, static_part = eqx.partition(self.attention_blocks, eqx.is_array_like,
+                                                  is_leaf=lambda x: isinstance(x, eqx.nn.Dropout))
+        
         x = self.reshape_layer(x) # (batch, seqlen, bottleneck)
+        
+        def f(input_tup: Tuple[Array, int], _dynamic_bl: PyTree) -> Tuple[Tuple[Array, int], int]:
+            input_arr, idx = input_tup # i is the iteration index
+            block = eqx.combine(_dynamic_bl, static_part) # reconstruct the block
+            
+            output = jax.lax.cond(idx == 0,
+                                  lambda: block(x, input_arr, pad_mask, enable_dropout, key).astype(jnp.bfloat16), # cross-attention
+                                  lambda: block(x, x, pad_mask, enable_dropout, key).astype(jnp.bfloat16)) # self-attention
+            
+            return (output, idx + 1), None
 
-        for idx, block in enumerate(self.attention_blocks):
-            if idx == 0:
-                # cross attention with input_arr
-                x = block(x, input_arr, pad_mask, enable_dropout, key).astype(jnp.bfloat16)
-            else:
-                # self attention with input_arr
-                x = block(x, x, pad_mask, enable_dropout, key).astype(jnp.bfloat16)
+        out = eqx.internal.scan(f=f, init=(input_arr, 0), xs=dynamic_part, kind='lax')[0][0]
 
-        return x
+        return out
 
 class React(eqx.Module):
     '''
