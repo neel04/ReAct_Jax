@@ -49,8 +49,8 @@ def main(key: PRNGKeyArray):
     if args.tune_hyperparams:
         args.group = 'Sweeps' if args.baseline else 'Sweeps_5i'
         
-        trainloader = train_dataset.create_dataloader('40%')
-        valloader = val_dataset.create_dataloader('40%')
+        trainloader = train_dataset.create_dataloader('80%')
+        valloader = val_dataset.create_dataloader('80%')
 
         study = optuna.create_study(direction='minimize',
                                     study_name='ReAct_Jax',

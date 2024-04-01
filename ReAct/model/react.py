@@ -45,8 +45,8 @@ class RecurrentModule(eqx.Module):
         
         def f(input_tup: Tuple[Array, int], _dynamic_bl: PyTree) -> Tuple[Tuple[Array, int], int]:
             input_arr, idx = input_tup # i is the iteration index
-            block = eqx.combine(_dynamic_bl, static_part) # reconstruct the block
             
+            block = eqx.combine(_dynamic_bl, static_part) # reconstruct the block
             output = block(x, x, pad_mask, enable_dropout, key).astype(jnp.bfloat16) # self-attention
             
             return (output, idx + 1), None
@@ -119,20 +119,18 @@ class React(eqx.Module):
         # These are constants
         input_arr = input_arr.astype(jnp.bfloat16)
         interim_thought = interim_thought.astype(jnp.bfloat16)
+        mask = mask.astype(jnp.bfloat16)
 
-        def body_fun(carry: Array, _) -> Tuple[PyTree, Array]:
-            thought, mask = carry
-
+        def body_fun(thought: Array, _) -> Tuple[PyTree, Array]:
             latent = jnp.concatenate([thought, input_arr], axis=-1).astype(jnp.bfloat16)
             latent = self.main_block(latent, input_arr, mask, enable_dropout, key).astype(jnp.bfloat16)
             latent = jax.vmap(self.post_ln)(latent).astype(jnp.bfloat16)  # LN to keep scales tidy
 
-            return (latent, mask), latent
+            return latent, latent
 
-        final_val, history = eqx.internal.scan(f=body_fun, init=(interim_thought, mask), xs=None, length=5, kind='checkpointed')
-        
+        final_val, history = eqx.internal.scan(f=body_fun, init=interim_thought, xs=None, length=5, kind='checkpointed')
         #return jnp.einsum('i j k, i -> j k', history, self.iters_weights) # dot-product with iters_weights
-        return final_val[0]
+        return final_val
 
     @eqx.filter_jit
     def __call__(self,
