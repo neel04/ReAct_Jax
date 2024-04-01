@@ -1,4 +1,4 @@
-from typing import List, Optional, Tuple, Union
+from typing import Optional, Tuple, Union
 
 import equinox as eqx
 import jax
@@ -11,7 +11,7 @@ class RecurrentModule(eqx.Module):
     '''
     Bunch of AttentionBlocks
     '''
-    attention_blocks: List[AttentionBlock]
+    attention_blocks: PyTree[AttentionBlock]
     reshape_layer: eqx.Module
 
     def __init__(self,
@@ -24,13 +24,8 @@ class RecurrentModule(eqx.Module):
 
         keys = jax.random.split(key, num_blocks)
 
-        self.attention_blocks = []
         self.reshape_layer = LinearProj(bottleneck * 2, bottleneck, key=key)
 
-        for key in keys:
-            self.attention_blocks.append(
-                AttentionBlock(seqlen, n_heads, drop_rate, bottleneck, key))
-        
         make_block: callable = lambda k: AttentionBlock(seqlen, n_heads, drop_rate, bottleneck, k)  # noqa: E731
         self.attention_blocks = eqx.filter(eqx.filter_vmap(make_block)(keys), eqx.is_array_like)
 
@@ -52,13 +47,11 @@ class RecurrentModule(eqx.Module):
             input_arr, idx = input_tup # i is the iteration index
             block = eqx.combine(_dynamic_bl, static_part) # reconstruct the block
             
-            output = jax.lax.cond(idx == 0,
-                                  lambda: block(x, input_arr, pad_mask, enable_dropout, key).astype(jnp.bfloat16), # cross-attention
-                                  lambda: block(x, x, pad_mask, enable_dropout, key).astype(jnp.bfloat16)) # self-attention
+            output = block(x, x, pad_mask, enable_dropout, key).astype(jnp.bfloat16) # self-attention
             
             return (output, idx + 1), None
 
-        out = eqx.internal.scan(f=f, init=(input_arr, 0), xs=dynamic_part, kind='lax')[0][0]
+        out = eqx.internal.scan(f=f, init=(input_arr, 0), xs=dynamic_part, kind='lax')[0][0] # throw away idx
 
         return out
 
@@ -69,8 +62,8 @@ class React(eqx.Module):
     __name__ = 'ReAct'
 
     max_iters: int = eqx.field(static=True)
+    
     iters_weights: Array
-
     pos_enc: Array
     embed_layer: eqx.nn.Embedding
     main_block: LiteAttention
@@ -90,7 +83,7 @@ class React(eqx.Module):
         key1, key2, key3, key4 = jax.random.split(key, 4)
 
         self.max_iters = max_iters
-        self.iters_weights = jnp.ones((5,))
+        self.iters_weights = jnp.ones((5,), dtype=jnp.bfloat16)
         self.embed_layer = eqx.nn.Embedding(vocab_size, width, key=key1)
         self.pos_enc = jax.lax.stop_gradient(self.positional_encoding(seqlen, width))
 
@@ -136,9 +129,9 @@ class React(eqx.Module):
 
             return (latent, mask), latent
 
-        final_val, _ = eqx.internal.scan(f=body_fun, init=(interim_thought, mask), xs=None, length=5, kind='checkpointed')
-
-        #return jnp.dot(history, self.iters_weights)
+        final_val, history = eqx.internal.scan(f=body_fun, init=(interim_thought, mask), xs=None, length=5, kind='checkpointed')
+        
+        #return jnp.einsum('i j k, i -> j k', history, self.iters_weights) # dot-product with iters_weights
         return final_val[0]
 
     @eqx.filter_jit

@@ -146,9 +146,9 @@ class LinearProj(eqx.Module):
         self.weight = jax.random.uniform(wkey, (input_dim, output_dim), minval=-lim, maxval=lim).astype(jnp.bfloat16)
 
         if use_bias:
-            self.bias = jax.random.uniform(bkey, (output_dim,), minval=-lim, maxval=lim)
+            self.bias = jax.random.uniform(bkey, (output_dim,), minval=-lim, maxval=lim).astype(jnp.bfloat16)
         else:
-            self.bias = jnp.zeros((output_dim,))
+            self.bias = jnp.zeros((output_dim,)).astype(jnp.bfloat16)
     
     def __call__(self,
                  input: BFloat16[Array, 'batch in_dim'],

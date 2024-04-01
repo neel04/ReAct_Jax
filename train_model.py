@@ -28,6 +28,7 @@ def main(key: PRNGKeyArray):
         config.update("jax_debug_nans", True)
         config.update("jax_debug_infs", True)
         config.update("jax_disable_jit", False)
+        config.update("jax_default_matmul_precision", "bfloat16")
 
     # ========= Data =========
     #TODO: Use inheritance to avoid seperate file for each dataset

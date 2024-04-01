@@ -63,23 +63,6 @@ def iters_fwd(model: eqx.Module, input_arr: Array, pad_mask: Array, n: int, k: i
 def vanilla_fwd(model: eqx.Module, input_arr: Array, pad_mask: Array, n: int, k: int, key: PRNGKeyArray) -> Array:
     return model(input_arr, pad_mask, enable_dropout=True, key=key)
 
-@eqx.filter_value_and_grad
-def compute_loss(model: eqx.Module, x: Array, y: Array, pad_mask: Array,
-                 n: int, k: int, num_classes: int, keys: PRNGKeyArray = None):
-
-    if model.__name__ == 'ReAct':
-        forward = iters_fwd
-    else:
-        forward = vanilla_fwd
-
-    pred_y = jax.vmap(forward, in_axes=(None, 0, 0, 0, 0, 0))(model, x, pad_mask, n, k, keys) # (batch_size, seqlen, num_classes)
-
-    y_one_hot = jax.nn.one_hot(y, num_classes=num_classes) # (batch_size, seqlen, num_classes)
-
-    loss = _compute_softmax_cross_entropy_loss(pred_y, y_one_hot, pad_mask, n, k)
-
-    return loss
-
 @eqx.filter_jit
 def _compute_softmax_cross_entropy_loss(pred_y: Array, y_one_hot: Array,
                                         pad_mask: Array, n: Array, k: Array) -> Array:
@@ -105,9 +88,10 @@ def _compute_softmax_cross_entropy_loss(pred_y: Array, y_one_hot: Array,
                               None,
                               None,
                               None),
-    static_argnums=(6, 8)
+    static_argnums=(1, 7, 9)
 )
 def make_step(model: eqx.Module,
+              filter_spec: PyTree, # static
               x: Array,
               y: Array,
               pad_mask: Array,
@@ -118,9 +102,30 @@ def make_step(model: eqx.Module,
               num_classes: int, # static
               keys: List[PRNGKeyArray]):
 
-    loss, grads = compute_loss(model, x, y, pad_mask, n, k, num_classes, keys)
-    updates, opt_state = optim.update(grads, opt_state, model)
+    @eqx.filter_value_and_grad
+    def compute_loss(model: eqx.Module, static_model: PyTree, x: Array, y: Array, pad_mask: Array,
+                    n: int, k: int, num_classes: int, keys: PRNGKeyArray = None) -> Tuple[int, PyTree]:
+        '''
+        Computes the loss of the model w.r.t the input. Is a closure for accessing static_model 
+        '''
+        model = eqx.combine(model, static_model)
+        
+        if model.__name__ == 'ReAct':
+            forward = iters_fwd
+        else:
+            forward = vanilla_fwd
 
+        pred_y = jax.vmap(forward, in_axes=(None, 0, 0, 0, 0, 0))(model, x, pad_mask, n, k, keys) # (batch_size, seqlen, num_classes)
+        y_one_hot = jax.nn.one_hot(y, num_classes=num_classes) # (batch_size, seqlen, num_classes)
+        loss = _compute_softmax_cross_entropy_loss(pred_y, y_one_hot, pad_mask, n, k)
+
+        return loss
+
+    diff_model, static_model = eqx.partition(model, filter_spec,
+                                             is_leaf=lambda x: isinstance(x, eqx.nn.Dropout))
+    
+    loss, grads = compute_loss(diff_model, static_model, x, y, pad_mask, n, k, num_classes, keys)
+    updates, opt_state = optim.update(grads, opt_state, model)
     model = eqx.apply_updates(model, updates)
 
     return loss, model, opt_state
@@ -199,6 +204,25 @@ class Trainer:
 
         return optim, opt_state, model
 
+    @staticmethod
+    def get_filterspec(model: eqx.Module) -> PyTree[bool]:
+        '''
+        Returns a filter spec for the model to filter out the trainable parameters.
+        Can be used to freeze or unfreeze certain modules of the model depending on the step and epoch.
+        
+        Args:
+            model: The model to filter
+        Returns:
+            filter_spec: The filter spec as a PyTree[bool] marking trainable parameters
+        '''
+        filter_spec = jax.tree_util.tree_map(lambda _: True, model) # all trainable
+        filter_spec = eqx.tree_at(
+            lambda tree: tree.pos_enc, # pos_enc should be frozen
+            filter_spec,
+            replace=False)
+        
+        return filter_spec
+
     def init_model(self, key: PRNGKeyArray):
 
         if self.baseline:
@@ -208,12 +232,12 @@ class Trainer:
             model = React(self.n_heads, self.seqlen, self.max_iters, self.num_blocks, self.width,
                            self.drop_rate, self.num_classes, key)
 
-        optim, opt_state, model = self.set_optim_and_scheduler(model)
-        count_params(model) # prints to stdout
-
         # switch to half precision
         if self.bf16:
             model = half_precision(model)
+            
+        optim, opt_state, model = self.set_optim_and_scheduler(model)
+        count_params(model) # prints to stdout
 
         return optim, opt_state, model
 
@@ -275,6 +299,7 @@ class Trainer:
         print(f'Model: {model}')
 
         rndm_n, rndm_k = self.get_n_k(key=self.key) # initial n and k
+        filter_spec = self.get_filterspec(model)
 
         for epoch in range(epoch_done, self.epochs):
             # init empty metrics
@@ -289,7 +314,7 @@ class Trainer:
                 batch = batch['text']
                 seq, label, pad_mask = batch
                 
-                loss, model, opt_state = make_step(model, seq, label, pad_mask, rndm_n, rndm_k,
+                loss, model, opt_state = make_step(model, filter_spec, seq, label, pad_mask, rndm_n, rndm_k,
                                                    optim, opt_state, self.num_classes, keys)
 
                 if step % 75 == 0:
@@ -343,7 +368,7 @@ class Trainer:
                     )
 
                     ## Visualize one sample and model prediction
-                    sample_x, val_sample_x = seq[0][:32], val_sample[:32]
+                    sample_x, val_sample_x = seq[0][:16], val_sample[:16]
 
                     self.my_logger.info(f"epoch={epoch}, step={step}, loss={loss}")
                     self.my_logger.info(f'Validation accuracy: {val_metrics[0]} | using {self.max_iters} iterations')

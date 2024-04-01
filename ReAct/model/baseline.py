@@ -47,7 +47,7 @@ class main_block(eqx.Module):
             block = eqx.combine(_dynamic_bl, static_part)
             return block(input_arr, input_arr, pad_mask, enable_dropout, key), None
 
-        out, _ = jax.lax.scan(f=f, init=input_arr, xs=dynamic_part)
+        out, _ = eqx.internal.scan(f=f, init=input_arr, xs=dynamic_part, kind='lax')
         
         return out
         
