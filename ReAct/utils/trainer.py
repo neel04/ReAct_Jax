@@ -391,9 +391,9 @@ class Trainer:
         self.wandb_logger.finish()
         return loss
 
-    def generate(self, model: eqx.Module, input_arr: Array, metadata: dict, max_new_tokens: int, temperature: float = 0.35):
+    def generate(self, model: eqx.Module, input_arr: Array, metadata: dict, max_new_tokens: int, temperature: float = 0.5):
         '''
-        Take a conditioning sequence , call output_head to obtain a prediction
+        Take a conditioning sequence, call output_head to obtain a prediction
         and autoregressively complete the sequence max_new_tokens times.
         '''
         key = jax.random.PRNGKey(0)
@@ -418,15 +418,12 @@ class Trainer:
 
             if self.baseline:
                 logits = inference_model(padded_array, pad_mask, False, key)
-                gen = logits[zero_idx - 1, :] / temperature # chose the last token representation
             else:
-                logits = inference_model(padded_array, self.max_iters, pad_mask, False, False, key)[1]
-                logits = logits[zero_idx - 1, :] # chose the last token representation
-                gen = inference_model.out_head(logits) / temperature
-
-            # greedy decoding
-            gen = gen.argmax()
-            input_arr = jnp.concatenate([input_arr, gen.reshape(-1)])
+                logits = inference_model(padded_array, self.max_iters, pad_mask, False, False, key)[0]
+            
+            logits = logits[zero_idx - 1, :] # extract the logits for the last token
+            gen = jax.nn.softmax(logits / temperature).argmax() # greedy decoding
+            input_arr = jnp.concatenate([input_arr, gen.reshape(-1)]) # append the generated token for AR
 
         model_gen = f'model generation: {self.decode_fn(input_arr[-max_new_tokens:-1])}\n'
         self.my_logger.info(prompt)

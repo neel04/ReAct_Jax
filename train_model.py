@@ -31,8 +31,6 @@ def main(key: PRNGKeyArray):
         config.update("jax_default_matmul_precision", "bfloat16")
 
     # ========= Data =========
-    #TODO: Use inheritance to avoid seperate file for each dataset
-
     match args.dataset.lower():
         case 'tinystories':
             dataset = TinyStoriesDataset
