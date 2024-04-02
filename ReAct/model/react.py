@@ -124,6 +124,7 @@ class React(eqx.Module):
         def body_fun(thought: Array, _) -> Tuple[PyTree, Array]:
             latent = jnp.concatenate([thought, input_arr], axis=-1).astype(jnp.bfloat16)
             latent = self.main_block(latent, input_arr, mask, enable_dropout, key).astype(jnp.bfloat16)
+            latent = jax.vmap(self.post_ln)(latent).astype(jnp.bfloat16)  # LN to keep scales tidy
 
             return latent, latent
 
