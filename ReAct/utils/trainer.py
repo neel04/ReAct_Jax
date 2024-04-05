@@ -387,10 +387,14 @@ class Trainer:
                     self.generate(model, sample_x, metadata={'type': 'train', 'step': step}, max_new_tokens=96)
                     self.generate(model, val_sample_x, metadata={'type': 'val', 'step': step}, max_new_tokens=96)
 
-                if step % self.save_interval == 0:
+                if not self.tune_hyperparams and step % self.save_interval == 0:
                     filepath = f"{self.save_dir}model_{epoch}_{step}.eqx"
+                    
+                    model = jax.experimental.multihost_utils.process_allgather(model) # all-gather the model
                     save_eqx_obj(self.save_dir, filepath, (model, opt_state))
-                    self.wandb_logger.save(filepath) if not self.tune_hyperparams else ...
+                    
+                    self.my_logger.info(f'Model saved at {filepath}')
+                    self.wandb_logger.save(filepath)
 
             print(f'Epoch {epoch} done!')
             step_done = step # prepare for next epoch
