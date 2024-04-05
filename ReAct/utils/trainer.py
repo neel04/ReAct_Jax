@@ -166,8 +166,7 @@ class Trainer:
         metric = []
 
         for step, batch in tqdm(enumerate(loader), total=len(loader), desc='Validating'):
-            batch = batch['text']
-            seq, label, pad_mask = batch
+            seq, label, pad_mask = tuple(map(jnp.asarray, batch['text']))
 
             acc, loss, ppl = self.compute_metrics(model, seq, label, pad_mask, eval_iters, self.num_classes, keys)
 
@@ -178,7 +177,7 @@ class Trainer:
         cum_loss = sum(metric[1::3]) / len(metric[1::3])
         cum_ppl = sum(metric[2::3]) / len(metric[2::3])
 
-        return (cum_acc, cum_loss, cum_ppl), batch[0][0] # return one sample for viz
+        return (cum_acc, cum_loss, cum_ppl), seq[0] # return one sample for viz
 
     def set_optim_and_scheduler(self, model: eqx.Module) -> Tuple[Callable, PyTree, eqx.Module]:
         assert model is not None, 'Model is not initialized'
@@ -323,8 +322,7 @@ class Trainer:
             for step, batch in tqdm(enumerate(self.trainloader), total=len(self.trainloader), desc=f'Epoch {epoch}'):
                 step += step_done # for multiple epochs
                 
-                batch = batch['text']
-                seq, label, pad_mask = batch
+                seq, label, pad_mask = tuple(map(jnp.asarray, batch['text']))
                 
                 loss, model, opt_state = make_step(model, opt_state, filter_spec, seq, label, pad_mask,
                                                    rndm_n, rndm_k, optim, self.num_classes, keys)
