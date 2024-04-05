@@ -260,8 +260,8 @@ class Trainer:
 
     @partial(
         mesh.sjit,
-        in_shardings=(model_sharding_rule, P('fsdp'), None),
-        args_sharding_constraint=(model_sharding_rule, P('fsdp'), None),
+        in_shardings=(model_sharding_rule, None, None),
+        args_sharding_constraint=(model_sharding_rule, None, None),
         out_shardings=None,
         static_argnums=(0, 3, 4)
     )
