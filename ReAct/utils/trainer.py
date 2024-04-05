@@ -167,8 +167,9 @@ class Trainer:
 
         for step, batch in tqdm(enumerate(loader), total=len(loader), desc='Validating'):
             batch = batch['text']
+            seq, label, pad_mask = batch
 
-            acc, loss, ppl = self.compute_metrics(model, batch, eval_iters, self.num_classes, keys)
+            acc, loss, ppl = self.compute_metrics(model, seq, label, pad_mask, eval_iters, self.num_classes, keys)
 
             metric.extend([acc, loss, ppl])
 
@@ -260,21 +261,22 @@ class Trainer:
 
     @partial(
         mesh.sjit,
-        in_shardings=(model_sharding_rule, None, None),
-        args_sharding_constraint=(model_sharding_rule, None, None),
+        in_shardings=(model_sharding_rule, P('fsdp'), P('fsdp'), P('fsdp'), None),
+        args_sharding_constraint=(model_sharding_rule, P('fsdp'), P('fsdp'), P('fsdp'), None),
         out_shardings=None,
-        static_argnums=(0, 3, 4)
+        static_argnums=(0, 5, 6)
     )
     def compute_metrics(self,
                         model: eqx.Module,
-                        batch: Tuple,
+                        input_arr: Array,
+                        label: Array,
+                        pad_mask: Array,
                         eval_iters: int, # static
                         num_classes: int, # static
                         keys: List[PRNGKeyArray]):
         '''
         Computes the accuracy, perplexity, loss of the model w.r.t batch
         '''
-        input_arr, _, pad_mask = batch
         eval_iters = jnp.ones_like(input_arr[:, 0]) * eval_iters
         keys = keys[:input_arr.shape[0], ...] # take a batch_size sized slice of the keys
 
@@ -285,10 +287,10 @@ class Trainer:
 
         # compute accuracy
         y_hat = jax.nn.softmax(pred_y, axis=-1).argmax(-1) * pad_mask
-        accuracy = jnp.mean(y_hat == batch[1])
+        accuracy = jnp.mean(y_hat == label)
 
         # compute loss
-        y_one_hot = jax.nn.one_hot(batch[1], num_classes=num_classes) # (batch_size, seqlen, num_classes)
+        y_one_hot = jax.nn.one_hot(label, num_classes=num_classes) # (batch_size, seqlen, num_classes)
         loss = optax.softmax_cross_entropy(pred_y, y_one_hot).mean()
 
         # compute perplexity
@@ -330,9 +332,9 @@ class Trainer:
                 if step % 75 == 0:
                     # cycling through keys to get new n and k
                     #rndm_n, rndm_k = self.get_n_k(key=keys[step % self.batch_size])
-
-                    accuracy, loss, perplexity = self.compute_metrics(model, batch, self.max_iters,
-                                                                      self.num_classes, keys)
+                    
+                    accuracy, loss, perplexity = self.compute_metrics(model, seq, label, pad_mask, 
+                                                                      self.max_iters, self.num_classes, keys)
 
                     train_acc.append(accuracy)
                     train_loss.append(loss)
