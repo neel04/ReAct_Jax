@@ -19,8 +19,7 @@ from ReAct.utils.helpers import count_params, load_eqx_obj, save_eqx_obj
 
 from .helpers import broad_to_bsz, half_precision
 
-mesh = MeshShardingHelper(axis_dims=[-1], axis_names=['fsdp']) # handle DDP over multi-node
-model_sharding_rule = FSDPShardingRule(fsdp_axis_name='fsdp')
+mesh = MeshShardingHelper(axis_dims=[-1], axis_names=['data']) # handle DDP over multi-node
 
 @eqx.filter_jit
 def n_k_loop(model: eqx.Module, input_arr: Array, pad_mask: Array, n: Array, k: Array, key: PRNGKeyArray) -> Array:
@@ -78,9 +77,9 @@ def _compute_softmax_cross_entropy_loss(pred_y: Array, y_one_hot: Array,
 
 @partial(
     mesh.sjit,
-    in_shardings=(model_sharding_rule, model_sharding_rule) +  (None,) * 6,
-    out_shardings=(None, model_sharding_rule, model_sharding_rule),
-    args_sharding_constraint=(model_sharding_rule, model_sharding_rule, P('fsdp'), P('fsdp'), P('fsdp')) + (None,) * 3,
+    in_shardings=None,
+    out_shardings=None,
+    args_sharding_constraint=(None, None, P('data'), P('data'), P('data')) + (None,) * 3,
     static_argnums=(2, 8, 9),
     donate_argnums=(0,)
 )
@@ -132,7 +131,6 @@ class Trainer:
                  decode_fn: Callable,
                  key: PRNGKeyArray = jax.random.PRNGKey(69)):
 
-        self.dataset_length = 3381248
         self.decode_fn = decode_fn # decode the ids to text
         self.args = args
         self.key = key
@@ -140,6 +138,7 @@ class Trainer:
         # unpacking the loaders & loggers
         self.my_logger, self.wandb_logger = logger
         self.trainloader, self.valloader = loaders
+        self.dataset_length = self.trainloader.dataset_size // args.batch_size
 
         # Setup hyperparams. args is Namespace object
         # set each attribute as a class attribute
@@ -217,11 +216,6 @@ class Trainer:
         
         return filter_spec
 
-    @partial(
-        mesh.sjit,
-        out_shardings=(model_sharding_rule, model_sharding_rule),
-        static_argnums=(0,)
-    )
     def init_model(self, key: PRNGKeyArray):
 
         if self.baseline:
@@ -258,13 +252,6 @@ class Trainer:
 
         return model, opt_state, step
 
-    @partial(
-        mesh.sjit,
-        in_shardings=(model_sharding_rule, P('fsdp'), P('fsdp'), P('fsdp'), None),
-        args_sharding_constraint=(model_sharding_rule, P('fsdp'), P('fsdp'), P('fsdp'), None),
-        out_shardings=None,
-        static_argnums=(0, 5, 6)
-    )
     def compute_metrics(self,
                         model: eqx.Module,
                         input_arr: Array,
@@ -390,7 +377,7 @@ class Trainer:
                 if not self.tune_hyperparams and step % self.save_interval == 0:
                     filepath = f"{self.save_dir}model_{epoch}_{step}.eqx"
                     
-                    model = jax.experimental.multihost_utils.process_allgather(model) # all-gather the model
+                    #model = jax.experimental.multihost_utils.process_allgather(model) # all-gather the model
                     save_eqx_obj(self.save_dir, filepath, (model, opt_state))
                     
                     self.my_logger.info(f'Model saved at {filepath}')
