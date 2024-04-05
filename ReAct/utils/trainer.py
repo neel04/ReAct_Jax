@@ -78,13 +78,14 @@ def _compute_softmax_cross_entropy_loss(pred_y: Array, y_one_hot: Array,
 
 @partial(
     mesh.sjit,
-    in_shardings=(model_sharding_rule, None, None, None, None, None, model_sharding_rule, None),
+    in_shardings=(model_sharding_rule, model_sharding_rule) +  (None,) * 6,
     out_shardings=(None, model_sharding_rule, model_sharding_rule),
-    args_sharding_constraint=(model_sharding_rule, P('fsdp'), P('fsdp'), P('fsdp'), None, None, model_sharding_rule, None),
-    static_argnums=(1, 7, 9),
+    args_sharding_constraint=(model_sharding_rule, model_sharding_rule, P('fsdp'), P('fsdp'), P('fsdp')) + (None,) * 3,
+    static_argnums=(2, 8, 9),
     donate_argnums=(0,)
 )
 def make_step(model: eqx.Module,
+              opt_state: Tuple[PyTree],
               filter_spec: PyTree, # static
               x: Array,
               y: Array,
@@ -92,7 +93,6 @@ def make_step(model: eqx.Module,
               n: Array,
               k: Array,
               optim: Callable, # static
-              opt_state: Tuple[PyTree],
               num_classes: int, # static
               keys: List[PRNGKeyArray]):
 
@@ -258,8 +258,19 @@ class Trainer:
 
         return model, opt_state, step
 
-    @eqx.filter_jit
-    def compute_metrics(self, model: eqx.Module, batch: Tuple, eval_iters: int, num_classes: int, keys: List[PRNGKeyArray]):
+    @partial(
+        mesh.sjit,
+        in_shardings=(model_sharding_rule, P('fsdp'), None),
+        args_sharding_constraint=(model_sharding_rule, P('fsdp'), None),
+        out_shardings=None,
+        static_argnums=(0, 3, 4)
+    )
+    def compute_metrics(self,
+                        model: eqx.Module,
+                        batch: Tuple,
+                        eval_iters: int, # static
+                        num_classes: int, # static
+                        keys: List[PRNGKeyArray]):
         '''
         Computes the accuracy, perplexity, loss of the model w.r.t batch
         '''
@@ -313,8 +324,8 @@ class Trainer:
                 batch = batch['text']
                 seq, label, pad_mask = batch
                 
-                loss, model, opt_state = make_step(model, filter_spec, seq, label, pad_mask, rndm_n, rndm_k,
-                                                   optim, opt_state, self.num_classes, keys)
+                loss, model, opt_state = make_step(model, opt_state, filter_spec, seq, label, pad_mask,
+                                                   rndm_n, rndm_k, optim, self.num_classes, keys)
 
                 if step % 75 == 0:
                     # cycling through keys to get new n and k
