@@ -7,7 +7,7 @@ import jax
 import jax.numpy as jnp
 import optax
 from jaxtyping import Array, PRNGKeyArray, PyTree
-from scalax.sharding import MeshShardingHelper
+from scalax.sharding import FSDPShardingRule, MeshShardingHelper
 from scalax.sharding import PartitionSpec as P
 from torch.utils.data import DataLoader
 from tqdm.auto import tqdm
@@ -19,7 +19,8 @@ from ReAct.utils.helpers import count_params, load_eqx_obj, save_eqx_obj
 
 from .helpers import broad_to_bsz, half_precision
 
-mesh = MeshShardingHelper(axis_dims=[-1], axis_names=['data']) # handle DDP over multi-node
+mesh = MeshShardingHelper(axis_dims=[-1], axis_names=['fsdp']) # handle DDP over multi-node
+model_sharding_rule = FSDPShardingRule(fsdp_axis_name='fsdp')
 
 @eqx.filter_jit
 def n_k_loop(model: eqx.Module, input_arr: Array, pad_mask: Array, n: Array, k: Array, key: PRNGKeyArray) -> Array:
@@ -77,18 +78,11 @@ def _compute_softmax_cross_entropy_loss(pred_y: Array, y_one_hot: Array,
 
 @partial(
     mesh.sjit,
-    in_shardings=None, # Model and data are replicated in the input
-    out_shardings=None, # Model and metrics are replicated in the output
-    # Inside the function, the data should be sharded according to the `data` axis
-    args_sharding_constraint=(None,
-                              P('data'),
-                              P('data'),
-                              P('data'),
-                              None,
-                              None,
-                              None,
-                              None),
-    static_argnums=(1, 7, 9)
+    in_shardings=(model_sharding_rule, None, None, None, None, None, model_sharding_rule, None),
+    out_shardings=(None, model_sharding_rule, model_sharding_rule),
+    args_sharding_constraint=(model_sharding_rule, P('fsdp'), P('fsdp'), P('fsdp'), None, None, model_sharding_rule, None),
+    static_argnums=(1, 7, 9),
+    donate_argnums=(0,)
 )
 def make_step(model: eqx.Module,
               filter_spec: PyTree, # static
@@ -185,7 +179,7 @@ class Trainer:
 
         return (cum_acc, cum_loss, cum_ppl), batch[0][0] # return one sample for viz
 
-    def set_optim_and_scheduler(self, model: eqx.Module):
+    def set_optim_and_scheduler(self, model: eqx.Module) -> Tuple[Callable, PyTree, eqx.Module]:
         assert model is not None, 'Model is not initialized'
 
         total_steps = self.epochs * self.dataset_length // self.batch_size
@@ -223,6 +217,11 @@ class Trainer:
         
         return filter_spec
 
+    @partial(
+        mesh.sjit,
+        out_shardings=(model_sharding_rule, model_sharding_rule),
+        static_argnums=(0,)
+    )
     def init_model(self, key: PRNGKeyArray):
 
         if self.baseline:
@@ -236,10 +235,10 @@ class Trainer:
         if self.bf16:
             model = half_precision(model)
             
-        optim, opt_state, model = self.set_optim_and_scheduler(model)
+        _, opt_state, model = self.set_optim_and_scheduler(model)
         count_params(model) # prints to stdout
 
-        return optim, opt_state, model
+        return opt_state, model
 
     def resume_training(self, model: eqx.Module, opt_state: eqx.Module):
         # extracting out the paths
@@ -287,9 +286,9 @@ class Trainer:
         return accuracy, loss, perplexity
 
     def train(self):
-        # Initialize everything
         step_done = 0
-        optim, opt_state, model = self.init_model(self.key)
+        opt_state, model = self.init_model(self.key)
+        optim, _, _ = self.set_optim_and_scheduler(model)
 
         if self.resume:
             model, opt_state, epoch_done = self.resume_training(model, opt_state)
@@ -378,12 +377,9 @@ class Trainer:
                     self.generate(model, val_sample_x, metadata={'type': 'val', 'step': step}, max_new_tokens=96)
 
                 if step % self.save_interval == 0:
-                    # Save the model
                     filepath = f"{self.save_dir}model_{epoch}_{step}.eqx"
-
                     save_eqx_obj(self.save_dir, filepath, (model, opt_state))
-
-                    self.wandb_logger.save(filepath)
+                    self.wandb_logger.save(filepath) if not self.tune_hyperparams else ...
 
             print(f'Epoch {epoch} done!')
             step_done = step # prepare for next epoch
