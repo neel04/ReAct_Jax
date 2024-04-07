@@ -1,8 +1,5 @@
 FROM python:3.11
 
-# Performance tuning
-ENV LIBTPU_INIT_ARGS="--xla_enable_async_all_gather=true TPU_MEGACORE=MEGACORE_DENSE"
-
 # Set environment variables
 ENV WANDB_API_KEY=78c7285b02548bf0c06dca38776c08bb6018593f
 ENV HF_TOKEN=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

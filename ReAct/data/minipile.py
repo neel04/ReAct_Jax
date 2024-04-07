@@ -99,7 +99,7 @@ class MiniPileDataset:
             dataset = load_dataset(f'Neel-Gupta/minipile-processed_{self.bsz}', split=f'{self.split}[:{slice}]', ignore_verifications=True,
                                    keep_in_memory=True, num_proc=None)
             
-            print('Loaded dataset from HuggingFace Hub')
+            print(f'Loaded {self.split} dataset from HuggingFace Hub')
             
             dataset.set_format(type='numpy')
             

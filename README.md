@@ -41,8 +41,8 @@ Setup the TPU pod slice with basics:
 gcloud compute tpus tpu-vm ssh node-v4 \
 --zone=us-central2-b --worker=all --command="\
     sudo apt-get update; \
-    sudo apt-get install neovim -y; \
     sudo snap install nvim --classic; \
+    git clone https://github.com/NvChad/starter ~/.config/nvim && nvim; \
     echo 'Setup done!'"
 ```
 
