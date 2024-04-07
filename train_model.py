@@ -118,6 +118,10 @@ def kickoff_optuna(trial, **trainer_kwargs):
     trainer_kwargs['logger'] = (my_logger, wandb_logger)
 
     trainer = Trainer(**trainer_kwargs)
+    
+    my_logger.info(f"# of all devices: {jax.device_count()}")
+    my_logger.info(f"# of hosts: {jax.process_count()}")
+    my_logger.info(f"Host id: {jax.process_index()}")
 
     with jax.spmd_mode('allow_all'):
         loss = trainer.train()

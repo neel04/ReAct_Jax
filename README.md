@@ -55,3 +55,11 @@ gcloud compute tpus tpu-vm ssh node-v4 \
     sleep 3s && wget https://gist.githubusercontent.com/neel04/3bfc7e4d9cd746829b7e72f1b6fac5de/raw/run.sh; \
     sleep 5s && tmux new-session -d 'bash run.sh &> output.log'"
 ```
+
+If you get errors regarding workers not being able to sync up at the distributed barrier, do:
+
+```bash
+gcloud compute tpus tpu-vm ssh --zone "us-central2-b" "ondem" \
+--project "react-jax"  \ 
+--command 'sudo docker system prune -f && sudo rm -rf ~/.cache;'
+```
