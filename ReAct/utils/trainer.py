@@ -157,8 +157,11 @@ class Trainer:
         # unpacking the loaders & loggers
         self.my_logger, self.wandb_logger = logger
         self.trainloader, self.valloader = loaders
+        
         self.dataset_length = self.trainloader.dataset_size // args.batch_size
-
+        self.trainloader = jax.tree_map(lambda x: jnp.asarray(x), self.trainloader['text'])
+        self.valloader = jax.tree_map(lambda x: jnp.asarray(x), self.valloader['text'])
+        
         # Setup hyperparams. args is Namespace object
         # set each attribute as a class attribute
         self.my_logger.info(f'Using Args: {self.args}\n')
@@ -184,7 +187,7 @@ class Trainer:
         metric = []
 
         for step, batch in tqdm(enumerate(loader), total=len(loader), desc='Validating'):
-            seq, label, pad_mask = tuple(map(jnp.asarray, batch['text']))
+            seq, label, pad_mask = batch
 
             acc, loss, ppl = self.compute_metrics(model, seq, label, pad_mask, eval_iters, self.num_classes, keys)
 
@@ -341,7 +344,7 @@ class Trainer:
             for step, batch in tqdm(enumerate(self.trainloader), total=len(self.trainloader), desc=f'Epoch {epoch}'):
                 step += step_done # for multiple epochs
                 
-                seq, label, pad_mask = tuple(map(jnp.asarray, batch['text']))
+                seq, label, pad_mask = batch
                 
                 loss, model, opt_state = make_step(model, opt_state, filter_spec, seq, label, pad_mask,
                                                    rndm_n, rndm_k, optim, self.num_classes, keys)
