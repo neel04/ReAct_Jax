@@ -128,7 +128,7 @@ class React(eqx.Module):
 
             return latent, latent
 
-        final_val, history = eqx.internal.scan(f=body_fun, init=interim_thought, xs=None, length=5, kind='checkpointed')
+        final_val, _ = eqx.internal.scan(f=body_fun, init=interim_thought, xs=None, length=5, kind='checkpointed')
         #return jnp.einsum('i j k, i -> j k', history, self.iters_weights) # dot-product with iters_weights
         return final_val
 
