@@ -18,28 +18,7 @@ from ReAct.utils.helpers import count_params, load_eqx_obj, save_eqx_obj
 
 from .helpers import broad_to_bsz, half_precision
 
-mesh = MeshShardingHelper(axis_dims=[-1, 1], axis_names=['data', 'tp']) # handle DDP + TP over multi-node
-
-model_sharding_rule = TreePathShardingRule(
-    ('iters_weights', P()),
-    ('pos_enc', P()), 
-    ('embed_layer', P(None, 'tp')),
-    # Attention sharded by heads. None -> Num. of blocks dim
-    ('attn_gate/(key|query|value|output)_proj/weight', P(None, None,'tp')),
-    ('attn_gate/(key|query|value|output)_proj/bias', P(None, 'tp')),
-    # Megatron styled FF sharding
-    ('mlp/layers/0/weight', P(None, None, 'tp')),
-    ('mlp/layers/2/weight', P(None, 'tp', None)),
-    ('mlp/layers/(0|2)/bias', P(None, 'tp')),
-    # handling the biases
-    ('reshape_layer/weight', P(None, 'tp')),
-    ('reshape_layer/bias', P('tp')),
-    ('out_head/weight', P(None, 'tp')),
-    ('out_head/bias', P('tp')),
-    # Misc. replicated
-    ('ln', P()),
-    ('dropout', P()),
-)
+mesh = MeshShardingHelper(axis_dims=[-1], axis_names=['data']) # handle DDP + TP over multi-node
 
 @eqx.filter_jit
 def n_k_loop(model: eqx.Module, input_arr: Array, pad_mask: Array, n: Array, k: Array, key: PRNGKeyArray) -> Array:
@@ -97,9 +76,9 @@ def _compute_softmax_cross_entropy_loss(pred_y: Array, y_one_hot: Array,
 
 @partial(
     mesh.sjit,
-    in_shardings=(model_sharding_rule, model_sharding_rule, P(), P(), P(), None, None, None),
-    out_shardings=(None, model_sharding_rule, model_sharding_rule),
-    args_sharding_constraint=(model_sharding_rule, model_sharding_rule, P('data'), P('data'), P('data'), None, None, None),
+    in_shardings=None,
+    out_shardings=None,
+    args_sharding_constraint=(None, None, P('data'), P('data'), P('data')) + (None,) * 3,
     static_argnums=(2, 8, 9)
 )
 def make_step(model: eqx.Module,
@@ -238,12 +217,6 @@ class Trainer:
         
         return filter_spec
     
-    @partial(
-        mesh.sjit,
-        in_shardings=None,
-        out_shardings=(model_sharding_rule, model_sharding_rule),
-        static_argnums=(0,)
-    )
     def init_model(self, key: PRNGKeyArray):
 
         if self.baseline:
@@ -280,13 +253,6 @@ class Trainer:
 
         return model, opt_state, step
 
-    @partial(
-        mesh.sjit,
-        in_shardings=(model_sharding_rule, P(), P(), P(), None),
-        args_sharding_constraint=(model_sharding_rule, P('data'), P('data'), P('data'), None),
-        out_shardings=None,
-        static_argnums=(0, 5, 6)
-    )
     def compute_metrics(self,
                         model: eqx.Module,
                         input_arr: Array,
