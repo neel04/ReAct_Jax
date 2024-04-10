@@ -28,7 +28,8 @@ model_sharding_rule = TreePathShardingRule(
     ('attn_gate/(key|query|value|output)_proj/weight', P(None, None,'tp')),
     ('attn_gate/(key|query|value|output)_proj/bias', P(None, 'tp')),
     # Megatron styled FF sharding
-    ('mlp/layers/(0|2)/weight', P(None, None, 'tp')),
+    ('mlp/layers/0/weight', P(None, None, 'tp')),
+    ('mlp/layers/2/weight', P(None, 'tp', None)),
     ('mlp/layers/(0|2)/bias', P(None, 'tp')),
     # handling the biases
     ('reshape_layer/weight', P(None, 'tp')),
