@@ -100,8 +100,7 @@ def _compute_softmax_cross_entropy_loss(pred_y: Array, y_one_hot: Array,
     in_shardings=(model_sharding_rule, model_sharding_rule, P(), P(), P(), None, None, None),
     out_shardings=(None, model_sharding_rule, model_sharding_rule),
     args_sharding_constraint=(model_sharding_rule, model_sharding_rule, P('data'), P('data'), P('data'), None, None, None),
-    static_argnums=(2, 8, 9),
-    donate_argnums=(0,)
+    static_argnums=(2, 8, 9)
 )
 def make_step(model: eqx.Module,
               opt_state: Tuple[PyTree],
