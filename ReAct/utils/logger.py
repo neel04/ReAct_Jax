@@ -32,7 +32,7 @@ class UnifiedLogger:
         logger.addHandler(ch)
 
         return logger
-    
+
     def wandb_logger(self, args: dict):
         key = os.environ.get('WANDB_API_KEY')
         wandb.login(key=key)
@@ -43,7 +43,7 @@ class UnifiedLogger:
             id = args.resume.split("+")[0].split("/")[-1].strip()
         else:
             id = None
-            
+
         wandb.init(project='ReAct_Jax',
                    config=args,
                    group=args.group,
@@ -51,13 +51,13 @@ class UnifiedLogger:
                    resume='allow',
                    id=id,
                    reinit=True)
-        
+
         wandb.run.log_code(
             "../",
             include_fn=lambda path: path.endswith(".py") or path.endswith(".ipynb") or path.endswith(".sh"))
 
         return wandb
-    
+
     def update_args_for_hypertuning(self, args: dict, experiment: Callable = None):
         '''
         Consumes the experiment object provided by init_hypertuning() and updates the args dict

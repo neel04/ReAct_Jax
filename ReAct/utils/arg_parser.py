@@ -19,8 +19,8 @@ def parse_args():
     parser.add_argument('--drop_rate', type=float, default=0.1,
                         help='Dropout rate. Default: 0.1')
 
-    parser.add_argument('--num_classes', type=int, default=4096,
-                        help='Number of target classes OR vocab size. Default: 4096')
+    parser.add_argument('--num_classes', type=int, default=50304,
+                        help='Number of target classes OR vocab size. Default: 50304')
     
     parser.add_argument('--n_heads', type=int, default=4,
                         help='Number of attention heads. Default: 4')

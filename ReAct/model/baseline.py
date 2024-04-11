@@ -1,8 +1,9 @@
+from typing import Callable, List
+
 import equinox as eqx
 import jax
 import jax.numpy as jnp
-from jaxtyping import Array, PRNGKeyArray
-from typing import List
+from jaxtyping import Array, PRNGKeyArray, PyTree
 
 from .blocks import AttentionBlock, LinearProj
 
@@ -23,11 +24,10 @@ class main_block(eqx.Module):
                  key: PRNGKeyArray):
         
         keys = jax.random.split(key, num_blocks)
+        make_block: Callable = lambda k: AttentionBlock(seqlen, n_heads, drop_rate, bottleneck, k)  # noqa: E731
         
-        self.attention_blocks = [
-            AttentionBlock(seqlen, n_heads, drop_rate, bottleneck, keys[i])
-            for i in range(num_blocks)
-        ]
+        # weights have dim: (num_blocks, *)
+        self.attention_blocks = eqx.filter(eqx.filter_vmap(make_block)(keys), eqx.is_array_like)
     
     def __call__(self,
                  input_arr: Array,
@@ -35,11 +35,21 @@ class main_block(eqx.Module):
                  enable_dropout: bool,
                  key: PRNGKeyArray) -> Array:
         
-        for block in self.attention_blocks:
-            # repeated input_arr --> self attention
-            input_arr = block(input_arr, input_arr, pad_mask, enable_dropout, key)
+        enable_dropout: bool = True
+        key: PRNGKeyArray = key
         
-        return input_arr
+        # static_part are activations etc.
+        # dynamic_part are the parameters
+        dynamic_part, static_part = eqx.partition(self.attention_blocks, eqx.is_array_like,
+                                                  is_leaf=lambda x: isinstance(x, eqx.nn.Dropout))
+        
+        def f(input_arr: Array, _dynamic_bl: PyTree):
+            block = eqx.combine(_dynamic_bl, static_part)
+            return block(input_arr, input_arr, pad_mask, enable_dropout, key), None
+
+        out, _ = eqx.internal.scan(f=f, init=input_arr, xs=dynamic_part, kind='lax')
+        
+        return out
         
 class GPT(eqx.Module):
     '''

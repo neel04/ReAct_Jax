@@ -2,7 +2,9 @@ import os
 from pathlib import Path
 from typing import Dict, List
 
+import datasets
 import jax
+import jax.numpy as jnp
 import numpy as np
 from datasets import load_dataset, load_from_disk
 from jaxtyping import Array
@@ -10,15 +12,12 @@ from jaxtyping import Array
 from .tokenizer import Tok
 
 class MiniPileDataset:
-    def __init__(self, split: str = 'train', max_length: int = 512, bsz: int = 256, vocab_dir: str ='./ReAct/data'):
+    def __init__(self, split: str = 'train', max_length: int = 512, bsz: int = 256, vocab_dir: str ='./ReAct/data'):    
+        datasets.config.IN_MEMORY_MAX_SIZE = 1e+11
+        
         self.bsz = bsz
         self.max_length = max_length + 1
         self.split = split
-
-        self.dataset = load_dataset('Neel-Gupta/minipile-processed', split=self.split, ignore_verifications=True,
-                                    keep_in_memory=True, num_proc=os.cpu_count() // 2)
-
-        self.dataset.set_format(type='numpy')
 
         self.tok = Tok(vocab_dir=None, max_length=self.max_length) # vocab_dir is None = GPT2 tokenizer
 
@@ -33,7 +32,7 @@ class MiniPileDataset:
         
         targets = np.roll(seq, shift=-1)
         seq, targets = seq[:, :-1], targets[:, :-1]
-        pad_mask = np.where(seq != 50527 or seq != 50526, 1, 0)
+        pad_mask = np.where(seq != 50527, 1, 0)
 
         return {'text': [[seq, targets, pad_mask]]}
 
@@ -83,47 +82,61 @@ class MiniPileDataset:
                             token=os.getenv('HF_TOKEN'),
                             split=self.split)
 
-    def take_subset(self, dataset) -> None:
+    def take_subset(self, dataset, elements: int) -> None:
         '''
         Take a slice of dataset for debugging purposes
         '''
         if jax.default_backend() == 'cpu':
-            samples = 16_000 if self.split == 'train' else 10_000
+            samples = elements if self.split == 'train' else elements // 4
             print(f'\nUsing only {samples} samples from the dataset...')
             dataset = dataset.select(range(samples)) # only use some samples
         
         return dataset
 
-    def create_dataloader(self):
-        dataset = self.dataset
+    def numpify(self, dataset: datasets.Dataset) -> datasets.Dataset:
+        '''
+        Convert the dataset to numpy arrays
+        '''
+        return jax.tree_map(lambda x: jnp.asarray(x), dataset['text'])
+    
+    def create_dataloader(self, slice: str = '100%'):
         data_path = Path(f'./cached_data/minipile_{self.split}.data')
+        
+        try:
+            dataset = load_dataset(f'Neel-Gupta/minipile-processed_{self.bsz}', split=f'{self.split}[:{slice}]', ignore_verifications=True,
+                                   keep_in_memory=True, num_proc=None)
+            
+            print(f'Loaded {self.split} dataset from HuggingFace Hub')
+            
+            dataset.set_format(type='numpy')
+            
+            return self.numpify(dataset)
+        
+        except (FileNotFoundError, ValueError):
+            if os.path.exists(data_path):
+                print(f'Loading dataset from {data_path}...')
+                dataset = self.load_data(data_path)
+                return self.numpify(dataset)
+            else:
+                print(f'Building dataset from scratch... [split: {self.split}] | [bsz: {self.bsz}]')
+                
+                dataset = load_dataset('JeanKaddour/minipile', split=f'{self.split}[:{slice}]', ignore_verifications=True,
+                                        keep_in_memory=True, num_proc=None)
+                
+                dataset = self.take_subset(dataset, 2_000)
+                
+                dataset = dataset.map(self.chunk_examples, batched=True, batch_size=self.bsz,
+                                    keep_in_memory=True, drop_last_batch=True)
 
-        dataset = self.take_subset(dataset)
+                dataset = dataset.map(self.tokenize_and_pad, batched=True, batch_size=self.bsz,
+                                    keep_in_memory=True, drop_last_batch=True, num_proc=None)
 
-        if self.bsz == 2048:
-            return dataset
-        elif os.path.exists(data_path):
-            print(f'Loading dataset from {data_path}...')
-            dataset = self.load_data(data_path)
-            return dataset
-        else:
-            print(f'Building dataset from scratch... [split: {self.split}] | [bsz: {self.bsz}]')
-            
-            dataset = load_dataset('JeanKaddour/minipile', split=self.split, ignore_verifications=True,
-                                    keep_in_memory=True, num_proc=os.cpu_count() // 2)
-            
-            dataset = self.take_subset(dataset)
-            
-            dataset = dataset.map(self.chunk_examples, batched=True, batch_size=self.bsz,
-                                keep_in_memory=True, drop_last_batch=True)
-
-            dataset = dataset.map(self.tokenize_and_pad, batched=True, batch_size=self.bsz,
-                                keep_in_memory=True, drop_last_batch=True, num_proc=None)
-
-            dataset = dataset.map(self.shift_tokens, batched=True, batch_size=self.bsz,
-                                keep_in_memory=True, drop_last_batch=True, num_proc=None)
-            
-            self.upload_dataset(dataset) # upload the processed dataset to the Hub
-            #self.save_data(dataset, data_path) # save the processed dataset locally
-            
-            return dataset
+                dataset = dataset.map(self.shift_tokens, batched=True, batch_size=self.bsz,
+                                    keep_in_memory=True, drop_last_batch=True, num_proc=None)
+                
+                dataset.set_format(type='numpy')
+                
+                self.upload_dataset(dataset,
+                                    hub_path=f'Neel-Gupta/minipile-processed_{self.bsz}') # upload the processed dataset to the Hub
+                
+                return self.numpify(dataset)

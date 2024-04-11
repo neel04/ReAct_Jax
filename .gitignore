@@ -161,7 +161,7 @@ cython_debug/
 
 # vscode
 .vscode/
-.*
+.DS_Store
 *.eqx
 **wandb
 *.wandb

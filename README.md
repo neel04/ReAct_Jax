@@ -41,9 +41,9 @@ Setup the TPU pod slice with basics:
 gcloud compute tpus tpu-vm ssh node-v4 \
 --zone=us-central2-b --worker=all --command="\
     sudo apt-get update; \
-    sudo apt-get install neovim -y; \
     sudo snap install nvim --classic; \
-    echo 'Setup done!"
+    git clone https://github.com/NvChad/starter ~/.config/nvim && nvim; \
+    echo 'Setup done!'"
 ```
 
 And then actually kickoff the training by downloading the script and running it:
@@ -51,7 +51,15 @@ And then actually kickoff the training by downloading the script and running it:
 ```bash
 gcloud compute tpus tpu-vm ssh node-v4 \
 --zone=us-central2-b --worker=all --command="\
-    tmux kill-server; rm run.sh; \
+    tmux kill-server; sudo rm -rf ./*; \
     sleep 3s && wget https://gist.githubusercontent.com/neel04/3bfc7e4d9cd746829b7e72f1b6fac5de/raw/run.sh; \
-    sleep 5s && tmux new-session -d 'bash run.sh'"
+    sleep 5s && tmux new-session -d 'bash run.sh &> output.log'"
+```
+
+If you get errors regarding workers not being able to sync up at the distributed barrier, do:
+
+```bash
+gcloud compute tpus tpu-vm ssh --zone "us-central2-b" "ondem" \
+--project "react-jax"  \ 
+--command 'sudo docker system prune -f && sudo rm -rf ~/.cache;'
 ```

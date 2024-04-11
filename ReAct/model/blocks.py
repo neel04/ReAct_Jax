@@ -47,7 +47,6 @@ class AttentionBlock(eqx.Module):
         
         """Create self-attention mask from sequence-level mask."""
         
-        # merge with pad_mask in the end
         mask = jnp.ones((self.seqlen, self.seqlen), dtype=jnp.bfloat16)
         mask = jnp.tril(mask)
         mask = jnp.expand_dims(mask, 0)
@@ -146,9 +145,9 @@ class LinearProj(eqx.Module):
         self.weight = jax.random.uniform(wkey, (input_dim, output_dim), minval=-lim, maxval=lim).astype(jnp.bfloat16)
 
         if use_bias:
-            self.bias = jax.random.uniform(bkey, (output_dim,), minval=-lim, maxval=lim)
+            self.bias = jax.random.uniform(bkey, (output_dim,), minval=-lim, maxval=lim).astype(jnp.bfloat16)
         else:
-            self.bias = jnp.zeros((output_dim,))
+            self.bias = jnp.zeros((output_dim,)).astype(jnp.bfloat16)
     
     def __call__(self,
                  input: BFloat16[Array, 'batch in_dim'],

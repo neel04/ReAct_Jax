@@ -7,12 +7,13 @@ if platform.processor() != 'arm':
 import jax.numpy as jnp
 import optuna
 from jax import config
+from jax.experimental.compilation_cache import compilation_cache
 from jaxtyping import PRNGKeyArray
 from optuna.integration.wandb import WeightsAndBiasesCallback
 
+from ReAct.data.minipile import MiniPileDataset
 from ReAct.data.owt import OpenWebTextDataset
 from ReAct.data.tinystories import TinyStoriesDataset
-from ReAct.data.minipile import MiniPileDataset
 from ReAct.utils.arg_parser import parse_args
 from ReAct.utils.logger import UnifiedLogger
 from ReAct.utils.trainer import Trainer
@@ -27,10 +28,9 @@ def main(key: PRNGKeyArray):
         config.update("jax_debug_nans", True)
         config.update("jax_debug_infs", True)
         config.update("jax_disable_jit", False)
+        config.update("jax_default_matmul_precision", "bfloat16")
 
     # ========= Data =========
-    #TODO: Use inheritance to avoid seperate file for each dataset
-
     match args.dataset.lower():
         case 'tinystories':
             dataset = TinyStoriesDataset
@@ -42,13 +42,13 @@ def main(key: PRNGKeyArray):
     train_dataset = dataset(split='train', max_length=args.seqlen, bsz=args.batch_size)
     val_dataset = dataset(split='test', max_length=args.seqlen, bsz=args.batch_size)
 
-    trainloader = train_dataset.create_dataloader()
-    valloader = val_dataset.create_dataloader()
-
     # ========= Training/Hypertuning =========
 
     if args.tune_hyperparams:
         args.group = 'Sweeps' if args.baseline else 'Sweeps_5i'
+        
+        trainloader = train_dataset.create_dataloader('40%')
+        valloader = val_dataset.create_dataloader('40%')
 
         study = optuna.create_study(direction='minimize',
                                     study_name='ReAct_Jax',
@@ -57,7 +57,7 @@ def main(key: PRNGKeyArray):
                                         seed=69,
                                         consider_magic_clip=True,
                                     ))
-        
+
         wandb_kwargs = {
             "project": "ReAct_Jax",
             "config": args,
@@ -65,7 +65,7 @@ def main(key: PRNGKeyArray):
             "entity": "neel",
             "magic": True,
         }
-        
+
         trainer_kwargs = {
             "args": args,
             "loaders": (trainloader, valloader),
@@ -78,9 +78,13 @@ def main(key: PRNGKeyArray):
             wandb_kwargs=wandb_kwargs,
             as_multirun=True
         )
+
         study.optimize(lambda trial: kickoff_optuna(trial=trial, **trainer_kwargs), n_trials=50, callbacks=[wandbc])
 
     else:
+        trainloader = train_dataset.create_dataloader()
+        valloader = val_dataset.create_dataloader()
+
         logger = UnifiedLogger(args, level='DEBUG')
         my_logger, wandb_logger = logger.my_logger(), logger.wandb_logger(args)
 
@@ -114,6 +118,10 @@ def kickoff_optuna(trial, **trainer_kwargs):
     trainer_kwargs['logger'] = (my_logger, wandb_logger)
 
     trainer = Trainer(**trainer_kwargs)
+    
+    my_logger.info(f"# of all devices: {jax.device_count()}")
+    my_logger.info(f"# of hosts: {jax.process_count()}")
+    my_logger.info(f"Host id: {jax.process_index()}")
 
     with jax.spmd_mode('allow_all'):
         loss = trainer.train()
@@ -121,5 +129,6 @@ def kickoff_optuna(trial, **trainer_kwargs):
     return jnp.nan_to_num(loss, nan=9999.0) # return the loss
 
 if __name__ == '__main__':
+    compilation_cache.initialize_cache('./compilation_cache')
     key = jax.random.PRNGKey(69)
     main(key)

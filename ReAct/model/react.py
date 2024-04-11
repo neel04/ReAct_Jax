@@ -1,4 +1,4 @@
-from typing import List, Optional, Tuple, Union
+from typing import Optional, Tuple, Union
 
 import equinox as eqx
 import jax
@@ -11,43 +11,49 @@ class RecurrentModule(eqx.Module):
     '''
     Bunch of AttentionBlocks
     '''
-    attention_blocks: List[AttentionBlock]
+    attention_blocks: PyTree[AttentionBlock]
     reshape_layer: eqx.Module
 
     def __init__(self,
                  seqlen: int,
                  drop_rate: float,
                  n_heads: int,
-                 num_blocks: int, 
-                 bottleneck: int, 
+                 num_blocks: int,
+                 bottleneck: int,
                  key: PRNGKeyArray):  # noqa: E501
-        
+
         keys = jax.random.split(key, num_blocks)
 
-        self.attention_blocks = []
         self.reshape_layer = LinearProj(bottleneck * 2, bottleneck, key=key)
 
-        for key in keys:
-            self.attention_blocks.append(
-                AttentionBlock(seqlen, n_heads, drop_rate, bottleneck, key))
-            
+        make_block: callable = lambda k: AttentionBlock(seqlen, n_heads, drop_rate, bottleneck, k)  # noqa: E731
+        self.attention_blocks = eqx.filter(eqx.filter_vmap(make_block)(keys), eqx.is_array_like)
+
     def __call__(self, x: Array,
                  input_arr: Array,
                  pad_mask: Array,
                  enable_dropout: bool,
                  key: PRNGKeyArray) -> Array:
+
+        enable_dropout: bool = True
+        key: PRNGKeyArray = key
+        
+        dynamic_part, static_part = eqx.partition(self.attention_blocks, eqx.is_array_like,
+                                                  is_leaf=lambda x: isinstance(x, eqx.nn.Dropout))
         
         x = self.reshape_layer(x) # (batch, seqlen, bottleneck)
-
-        for idx, block in enumerate(self.attention_blocks):
-            if idx == 0:
-                # cross attention with input_arr
-                x = block(x, input_arr, pad_mask, enable_dropout, key).astype(jnp.bfloat16)
-            else:
-                # self attention with input_arr
-                x = block(x, x, pad_mask, enable_dropout, key).astype(jnp.bfloat16)
         
-        return x
+        def f(input_tup: Tuple[Array, int], _dynamic_bl: PyTree) -> Tuple[Tuple[Array, int], int]:
+            input_arr, idx = input_tup # i is the iteration index
+            
+            block = eqx.combine(_dynamic_bl, static_part) # reconstruct the block
+            output = block(x, x, pad_mask, enable_dropout, key).astype(jnp.bfloat16) # self-attention
+            
+            return (output, idx + 1), None
+
+        out = eqx.internal.scan(f=f, init=(input_arr, 0), xs=dynamic_part, kind='lax')[0][0] # throw away idx
+
+        return out
 
 class React(eqx.Module):
     '''
@@ -56,8 +62,8 @@ class React(eqx.Module):
     __name__ = 'ReAct'
 
     max_iters: int = eqx.field(static=True)
+    
     iters_weights: Array
-
     pos_enc: Array
     embed_layer: eqx.nn.Embedding
     main_block: LiteAttention
@@ -77,7 +83,7 @@ class React(eqx.Module):
         key1, key2, key3, key4 = jax.random.split(key, 4)
 
         self.max_iters = max_iters
-        self.iters_weights = jnp.ones((5,))
+        self.iters_weights = jnp.ones((5,), dtype=jnp.bfloat16)
         self.embed_layer = eqx.nn.Embedding(vocab_size, width, key=key1)
         self.pos_enc = jax.lax.stop_gradient(self.positional_encoding(seqlen, width))
 
@@ -113,20 +119,18 @@ class React(eqx.Module):
         # These are constants
         input_arr = input_arr.astype(jnp.bfloat16)
         interim_thought = interim_thought.astype(jnp.bfloat16)
+        mask = mask.astype(jnp.bfloat16)
 
-        def body_fun(carry: Array, _) -> Tuple[PyTree, Array]:
-            thought, mask = carry
-
+        def body_fun(thought: Array, _) -> Tuple[PyTree, Array]:
             latent = jnp.concatenate([thought, input_arr], axis=-1).astype(jnp.bfloat16)
             latent = self.main_block(latent, input_arr, mask, enable_dropout, key).astype(jnp.bfloat16)
             latent = jax.vmap(self.post_ln)(latent).astype(jnp.bfloat16)  # LN to keep scales tidy
 
-            return (latent, mask), latent
+            return latent, latent
 
-        final_val, _ = eqx.internal.scan(f=body_fun, init=(interim_thought, mask), xs=None, length=5, kind='checkpointed')
-
-        #return jnp.dot(history, self.iters_weights)
-        return final_val[0]
+        final_val, _ = eqx.internal.scan(f=body_fun, init=interim_thought, xs=None, length=5, kind='checkpointed')
+        #return jnp.einsum('i j k, i -> j k', history, self.iters_weights) # dot-product with iters_weights
+        return final_val
 
     @eqx.filter_jit
     def __call__(self,
