@@ -7,7 +7,7 @@ import jax
 import jax.numpy as jnp
 import optax
 from jaxtyping import Array, PRNGKeyArray, PyTree
-from scalax.sharding import TreePathShardingRule, MeshShardingHelper, PartitionSpec as P
+from scalax.sharding import MeshShardingHelper, PartitionSpec as P
 from torch.utils.data import DataLoader
 from tqdm.auto import tqdm
 
@@ -76,9 +76,9 @@ def _compute_softmax_cross_entropy_loss(pred_y: Array, y_one_hot: Array,
 
 @partial(
     mesh.sjit,
-    in_shardings=None,
-    out_shardings=None,
+    in_shardings=(None, None, P('data'), P('data'), P('data')) + (None,) * 3,
     args_sharding_constraint=(None, None, P('data'), P('data'), P('data')) + (None,) * 3,
+    out_shardings=None,
     static_argnums=(2, 8, 9)
 )
 def make_step(model: eqx.Module,
@@ -253,6 +253,13 @@ class Trainer:
 
         return model, opt_state, step
 
+    @partial(
+        mesh.sjit,
+        in_shardings=(None, P('data'), P('data'), P('data'), None),
+        out_shardings=None,
+        args_sharding_constraint=(None, P('data'), P('data'), P('data'), None),
+        static_argnums=(0, 5, 6)
+    )
     def compute_metrics(self,
                         model: eqx.Module,
                         input_arr: Array,

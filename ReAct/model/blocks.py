@@ -47,7 +47,6 @@ class AttentionBlock(eqx.Module):
         
         """Create self-attention mask from sequence-level mask."""
         
-        # merge with pad_mask in the end
         mask = jnp.ones((self.seqlen, self.seqlen), dtype=jnp.bfloat16)
         mask = jnp.tril(mask)
         mask = jnp.expand_dims(mask, 0)
