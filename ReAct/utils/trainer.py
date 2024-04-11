@@ -136,13 +136,11 @@ class Trainer:
         # unpacking the loaders & loggers
         self.my_logger, self.wandb_logger = logger
         self.trainloader, self.valloader = loaders
-        
         self.dataset_length = len(self.trainloader) * args.batch_size * args.seqlen
         
-        # Setup hyperparams. args is Namespace object
-        # set each attribute as a class attribute
         self.my_logger.info(f'Using Args: {self.args}\n')
 
+        # Assign each arg as a class attribute
         for k, v in vars(self.args).items():
                 setattr(self, k, v)
 
@@ -180,10 +178,13 @@ class Trainer:
     def set_optim_and_scheduler(self, model: eqx.Module) -> Tuple[Callable, PyTree, eqx.Module]:
         assert model is not None, 'Model is not initialized'
 
-        total_steps = self.epochs * self.dataset_length // self.batch_size
+        total_steps = self.epochs * len(self.trainloader)
 
-        self.schedule_fn = optax.warmup_cosine_decay_schedule(init_value=self.lr / 2, peak_value=self.lr,
-                                                              warmup_steps=self.warmup_steps, decay_steps=total_steps)
+        self.schedule_fn = optax.warmup_cosine_decay_schedule(init_value=self.lr / 2,
+                                                              peak_value=self.lr,
+                                                              end_value=self.lr / 10,
+                                                              warmup_steps=self.warmup_steps,
+                                                              decay_steps=total_steps)
 
         # optimizer with weight decay
         optim = optax.chain(
