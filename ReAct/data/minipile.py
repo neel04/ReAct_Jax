@@ -4,6 +4,7 @@ from typing import Dict, List
 
 import datasets
 import jax
+import jax.numpy as jnp
 import numpy as np
 from datasets import load_dataset, load_from_disk
 from jaxtyping import Array
@@ -91,6 +92,12 @@ class MiniPileDataset:
             dataset = dataset.select(range(samples)) # only use some samples
         
         return dataset
+
+    def numpify(self, dataset: datasets.Dataset) -> datasets.Dataset:
+        '''
+        Convert the dataset to numpy arrays
+        '''
+        return jax.tree_map(lambda x: jnp.asarray(x), dataset['text'])
     
     def create_dataloader(self, slice: str = '100%'):
         data_path = Path(f'./cached_data/minipile_{self.split}.data')
@@ -103,13 +110,13 @@ class MiniPileDataset:
             
             dataset.set_format(type='numpy')
             
-            return dataset
+            return self.numpify(dataset)
         
         except (FileNotFoundError, ValueError):
             if os.path.exists(data_path):
                 print(f'Loading dataset from {data_path}...')
                 dataset = self.load_data(data_path)
-                return dataset
+                return self.numpify(dataset)
             else:
                 print(f'Building dataset from scratch... [split: {self.split}] | [bsz: {self.bsz}]')
                 
@@ -131,6 +138,5 @@ class MiniPileDataset:
                 
                 self.upload_dataset(dataset,
                                     hub_path=f'Neel-Gupta/minipile-processed_{self.bsz}') # upload the processed dataset to the Hub
-                #self.save_data(dataset, data_path) # save the processed dataset locally
                 
-                return dataset
+                return self.numpify(dataset)

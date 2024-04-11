@@ -137,9 +137,7 @@ class Trainer:
         self.my_logger, self.wandb_logger = logger
         self.trainloader, self.valloader = loaders
         
-        self.dataset_length = self.trainloader.dataset_size // args.batch_size
-        self.trainloader = jax.tree_map(lambda x: jnp.asarray(x), self.trainloader['text'])
-        self.valloader = jax.tree_map(lambda x: jnp.asarray(x), self.valloader['text'])
+        self.dataset_length = len(self.trainloader) * args.batch_size * args.seqlen
         
         # Setup hyperparams. args is Namespace object
         # set each attribute as a class attribute
