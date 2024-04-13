@@ -59,7 +59,5 @@ gcloud compute tpus tpu-vm ssh node-v4 \
 If you get errors regarding workers not being able to sync up at the distributed barrier, do:
 
 ```bash
-gcloud compute tpus tpu-vm ssh --zone "us-central2-b" "ondem" \
---project "react-jax"  \ 
---command 'sudo docker system prune -f && sudo rm -rf ~/.cache;'
+gcloud compute tpus tpu-vm ssh --zone "us-central2-b" "ondem" --worker 'all' --project "react-jax" --command 'sudo docker system prune -f && sudo rm -rf ~/.cache;'
 ```

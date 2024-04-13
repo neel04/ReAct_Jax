@@ -15,6 +15,7 @@ class MiniPileDataset:
     def __init__(self, split: str = 'train', max_length: int = 512, bsz: int = 256, vocab_dir: str ='./ReAct/data'):    
         datasets.config.IN_MEMORY_MAX_SIZE = 1e+11
         
+        self.cpus = jax.devices("cpu")
         self.bsz = bsz
         self.max_length = max_length + 1
         self.split = split
@@ -93,12 +94,6 @@ class MiniPileDataset:
         
         return dataset
 
-    def numpify(self, dataset: datasets.Dataset) -> datasets.Dataset:
-        '''
-        Convert the dataset to numpy arrays
-        '''
-        return jax.tree_map(lambda x: jnp.asarray(x), dataset['text'])
-    
     def create_dataloader(self, slice: str = '100%'):
         data_path = Path(f'./cached_data/minipile_{self.split}.data')
         
@@ -108,9 +103,9 @@ class MiniPileDataset:
             
             print(f'Loaded {self.split} dataset from HuggingFace Hub')
             
-            dataset.set_format(type='numpy')
+            dataset.set_format(type='jax')
             
-            return self.numpify(dataset)
+            return dataset
         
         except (FileNotFoundError, ValueError):
             if os.path.exists(data_path):
@@ -134,9 +129,9 @@ class MiniPileDataset:
                 dataset = dataset.map(self.shift_tokens, batched=True, batch_size=self.bsz,
                                     keep_in_memory=True, drop_last_batch=True, num_proc=None)
                 
-                dataset.set_format(type='numpy')
+                dataset.set_format(type='jax')
                 
                 self.upload_dataset(dataset,
                                     hub_path=f'Neel-Gupta/minipile-processed_{self.bsz}') # upload the processed dataset to the Hub
                 
-                return self.numpify(dataset)
+                return dataset

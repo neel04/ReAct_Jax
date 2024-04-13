@@ -5,7 +5,18 @@ import jax.numpy as jnp
 
 from jax import tree_util as jtu
 from jaxtyping import Array, PRNGKeyArray
-from typing import Optional
+from typing import Optional, Callable
+
+def calc_performance_metrics(fn: Callable, static_argnums: tuple[int], args: tuple[int]) -> float:
+    '''
+    Calculate the number of FLOPs and memory requirements
+    for a given function using AOT compilation.
+    Returns the number of FLOPs in PetaFLOPs
+    '''
+    compiled = jax.jit(fn, static_argnums=static_argnums).lower(*args).compile()
+    cost_anal = compiled.cost_analysis()
+    
+    return cost_anal[0]['flops'] / 1e15
     
 def half_precision(model: eqx.Module) -> eqx.Module:
     return jtu.tree_map(lambda x: x.astype(jnp.bfloat16) if eqx.is_inexact_array(x) else x, model)
@@ -60,14 +71,3 @@ def inverted_freq(arr: Array):
     inv_weights = (counts.max() / counts) # scale it down
     
     return inv_weights[arr - arr.min()]
-
-if __name__ == '__main__':
-    import plotly.express as px
-    import pandas as pd
-    
-    key = jax.random.PRNGKey(0)
-    out: Array = get_rand_nums(key, 1, 10, 512, 4)
-    elems, counts = jnp.unique(out, return_counts=True)
-    df = pd.DataFrame({'elems': elems, 'counts': counts})
-    fig = px.bar(df, x='elems', y='counts')
-    fig.show()

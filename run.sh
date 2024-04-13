@@ -1,4 +1,4 @@
-a#!/bin/bash
+#!/bin/bash
 BRANCH="dev"
 IMAGE_NAME="docker.io/neel04/react_image:latest"
 CONTAINER_NAME="react_container"

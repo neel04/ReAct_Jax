@@ -7,7 +7,8 @@ import jax
 import jax.numpy as jnp
 import optax
 from jaxtyping import Array, PRNGKeyArray, PyTree
-from scalax.sharding import MeshShardingHelper, PartitionSpec as P
+from scalax.sharding import MeshShardingHelper
+from scalax.sharding import PartitionSpec as P
 from torch.utils.data import DataLoader
 from tqdm.auto import tqdm
 
@@ -16,7 +17,7 @@ from ReAct.model.baseline import GPT
 from ReAct.model.react import React
 from ReAct.utils.helpers import count_params, load_eqx_obj, save_eqx_obj
 
-from .helpers import broad_to_bsz, half_precision
+from .helpers import broad_to_bsz, calc_performance_metrics, half_precision
 
 mesh = MeshShardingHelper(axis_dims=[-1], axis_names=['data']) # handle DDP + TP over multi-node
 
@@ -95,12 +96,12 @@ def make_step(model: eqx.Module,
 
     @eqx.filter_value_and_grad
     def compute_loss(model: eqx.Module, static_model: PyTree, x: Array, y: Array, pad_mask: Array,
-                    n: int, k: int, num_classes: int, keys: PRNGKeyArray = None) -> Tuple[int, PyTree]:
+                    n: int, k: int, num_classes: int, keys: PRNGKeyArray) -> int:
         '''
-        Computes the loss of the model w.r.t the input. Is a closure for accessing static_model 
+        Computes the loss of the model w.r.t the input. Is a closure for accessing static_model
         '''
         model = eqx.combine(model, static_model)
-        
+
         if model.__name__ == 'ReAct':
             forward = iters_fwd
         else:
@@ -114,7 +115,7 @@ def make_step(model: eqx.Module,
 
     diff_model, static_model = eqx.partition(model, filter_spec,
                                              is_leaf=lambda x: isinstance(x, eqx.nn.Dropout))
-    
+
     loss, grads = compute_loss(diff_model, static_model, x, y, pad_mask, n, k, num_classes, keys)
     updates, opt_state = optim.update(grads, opt_state, model)
     model = eqx.apply_updates(model, updates)
@@ -137,7 +138,7 @@ class Trainer:
         self.my_logger, self.wandb_logger = logger
         self.trainloader, self.valloader = loaders
         self.dataset_length = len(self.trainloader) * args.batch_size * args.seqlen
-        
+
         self.my_logger.info(f'Using Args: {self.args}\n')
 
         # Assign each arg as a class attribute
@@ -162,10 +163,8 @@ class Trainer:
         metric = []
 
         for step, batch in tqdm(enumerate(loader), total=len(loader), desc='Validating'):
-            seq, label, pad_mask = batch
-
+            seq, label, pad_mask = batch['text']
             acc, loss, ppl = self.compute_metrics(model, seq, label, pad_mask, eval_iters, self.num_classes, keys)
-
             metric.extend([acc, loss, ppl])
 
         # Compute cumulatives
@@ -202,7 +201,7 @@ class Trainer:
         '''
         Returns a filter spec for the model to filter out the trainable parameters.
         Can be used to freeze or unfreeze certain modules of the model depending on the step and epoch.
-        
+
         Args:
             model: The model to filter
         Returns:
@@ -213,9 +212,9 @@ class Trainer:
             lambda tree: tree.pos_enc, # pos_enc should be frozen
             filter_spec,
             replace=False)
-        
+
         return filter_spec
-    
+
     def init_model(self, key: PRNGKeyArray):
 
         if self.baseline:
@@ -228,7 +227,7 @@ class Trainer:
         # switch to half precision
         if self.bf16:
             model = half_precision(model)
-            
+
         _, opt_state, model = self.set_optim_and_scheduler(model)
         count_params(model) # prints to stdout
 
@@ -315,17 +314,20 @@ class Trainer:
             
             for step, batch in tqdm(enumerate(self.trainloader), total=len(self.trainloader), desc=f'Epoch {epoch}'):
                 step += step_done # for multiple epochs
-                
-                seq, label, pad_mask = batch
-                
+
+                seq, label, pad_mask = batch['text']
+
                 loss, model, opt_state = make_step(model, opt_state, filter_spec, seq, label, pad_mask,
                                                    rndm_n, rndm_k, optim, self.num_classes, keys)
 
-                if step % 75 == 0:
-                    # cycling through keys to get new n and k
+                if step % 100 == 0:
                     #rndm_n, rndm_k = self.get_n_k(key=keys[step % self.batch_size])
-                    
-                    accuracy, loss, perplexity = self.compute_metrics(model, seq, label, pad_mask, 
+                    pflops_consumed = calc_performance_metrics(make_step,
+                                                static_argnums=(2, 8, 9),
+                                                args=(model, opt_state, filter_spec, seq, label,
+                                                      pad_mask, rndm_n, rndm_k, optim, self.num_classes, keys))
+
+                    accuracy, loss, perplexity = self.compute_metrics(model, seq, label, pad_mask,
                                                                       self.max_iters, self.num_classes, keys)
 
                     train_acc.append(accuracy)
@@ -338,6 +340,7 @@ class Trainer:
                         {
                             'Train/loss': loss,
                             'Train/Lr': self.schedule_fn(epoch + 1 * step).item(),
+                            'Metrics/Step_PFLOPs': pflops_consumed,
                         },
                         step=step
                     )
