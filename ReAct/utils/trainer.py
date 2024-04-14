@@ -163,7 +163,7 @@ class Trainer:
         metric = []
 
         for step, batch in tqdm(enumerate(loader), total=len(loader), desc='Validating'):
-            seq, label, pad_mask = batch['text']
+            seq, label, pad_mask = jnp.asarray(batch['text'])
             acc, loss, ppl = self.compute_metrics(model, seq, label, pad_mask, eval_iters, self.num_classes, keys)
             metric.extend([acc, loss, ppl])
 
@@ -315,7 +315,7 @@ class Trainer:
             for step, batch in tqdm(enumerate(self.trainloader), total=len(self.trainloader), desc=f'Epoch {epoch}'):
                 step += step_done # for multiple epochs
 
-                seq, label, pad_mask = batch['text']
+                seq, label, pad_mask = jnp.asarray(batch['text'])
 
                 loss, model, opt_state = make_step(model, opt_state, filter_spec, seq, label, pad_mask,
                                                    rndm_n, rndm_k, optim, self.num_classes, keys)

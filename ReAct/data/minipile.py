@@ -102,7 +102,7 @@ class MiniPileDataset:
             
             print(f'Loaded {self.split} dataset from HuggingFace Hub')
             
-            dataset.set_format(type='jax')
+            dataset.set_format(type='numpy')
             
             return dataset
         
@@ -110,7 +110,7 @@ class MiniPileDataset:
             if os.path.exists(data_path):
                 print(f'Loading dataset from {data_path}...')
                 dataset = self.load_data(data_path)
-                return self.numpify(dataset)
+                return dataset
             else:
                 print(f'Building dataset from scratch... [split: {self.split}] | [bsz: {self.bsz}]')
                 
@@ -128,7 +128,7 @@ class MiniPileDataset:
                 dataset = dataset.map(self.shift_tokens, batched=True, batch_size=self.bsz,
                                     keep_in_memory=True, drop_last_batch=True, num_proc=None)
                 
-                dataset.set_format(type='jax')
+                dataset.set_format(type='numpy')
                 
                 self.upload_dataset(dataset,
                                     hub_path=f'Neel-Gupta/minipile-processed_{self.bsz}') # upload the processed dataset to the Hub
