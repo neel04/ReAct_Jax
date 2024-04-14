@@ -229,7 +229,9 @@ class Trainer:
             model = half_precision(model)
 
         _, opt_state, model = self.set_optim_and_scheduler(model)
+        
         count_params(model) # prints to stdout
+        calc_performance_metrics(self.args, self.my_logger) # logs via logger
 
         return opt_state, model
 
@@ -322,11 +324,7 @@ class Trainer:
 
                 if step % 100 == 0:
                     #rndm_n, rndm_k = self.get_n_k(key=keys[step % self.batch_size])
-                    pflops_consumed = calc_performance_metrics(make_step,
-                                                static_argnums=(2, 8, 9),
-                                                args=(model, opt_state, filter_spec, seq, label,
-                                                      pad_mask, rndm_n, rndm_k, optim, self.num_classes, keys))
-
+                    
                     accuracy, loss, perplexity = self.compute_metrics(model, seq, label, pad_mask,
                                                                       self.max_iters, self.num_classes, keys)
 
@@ -339,8 +337,7 @@ class Trainer:
                     self.wandb_logger.log(
                         {
                             'Train/loss': loss,
-                            'Train/Lr': self.schedule_fn(epoch + 1 * step).item(),
-                            'Metrics/Step_PFLOPs': pflops_consumed,
+                            'Train/Lr': self.schedule_fn(epoch + 1 * step).item()
                         },
                         step=step
                     )
