@@ -48,10 +48,9 @@ class RecurrentModule(eqx.Module):
             
             block = eqx.combine(_dynamic_bl, static_part) # reconstruct the block
             
-            if idx == 0:
-                output = block(input_arr, input_arr, pad_mask, enable_dropout, key).astype(jnp.bfloat16)
-            else:
-                output = block(x, x, pad_mask, enable_dropout, key).astype(jnp.bfloat16) # self-attention
+            output = jax.lax.cond(idx == 0,
+                                  lambda: block(input_arr, input_arr, pad_mask, enable_dropout, key).astype(jnp.bfloat16),
+                                  lambda: block(x, x, pad_mask, enable_dropout, key).astype(jnp.bfloat16))
             
             return (output, idx + 1), None
 
