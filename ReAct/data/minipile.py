@@ -4,7 +4,6 @@ from typing import Dict, List
 
 import datasets
 import jax
-import jax.numpy as jnp
 import numpy as np
 from datasets import load_dataset, load_from_disk
 from jaxtyping import Array
