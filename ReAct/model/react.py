@@ -51,8 +51,8 @@ class RecurrentModule(eqx.Module):
             
             # x-attn on the first block
             x = jax.lax.cond(idx == 0,
-                             lambda: block(x, input_arr, pad_mask, enable_dropout, key).astype(jnp.bfloat16),
-                             lambda: block(x, x, pad_mask, enable_dropout, key).astype(jnp.bfloat16))
+                             lambda: block(x, input_arr, pad_mask, enable_dropout, key),
+                             lambda: block(x, x, pad_mask, enable_dropout, key))
             
             return (x, idx + 1), None
 
@@ -125,9 +125,9 @@ class React(eqx.Module):
         mask = mask.astype(jnp.bfloat16)
 
         def body_fun(thought: Array, _) -> Tuple[PyTree, Array]:
-            #TODO: blocking initial input_arr concat
-            latent = jnp.concatenate([thought, thought], axis=-1).astype(jnp.bfloat16)
-            latent = self.main_block(latent, input_arr, mask, enable_dropout, key).astype(jnp.bfloat16)
+            latent = jnp.concatenate([input_arr, thought], axis=-1).astype(jnp.bfloat16)
+            #TODO: Added thought skip connection here
+            latent = thought + self.main_block(latent, input_arr, mask, enable_dropout, key).astype(jnp.bfloat16)
             latent = jax.vmap(self.post_ln)(latent).astype(jnp.bfloat16)  # LN to keep scales tidy
 
             return latent, latent

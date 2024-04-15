@@ -17,7 +17,7 @@ from ReAct.model.baseline import GPT
 from ReAct.model.react import React
 from ReAct.utils.helpers import count_params, load_eqx_obj, save_eqx_obj
 
-from .helpers import broad_to_bsz, calc_performance_metrics, half_precision
+from .helpers import broad_to_bsz, calc_performance_metrics, half_precision, xla_calc_flops
 
 mesh = MeshShardingHelper(axis_dims=[-1], axis_names=['data']) # handle DDP + TP over multi-node
 
@@ -294,8 +294,13 @@ class Trainer:
 
     def train(self):
         step_done = 0
+        
+        rndm_n, rndm_k = self.get_n_k(key=self.key) # initial n and k
+        dummy_arr = jax.ShapeDtypeStruct((self.batch_size, self.seqlen), jnp.uint16)
+        
         opt_state, model = self.init_model(self.key)
         optim, _, _ = self.set_optim_and_scheduler(model)
+        filter_spec = self.get_filterspec(model)
 
         if self.resume:
             model, opt_state, epoch_done = self.resume_training(model, opt_state)
@@ -303,9 +308,17 @@ class Trainer:
             epoch_done = 0
 
         print(f'Model: {model}')
-
-        rndm_n, rndm_k = self.get_n_k(key=self.key) # initial n and k
-        filter_spec = self.get_filterspec(model)
+        
+        # Report XLA computed FLOPs to do the make_step 
+        xla_calc_flops(
+            fn=make_step,
+            args=(model, opt_state, filter_spec,
+                  dummy_arr, dummy_arr, dummy_arr,
+                  rndm_n, rndm_k, optim, self.num_classes,
+                  jax.random.split(self.key, self.batch_size)),
+            static_argnums=(2, 8, 9),
+            my_logger=self.my_logger
+        )
 
         for epoch in range(epoch_done, self.epochs):
             # init empty metrics

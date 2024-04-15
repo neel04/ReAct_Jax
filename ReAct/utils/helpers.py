@@ -1,6 +1,6 @@
 import math
 import os
-from typing import Callable, Optional
+from typing import Callable, Optional, Tuple
 
 import equinox as eqx
 import jax
@@ -30,7 +30,6 @@ def calc_performance_metrics(args, my_logger: Callable) -> None:
     args.tokens = args.batch_size * args.seqlen
     args.kv_size_ratio = 1
     
-    # TODO: Ignores activation checkpointing. Fix this at some point 
     my_logger.warning('! Ignoring activation checkpointing in FLOPs calculation !')
         
     qkv_flops = int(iter_factor * 2 * (1 + 2 * args.kv_size_ratio) * args.num_blocks * args.tokens * args.width * args.width)
@@ -45,6 +44,18 @@ def calc_performance_metrics(args, my_logger: Callable) -> None:
     embedding_flops = 6 * args.tokens * args.width * args.num_classes
     total_flops = qkv_flops + attention_matrix_flops + attention_over_values_flops + linear_projection_flops + ffn_flops + embedding_flops
     my_logger.info(f"Total FLOPs for the Model: {convert_flops(total_flops)} for a single fwd + bwd pass\n")
+    
+    
+def xla_calc_flops(fn: Callable, static_argnums: Tuple[int], args: Tuple, my_logger: Callable) -> None:
+    '''
+    Estimates FLOPs consumed during `fn` execution.
+    Use's XLA HLO analysis to estimate FLOPs.
+    
+    Returns: the total number of FLOPs
+    '''
+    compiled = jax.jit(fn, static_argnums=static_argnums).lower(*args).compile()
+    flops = compiled.cost_analysis()[0]['flops']
+    my_logger.info(f"XLA estimate of Total FLOPs for {fn.__name__}: {convert_flops(int(flops))}\n")
     
 def half_precision(model: eqx.Module) -> eqx.Module:
     return jtu.tree_map(lambda x: x.astype(jnp.bfloat16) if eqx.is_inexact_array(x) else x, model)
