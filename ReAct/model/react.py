@@ -48,9 +48,7 @@ class RecurrentModule(eqx.Module):
             
             block = eqx.combine(_dynamic_bl, static_part) # reconstruct the block
             
-            output = jax.lax.cond(idx == 0,
-                                  lambda: block(input_arr, input_arr, pad_mask, enable_dropout, key).astype(jnp.bfloat16),
-                                  lambda: block(x, x, pad_mask, enable_dropout, key).astype(jnp.bfloat16))
+            output = block(x, x, pad_mask, enable_dropout, key).astype(jnp.bfloat16)
             
             return (output, idx + 1), None
 
@@ -131,9 +129,9 @@ class React(eqx.Module):
 
             return latent, latent
 
-        final_val, _ = eqx.internal.scan(f=body_fun, init=interim_thought, xs=None, length=5, kind='checkpointed')
-        #return jnp.einsum('i j k, i -> j k', history, self.iters_weights) # dot-product with iters_weights
-        return final_val
+        final_val, history = eqx.internal.scan(f=body_fun, init=interim_thought, xs=None, length=5, kind='checkpointed')
+        return jnp.einsum('i j k, i -> j k', history, self.iters_weights) # dot-product with iters_weights
+        #return final_val
 
     @eqx.filter_jit
     def __call__(self,
