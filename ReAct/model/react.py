@@ -29,7 +29,8 @@ class RecurrentModule(eqx.Module):
         make_block: callable = lambda k: AttentionBlock(seqlen, n_heads, drop_rate, bottleneck, k)  # noqa: E731
         self.attention_blocks = eqx.filter(eqx.filter_vmap(make_block)(keys), eqx.is_array_like)
 
-    def __call__(self, x: Array,
+    def __call__(self,
+                 x: Array,
                  input_arr: Array,
                  pad_mask: Array,
                  enable_dropout: bool,
@@ -44,15 +45,15 @@ class RecurrentModule(eqx.Module):
         x = self.reshape_layer(x) # (batch, seqlen, bottleneck)
         
         def f(input_tup: Tuple[Array, int], _dynamic_bl: PyTree) -> Tuple[Tuple[Array, int], int]:
-            input_arr, idx = input_tup # i is the iteration index
+            x, idx = input_tup # i is the iteration index
             
             block = eqx.combine(_dynamic_bl, static_part) # reconstruct the block
             
-            output = block(x, x, pad_mask, enable_dropout, key).astype(jnp.bfloat16)
+            x = block(x, x, pad_mask, enable_dropout, key).astype(jnp.bfloat16)
             
-            return (output, idx + 1), None
+            return (x, idx + 1), None
 
-        out = eqx.internal.scan(f=f, init=(input_arr, 0), xs=dynamic_part, kind='lax')[0][0] # throw away idx
+        out = eqx.internal.scan(f=f, init=(x, 0), xs=dynamic_part, kind='lax')[0][0] # throw away idx
 
         return out
 
@@ -130,8 +131,8 @@ class React(eqx.Module):
             return latent, latent
 
         final_val, history = eqx.internal.scan(f=body_fun, init=interim_thought, xs=None, length=5, kind='checkpointed')
-        return jnp.einsum('i j k, i -> j k', history, self.iters_weights) # dot-product with iters_weights
-        #return final_val
+        #return jnp.einsum('i j k, i -> j k', history, self.iters_weights) # dot-product with iters_weights
+        return final_val
 
     @eqx.filter_jit
     def __call__(self,
