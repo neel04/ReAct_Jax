@@ -31,7 +31,7 @@ class RecurrentModule(eqx.Module):
 
     def __call__(self,
                  x: Array,
-                 input_arr: Array,
+                 input_arr: Optional[Array],
                  pad_mask: Array,
                  enable_dropout: bool,
                  key: PRNGKeyArray) -> Array:
@@ -49,7 +49,10 @@ class RecurrentModule(eqx.Module):
             
             block = eqx.combine(_dynamic_bl, static_part) # reconstruct the block
             
-            x = block(x, x, pad_mask, enable_dropout, key).astype(jnp.bfloat16)
+            # cross-attention for the first block
+            x = jax.lax.cond(idx == 0,
+                             lambda: block(x, input_arr, pad_mask, enable_dropout, key).astype(jnp.bfloat16),
+                             lambda: block(x, x, pad_mask, enable_dropout, key).astype(jnp.bfloat16))
             
             return (x, idx + 1), None
 
