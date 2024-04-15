@@ -33,11 +33,11 @@ def calc_performance_metrics(args, my_logger: Callable) -> None:
     # TODO: Ignores activation checkpointing. Fix this at some point 
     my_logger.warning('! Ignoring activation checkpointing in FLOPs calculation !')
         
-    qkv_flops = int(iter_factor * 2 * (1 + 2 * args.kv_size_ratio) * args.num_classes * args.tokens * args.width * args.width)
-    attention_matrix_flops = iter_factor * 2 * args.num_classes * args.tokens * args.seqlen * args.width
-    attention_over_values_flops = iter_factor * 2 * args.num_classes * args.tokens * args.seqlen * args.width
-    linear_projection_flops = iter_factor * 2 * args.num_classes * args.tokens * args.width * args.width
-    ffn_flops = iter_factor * 16 * args.num_classes * args.tokens * args.width * args.width
+    qkv_flops = int(iter_factor * 2 * (1 + 2 * args.kv_size_ratio) * args.num_blocks * args.tokens * args.width * args.width)
+    attention_matrix_flops = iter_factor * 2 * args.num_blocks * args.tokens * args.seqlen * args.width
+    attention_over_values_flops = iter_factor * 2 * args.num_blocks * args.tokens * args.seqlen * args.width
+    linear_projection_flops = iter_factor * 2 * args.num_blocks * args.tokens * args.width * args.width
+    ffn_flops = iter_factor * 16 * args.num_blocks * args.tokens * args.width * args.width
     
     # handle NewGELU
     ffn_flops *= 3.75

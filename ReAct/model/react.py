@@ -49,10 +49,10 @@ class RecurrentModule(eqx.Module):
             
             block = eqx.combine(_dynamic_bl, static_part) # reconstruct the block
             
-            #x = jax.lax.cond(idx == 0,
-                             #lambda: block(x, input_arr, pad_mask, enable_dropout, key).astype(jnp.bfloat16),
-                             #lambda: block(x, x, pad_mask, enable_dropout, key).astype(jnp.bfloat16))
-            x = block(x, input_arr, pad_mask, enable_dropout, key).astype(jnp.bfloat16)
+            # x-attn every alternate block
+            x = jax.lax.cond(idx % 2 != 0,
+                             lambda: block(x, input_arr, pad_mask, enable_dropout, key).astype(jnp.bfloat16),
+                             lambda: block(x, x, pad_mask, enable_dropout, key).astype(jnp.bfloat16))
             
             return (x, idx + 1), None
 
@@ -68,7 +68,6 @@ class React(eqx.Module):
 
     max_iters: int = eqx.field(static=True)
     
-    iters_weights: Array
     pos_enc: Array
     embed_layer: eqx.nn.Embedding
     main_block: LiteAttention
@@ -88,7 +87,6 @@ class React(eqx.Module):
         key1, key2, key3, key4 = jax.random.split(key, 4)
 
         self.max_iters = max_iters
-        self.iters_weights = jnp.ones((5,), dtype=jnp.bfloat16)
         self.embed_layer = eqx.nn.Embedding(vocab_size, width, key=key1)
         self.pos_enc = jax.lax.stop_gradient(self.positional_encoding(seqlen, width))
 
@@ -134,7 +132,7 @@ class React(eqx.Module):
             return latent, latent
 
         final_val, history = eqx.internal.scan(f=body_fun, init=interim_thought, xs=None, length=5, kind='checkpointed')
-        #return jnp.einsum('i j k, i -> j k', history, self.iters_weights) # dot-product with iters_weights
+        
         return final_val
 
     @eqx.filter_jit
