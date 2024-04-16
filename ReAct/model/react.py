@@ -5,7 +5,7 @@ import jax
 import jax.numpy as jnp
 from jaxtyping import Array, PRNGKeyArray, PyTree
 
-from .blocks import AttentionBlock, LinearProj, LiteAttention
+from .blocks import AttentionBlock, LinearProj, LiteAttention, NewGELU
 
 class RecurrentModule(eqx.Module):
     '''
@@ -50,7 +50,7 @@ class RecurrentModule(eqx.Module):
             block = eqx.combine(_dynamic_bl, static_part) # reconstruct the block
             
             # x-attn after the first MHSA block
-            x = jax.lax.cond(idx == 1,
+            x = jax.lax.cond(idx == 0,
                              lambda: block(x, input_arr, pad_mask, enable_dropout, key),
                              lambda: block(x, x, pad_mask, enable_dropout, key))
             
@@ -69,6 +69,8 @@ class React(eqx.Module):
     max_iters: int = eqx.field(static=True)
     
     pos_enc: Array
+    weight_head: Array
+    weight_act: eqx.Module
     embed_layer: eqx.nn.Embedding
     main_block: LiteAttention
     post_ln: eqx.nn.LayerNorm
@@ -91,6 +93,8 @@ class React(eqx.Module):
         self.pos_enc = jax.lax.stop_gradient(self.positional_encoding(seqlen, width))
 
         self.main_block = RecurrentModule(seqlen, drop_rate, n_heads, num_blocks, width, key=key2)
+        self.weight_head = jnp.zeros((max_iters, width, 1))
+        self.weight_act = NewGELU()
 
         self.post_ln = eqx.nn.LayerNorm(width)
         self.out_head = LinearProj(width, vocab_size, key=key4)
@@ -119,20 +123,25 @@ class React(eqx.Module):
                           enable_dropout: bool,
                           key: PRNGKeyArray) -> Array:
 
-        # declaring constants
+        # Declaring constants
         input_arr = input_arr.astype(jnp.bfloat16)
         interim_thought = interim_thought.astype(jnp.bfloat16)
         mask = mask.astype(jnp.bfloat16)
 
-        def body_fun(thought: Array, _) -> Tuple[PyTree, Array]:
-            latent = jnp.concatenate([input_arr, thought], axis=-1).astype(jnp.bfloat16)
-            latent = self.main_block(latent, input_arr, mask, enable_dropout, key).astype(jnp.bfloat16)
-            latent = jax.vmap(self.post_ln)(latent).astype(jnp.bfloat16)  # LN to keep scales tidy
+        def body_fun(thought: Array, idx: int) -> Tuple[Array, Array]:
+            latent = jnp.concatenate([input_arr, thought], axis=-1) # (seqlen, width * 2)
+            latent = self.main_block(latent, input_arr, mask, enable_dropout, key) # (seqlen, width)
+            
+            # Weighting each sequence element's representation
+            weights = jax.nn.softmax(self.weight_act(latent @ self.weight_head[idx])) # (seqlen, 1)
+            latent = weights * latent # (seqlen, width)
+            
+            latent = jax.vmap(self.post_ln)(latent)  # Post-LN for stability 
 
             return latent, latent
 
         final_val, history = eqx.internal.scan(
-            f=body_fun, init=interim_thought, xs=None, length=5, kind="checkpointed"
+            f=body_fun, init=interim_thought, xs=jnp.arange(5), kind="checkpointed"
         )
 
         return final_val

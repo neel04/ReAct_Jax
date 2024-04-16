@@ -151,11 +151,12 @@ class LinearProj(eqx.Module):
     
     def __call__(self,
                  input: BFloat16[Array, 'batch in_dim'],
-                 **kwargs):
+                 **kwargs) -> Array:
         
         mask = kwargs.get('mask', None)
         mask = jnp.ones_like(self.weight) if mask is None else mask
         output = input @ (self.weight * mask.astype(input.dtype)) + self.bias
+        
         return output
 
 class LiteAttention(eqx.Module):
