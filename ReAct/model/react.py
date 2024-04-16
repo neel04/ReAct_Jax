@@ -49,8 +49,8 @@ class RecurrentModule(eqx.Module):
             
             block = eqx.combine(_dynamic_bl, static_part) # reconstruct the block
             
-            # x-attn on the first block
-            x = jax.lax.cond(idx == 0,
+            # x-attn after the first MHSA block
+            x = jax.lax.cond(idx == 1,
                              lambda: block(x, input_arr, pad_mask, enable_dropout, key),
                              lambda: block(x, x, pad_mask, enable_dropout, key))
             
@@ -126,7 +126,7 @@ class React(eqx.Module):
 
         def body_fun(thought: Array, _) -> Tuple[PyTree, Array]:
             latent = jnp.concatenate([input_arr, thought], axis=-1).astype(jnp.bfloat16)
-            latent = input_arr + self.main_block(latent, input_arr, mask, enable_dropout, key).astype(jnp.bfloat16)
+            latent = self.main_block(latent, input_arr, mask, enable_dropout, key).astype(jnp.bfloat16)
             latent = jax.vmap(self.post_ln)(latent).astype(jnp.bfloat16)  # LN to keep scales tidy
 
             return latent, latent
