@@ -119,21 +119,22 @@ class React(eqx.Module):
                           enable_dropout: bool,
                           key: PRNGKeyArray) -> Array:
 
-        # These are constants
+        # declaring constants
         input_arr = input_arr.astype(jnp.bfloat16)
         interim_thought = interim_thought.astype(jnp.bfloat16)
         mask = mask.astype(jnp.bfloat16)
 
         def body_fun(thought: Array, _) -> Tuple[PyTree, Array]:
             latent = jnp.concatenate([input_arr, thought], axis=-1).astype(jnp.bfloat16)
-            #TODO: Added thought skip connection here
-            latent = thought + self.main_block(latent, input_arr, mask, enable_dropout, key).astype(jnp.bfloat16)
+            latent = input_arr + self.main_block(latent, input_arr, mask, enable_dropout, key).astype(jnp.bfloat16)
             latent = jax.vmap(self.post_ln)(latent).astype(jnp.bfloat16)  # LN to keep scales tidy
 
             return latent, latent
 
-        final_val, history = eqx.internal.scan(f=body_fun, init=interim_thought, xs=None, length=5, kind='checkpointed')
-        
+        final_val, history = eqx.internal.scan(
+            f=body_fun, init=interim_thought, xs=None, length=5, kind="checkpointed"
+        )
+
         return final_val
 
     @eqx.filter_jit
