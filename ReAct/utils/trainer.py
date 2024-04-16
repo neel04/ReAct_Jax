@@ -309,17 +309,6 @@ class Trainer:
 
         print(f'Model: {model}')
         
-        # Report XLA computed FLOPs to do the make_step 
-        #xla_calc_flops(
-            #fn=make_step,
-            #args=(model, opt_state, filter_spec,
-                  #dummy_arr, dummy_arr, dummy_arr,
-                  #rndm_n, rndm_k, optim, self.num_classes,
-                  #jax.random.split(self.key, self.batch_size)),
-            #static_argnums=(2, 8, 9),
-            #my_logger=self.my_logger
-        #)
-
         for epoch in range(epoch_done, self.epochs):
             # init empty metrics
             epoch_key = jnp.array([epoch, epoch + 1]).astype(jnp.uint32)

@@ -70,6 +70,7 @@ class React(eqx.Module):
     
     pos_enc: Array
     weight_head: Array
+    weight_head_2: Array
     weight_act: eqx.Module
     embed_layer: eqx.nn.Embedding
     main_block: LiteAttention
@@ -93,7 +94,8 @@ class React(eqx.Module):
         self.pos_enc = jax.lax.stop_gradient(self.positional_encoding(seqlen, width))
 
         self.main_block = RecurrentModule(seqlen, drop_rate, n_heads, num_blocks, width, key=key2)
-        self.weight_head = jnp.zeros((max_iters, width, 1))
+        self.weight_head = jax.random.uniform(shape=(max_iters, width, 1), key=key3)
+        self.weight_head_2 = jax.random.uniform(shape=(max_iters, 1, seqlen), key=key3)
         self.weight_act = NewGELU()
 
         self.post_ln = eqx.nn.LayerNorm(width)
@@ -133,7 +135,8 @@ class React(eqx.Module):
             latent = self.main_block(latent, input_arr, mask, enable_dropout, key) # (seqlen, width)
             
             # Weighting each sequence element's representation
-            weights = jax.nn.softmax(self.weight_act(latent @ self.weight_head[idx])) # (seqlen, 1)
+            weights = self.weight_act(latent @ self.weight_head[idx]) # (seqlen, 1)
+            weights = self.weight_act(self.weight_head_2[idx] @ weights) # (1, 1)
             latent = weights * latent # (seqlen, width)
             
             latent = jax.vmap(self.post_ln)(latent)  # Post-LN for stability 
