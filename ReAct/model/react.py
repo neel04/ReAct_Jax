@@ -67,10 +67,10 @@ class RecurrentModule(eqx.Module):
 
         out, history = eqx.internal.scan(f=f, init=(x, 0), xs=dynamic_part, kind='lax')
         
-        # Handle the LTM component
-        agg_out = history.sum(0)
-        input_arr *= jax.nn.softmax(self.forget_act(self.forget_gate(agg_out)))
-        input_arr += self.LTM_gate(agg_out, input_arr, pad_mask, enable_dropout, key) #TODO: Try it swapped
+        #TODO: Try a simple MLP over input_arr 
+        agg_out = history.mean(0)
+        input_arr *= jax.nn.sigmoid(self.forget_act(self.forget_gate(agg_out)))
+        #input_arr += self.LTM_gate(agg_out, input_arr, pad_mask, enable_dropout, key)
 
         return out[0], input_arr
 
