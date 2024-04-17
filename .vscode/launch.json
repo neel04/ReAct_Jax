@@ -17,7 +17,7 @@
                 "--dataset", "minipile",
                 "--bf16"
             ],
-            "justMyCode": false
+            "justMyCode": true
         }
     ]
 }

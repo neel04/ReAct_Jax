@@ -296,7 +296,6 @@ class Trainer:
         step_done = 0
         
         rndm_n, rndm_k = self.get_n_k(key=self.key) # initial n and k
-        dummy_arr = jax.ShapeDtypeStruct((self.batch_size, self.seqlen), jnp.uint16)
         
         opt_state, model = self.init_model(self.key)
         optim, _, _ = self.set_optim_and_scheduler(model)
