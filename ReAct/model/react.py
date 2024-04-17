@@ -5,7 +5,7 @@ import jax
 import jax.numpy as jnp
 from jaxtyping import Array, PRNGKeyArray, PyTree
 
-from .blocks import AttentionBlock, LinearProj, LiteAttention
+from .blocks import AttentionBlock, LinearProj, LiteAttention, NewGELU
 
 class RecurrentModule(eqx.Module):
     '''
@@ -16,6 +16,7 @@ class RecurrentModule(eqx.Module):
     attention_blocks: PyTree[AttentionBlock]
     LTM_gate: AttentionBlock
     forget_gate: LinearProj
+    forget_act: eqx.Module
     reshape_layer: LinearProj
 
     def __init__(self,
@@ -36,6 +37,7 @@ class RecurrentModule(eqx.Module):
         self.LTM_gate = AttentionBlock(seqlen, n_heads, drop_rate, bottleneck, key)
         self.reshape_layer = LinearProj(bottleneck * 2, bottleneck, key=key)
         self.forget_gate = LinearProj(bottleneck, bottleneck, key)
+        self.forget_act = NewGELU()
 
         self.attention_blocks = eqx.filter(eqx.filter_vmap(make_block)(keys), eqx.is_array_like)
     
@@ -66,9 +68,9 @@ class RecurrentModule(eqx.Module):
         out, history = eqx.internal.scan(f=f, init=(x, 0), xs=dynamic_part, kind='lax')
         
         # Handle the LTM component
-        penultimate_out = history[-2]
-        input_arr *= jax.nn.softmax(self.forget_gate(penultimate_out))
-        input_arr += self.LTM_gate(input_arr, penultimate_out, pad_mask, enable_dropout, key) #TODO: Try it swapped
+        agg_out = history.sum()
+        input_arr *= jax.nn.softmax(self.forget_act(self.forget_gate(agg_out)))
+        input_arr += self.LTM_gate(agg_out, input_arr, pad_mask, enable_dropout, key) #TODO: Try it swapped
 
         return out[0], input_arr
 
