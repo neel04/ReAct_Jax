@@ -64,8 +64,7 @@ class RecurrentModule(eqx.Module):
         out, history = eqx.internal.scan(f=f, init=(x, 0), xs=dynamic_part, kind='lax')
         
         # Handle the LTM component
-        penultimate_out = history[-2]
-        input_arr += self.LTM_gate(penultimate_out, input_arr, pad_mask, enable_dropout, key) #TODO: Try it swapped
+        input_arr = self.LTM_gate(out[0], input_arr, pad_mask, enable_dropout, key) #TODO: Try it swapped
 
         return out[0], input_arr
 
