@@ -15,6 +15,7 @@ class RecurrentModule(eqx.Module):
     
     attention_blocks: PyTree[AttentionBlock]
     LTM_gate: AttentionBlock
+    forget_gate: LinearProj
     reshape_layer: LinearProj
 
     def __init__(self,
@@ -34,6 +35,7 @@ class RecurrentModule(eqx.Module):
 
         self.LTM_gate = AttentionBlock(seqlen, n_heads, drop_rate, bottleneck, key)
         self.reshape_layer = LinearProj(bottleneck * 2, bottleneck, key=key)
+        self.forget_gate = LinearProj(bottleneck, bottleneck, key)
 
         self.attention_blocks = eqx.filter(eqx.filter_vmap(make_block)(keys), eqx.is_array_like)
     
@@ -64,7 +66,9 @@ class RecurrentModule(eqx.Module):
         out, history = eqx.internal.scan(f=f, init=(x, 0), xs=dynamic_part, kind='lax')
         
         # Handle the LTM component
-        input_arr = self.LTM_gate(out[0], input_arr, pad_mask, enable_dropout, key) #TODO: Try it swapped
+        penultimate_out = history[-2]
+        input_arr *= jax.nn.softmax(self.forget_gate(penultimate_out))
+        input_arr += self.LTM_gate(input_arr, penultimate_out, pad_mask, enable_dropout, key) #TODO: Try it swapped
 
         return out[0], input_arr
 
