@@ -9,12 +9,11 @@ from .blocks import AttentionBlock, LinearProj, LiteAttention, NewGELU
 
 class RecurrentModule(eqx.Module):
     '''
-    Bunch of AttentionBlocks in a pseuo-LTM fashion
+    Bunch of AttentionBlocks in a pseuo-LSTM fashion
     '''
     num_blocks: int = eqx.field(static=True)
     
     attention_blocks: PyTree[AttentionBlock]
-    LTM_gate: AttentionBlock
     forget_gate: LinearProj
     forget_act: eqx.Module
     reshape_layer: LinearProj
@@ -34,7 +33,6 @@ class RecurrentModule(eqx.Module):
             seqlen, n_heads, drop_rate, bottleneck, k
         )
 
-        self.LTM_gate = AttentionBlock(seqlen, n_heads, drop_rate, bottleneck, key)
         self.reshape_layer = LinearProj(bottleneck * 2, bottleneck, key=key)
         self.forget_gate = LinearProj(bottleneck, bottleneck, key)
         self.forget_act = NewGELU()
@@ -67,9 +65,7 @@ class RecurrentModule(eqx.Module):
 
         out, history = eqx.internal.scan(f=f, init=(x, 0), xs=dynamic_part, kind='lax')
         
-        agg_out = history.mean(0)
-        input_arr *= jax.nn.sigmoid(self.forget_act(self.forget_gate(agg_out)))
-        input_arr = self.LTM_gate(input_arr, input_arr, pad_mask, enable_dropout, key)
+        input_arr *= jax.nn.sigmoid(self.forget_act(self.forget_gate(history.mean(0))))
 
         return out[0], input_arr
 
