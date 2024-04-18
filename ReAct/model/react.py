@@ -67,9 +67,8 @@ class RecurrentModule(eqx.Module):
 
         out, history = eqx.internal.scan(f=f, init=(x, 0), xs=dynamic_part, kind='lax')
         
-        #TODO: Try a simple MLP over input_arr 
         agg_out = history.mean(0)
-        input_arr += self.forget_act(self.forget_gate(agg_out))
+        input_arr = self.forget_act(self.forget_gate(agg_out))
         #input_arr += self.LTM_gate(agg_out, input_arr, pad_mask, enable_dropout, key)
 
         return out[0], input_arr
