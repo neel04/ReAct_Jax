@@ -69,7 +69,7 @@ class RecurrentModule(eqx.Module):
         
         #TODO: Try a simple MLP over input_arr 
         agg_out = history.mean(0)
-        input_arr *= jax.nn.sigmoid(self.forget_act(self.forget_gate(agg_out)))
+        input_arr *= jax.nn.softmax(self.forget_act(self.forget_gate(agg_out)))
         #input_arr += self.LTM_gate(agg_out, input_arr, pad_mask, enable_dropout, key)
 
         return out[0], input_arr
