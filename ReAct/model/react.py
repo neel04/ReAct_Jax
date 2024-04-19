@@ -5,7 +5,7 @@ import jax
 import jax.numpy as jnp
 from jaxtyping import Array, PRNGKeyArray, PyTree
 
-from .blocks import AttentionBlock, LinearProj, LiteAttention, NewGELU
+from .blocks import AttentionBlock, LinearProj, LiteAttention, MLP
 
 class RecurrentModule(eqx.Module):
     '''
@@ -15,7 +15,6 @@ class RecurrentModule(eqx.Module):
     
     attention_blocks: PyTree[AttentionBlock]
     forget_gate: LinearProj
-    forget_act: eqx.Module
     reshape_layer: LinearProj
 
     def __init__(self,
@@ -34,8 +33,7 @@ class RecurrentModule(eqx.Module):
         )
 
         self.reshape_layer = LinearProj(bottleneck * 2, bottleneck, key=key)
-        self.forget_gate = LinearProj(bottleneck, bottleneck, key)
-        self.forget_act = NewGELU()
+        self.forget_gate = MLP(bottleneck, bottleneck, p=0.0, key=key)
 
         self.attention_blocks = eqx.filter(eqx.filter_vmap(make_block)(keys), eqx.is_array_like)
     
@@ -65,7 +63,7 @@ class RecurrentModule(eqx.Module):
 
         out, history = eqx.internal.scan(f=f, init=(x, 0), xs=dynamic_part, kind='lax')
         
-        input_arr *= jax.nn.sigmoid(self.forget_act(self.forget_gate(history.mean(0))))
+        input_arr *= jax.nn.sigmoid(self.forget_gate(history.mean(0)))
 
         return out[0], input_arr
 
