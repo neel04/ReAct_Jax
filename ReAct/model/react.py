@@ -13,6 +13,7 @@ class RecurrentModule(eqx.Module):
     '''
     num_blocks: int = eqx.field(static=True)
     
+    alpha: Array
     attention_blocks: PyTree[AttentionBlock]
     forget_gate: LinearProj
     reshape_layer: LinearProj
@@ -34,6 +35,7 @@ class RecurrentModule(eqx.Module):
 
         self.reshape_layer = LinearProj(bottleneck * 2, bottleneck, key=key)
         self.forget_gate = MLP(bottleneck, bottleneck, p=0.0, key=key)
+        self.alpha = jnp.array(0.5, dtype=jnp.bfloat16)
 
         self.attention_blocks = eqx.filter(eqx.filter_vmap(make_block)(keys), eqx.is_array_like)
     
@@ -64,6 +66,7 @@ class RecurrentModule(eqx.Module):
         out, history = eqx.internal.scan(f=f, init=(x, 0), xs=dynamic_part, kind='lax')
         
         input_arr *= jax.nn.sigmoid(self.forget_gate(history.mean(0), True, key))
+        input_arr = history.mean(0) * self.alpha + input_arr * (1 - self.alpha)
 
         return out[0], input_arr
 
