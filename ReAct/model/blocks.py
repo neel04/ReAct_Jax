@@ -142,7 +142,7 @@ class LinearProj(eqx.Module):
         self.use_bias = use_bias
 
         lim = 1 / math.sqrt(input_dim)
-        self.weight = jax.random.uniform(wkey, (input_dim, output_dim), minval=-lim, maxval=lim).astype(jnp.bfloat16)
+        self.weight = jax.nn.initializers.he_normal(dtype=jnp.bfloat16)(wkey, (input_dim, output_dim))
 
         if use_bias:
             self.bias = jax.random.uniform(bkey, (output_dim,), minval=-lim, maxval=lim).astype(jnp.bfloat16)

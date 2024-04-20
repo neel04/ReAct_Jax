@@ -17,7 +17,7 @@ from ReAct.model.baseline import GPT
 from ReAct.model.react import React
 from ReAct.utils.helpers import count_params, load_eqx_obj, save_eqx_obj
 
-from .helpers import broad_to_bsz, calc_performance_metrics, half_precision, xla_calc_flops
+from .helpers import broad_to_bsz, calc_performance_metrics, half_precision, custom_init
 
 mesh = MeshShardingHelper(axis_dims=[-1], axis_names=['data']) # handle DDP + TP over multi-node
 
@@ -230,6 +230,7 @@ class Trainer:
         if self.bf16:
             model = half_precision(model)
 
+        model = custom_init(model, key) # custom init for the model
         _, opt_state, model = self.set_optim_and_scheduler(model)
         
         count_params(model) # prints to stdout
