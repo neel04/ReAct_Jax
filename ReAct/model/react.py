@@ -66,7 +66,7 @@ class RecurrentModule(eqx.Module):
         out, history = eqx.internal.scan(f=f, init=(x, 0), xs=dynamic_part, kind='lax')
         
         input_arr *= jax.nn.sigmoid(self.forget_gate(history.mean(0), True, key))
-        input_arr = history.mean(0) * self.alpha + input_arr * (1 - self.alpha)
+        input_arr += history.mean(0) * self.alpha + input_arr * (1 - self.alpha)
 
         return out[0], input_arr
 
