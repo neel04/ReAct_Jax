@@ -1,6 +1,6 @@
 import math
 import os
-from typing import Callable, Optional, Tuple, List
+from typing import Callable, Optional, Tuple
 
 import equinox as eqx
 import jax
@@ -57,31 +57,11 @@ def xla_calc_flops(fn: Callable, static_argnums: Tuple[int], args: Tuple, my_log
     flops = compiled.cost_analysis()[0]['flops']
     my_logger.info(f"XLA estimate of Total FLOPs for {fn.__name__}: {convert_flops(int(flops))}\n")
     
+def custom_layer_init(model: PyTree) -> PyTree:
+    return None
+    
 def half_precision(model: eqx.Module) -> eqx.Module:
     return jtu.tree_map(lambda x: x.astype(jnp.bfloat16) if eqx.is_inexact_array(x) else x, model)
-
-def init_fn(arr: Array, key: PRNGKeyArray) -> Array:
-    '''
-    He normal initialization for the weights
-    '''
-    return jax.nn.initializers.he_normal(dtype=jnp.bfloat16)(key, arr.shape)
-
-def custom_init(model: PyTree, key: PRNGKeyArray) -> PyTree:
-    '''
-    Performs He init for the Attention linear weights
-    '''
-    def get_weights(m: PyTree) -> List[Array]:
-        return [x.weight for x in jax.tree_util.tree_leaves(m, is_leaf=is_linear) if is_linear(x)]
-    
-    is_linear = lambda x: isinstance(x, eqx.nn.Linear)  # noqa: E731
-    weights = get_weights(model)
-    
-    new_weights = [
-        init_fn(weight, subkey)
-        for weight, subkey in zip(weights, jax.random.split(key, len(weights)))
-    ]
-
-    return eqx.tree_at(get_weights, model, new_weights)
 
 def save_eqx_obj(save_dir: str, filename: str, obj: tuple):
     if not os.path.exists(save_dir):
