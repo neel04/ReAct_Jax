@@ -134,16 +134,18 @@ class Trainer:
         self.args = args
         self.key = key
 
-        # unpacking the loaders & loggers
         self.my_logger, self.wandb_logger = logger
         self.trainloader, self.valloader = loaders
         self.dataset_length = len(self.trainloader) * args.batch_size * args.seqlen
 
-        self.my_logger.info(f'Using Args: {self.args}\n')
+        self.text_table = wandb.Table(
+            columns=["Step", "Prompt", "Model Generation", "Type"]
+        )
+        
+        self.my_logger.info(f"Using Args: {self.args}\n")
 
         # Assign each arg as a class attribute
-        for k, v in vars(self.args).items():
-                setattr(self, k, v)
+        self.__dict__.update(vars(self.args))
 
     def get_n_k(self, key: PRNGKeyArray) -> Tuple[Array, Array]:
         n_key, k_key = jax.random.split(key, 2)
@@ -405,7 +407,6 @@ class Trainer:
         key = jax.random.PRNGKey(0)
         inference_model = eqx.nn.inference_mode(model)
 
-        text_table = wandb.Table(columns=["Step", "Prompt", "Model Generation", "Type"])
         prompt = f'Prompt: {self.decode_fn(input_arr)}'
 
         for _ in range(max_new_tokens):
@@ -436,7 +437,7 @@ class Trainer:
         self.my_logger.info(model_gen)
 
         # log to logger as a table
-        text_table.add_data(metadata['step'], prompt, model_gen, metadata['type'])
-        self.wandb_logger.log({'Generated Samples': text_table})
+        self.text_table.add_data(metadata["step"], prompt, model_gen, metadata["type"])
+        self.wandb_logger.log({"Generated Samples": self.text_table})
 
         return input_arr

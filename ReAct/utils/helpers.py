@@ -6,7 +6,7 @@ import equinox as eqx
 import jax
 import jax.numpy as jnp
 from jax import tree_util as jtu
-from jaxtyping import Array, PRNGKeyArray
+from jaxtyping import Array, PRNGKeyArray, PyTree
 
 def convert_flops(params: int) -> str:
     if params == 0:
@@ -56,6 +56,9 @@ def xla_calc_flops(fn: Callable, static_argnums: Tuple[int], args: Tuple, my_log
     compiled = jax.jit(fn, static_argnums=static_argnums).lower(*args).compile()
     flops = compiled.cost_analysis()[0]['flops']
     my_logger.info(f"XLA estimate of Total FLOPs for {fn.__name__}: {convert_flops(int(flops))}\n")
+    
+def custom_layer_init(model: PyTree) -> PyTree:
+    return None
     
 def half_precision(model: eqx.Module) -> eqx.Module:
     return jtu.tree_map(lambda x: x.astype(jnp.bfloat16) if eqx.is_inexact_array(x) else x, model)
