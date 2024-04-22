@@ -1,11 +1,12 @@
 import os
 from functools import partial
-from typing import Callable, List, Tuple
+from typing import Any, Callable, List, Optional, Tuple
 
 import equinox as eqx
 import jax
 import jax.numpy as jnp
 import optax
+import optuna
 from jaxtyping import Array, PRNGKeyArray, PyTree
 from scalax.sharding import MeshShardingHelper
 from scalax.sharding import PartitionSpec as P
@@ -17,7 +18,7 @@ from ReAct.model.baseline import GPT
 from ReAct.model.react import React
 from ReAct.utils.helpers import count_params, load_eqx_obj, save_eqx_obj
 
-from .helpers import broad_to_bsz, calc_performance_metrics, half_precision, xla_calc_flops
+from .helpers import broad_to_bsz, calc_performance_metrics, half_precision
 
 mesh = MeshShardingHelper(axis_dims=[-1], axis_names=['data']) # handle DDP + TP over multi-node
 
@@ -294,7 +295,7 @@ class Trainer:
 
         return accuracy, loss, perplexity
 
-    def train(self):
+    def train(self, trial: Optional[Any] = None) -> Tuple[float, int]:
         step_done = 0
         
         rndm_n, rndm_k = self.get_n_k(key=self.key) # initial n and k
@@ -344,8 +345,15 @@ class Trainer:
                         },
                         step=step
                     )
+                    
+                    if trial is not None:
+                        loss = jnp.nan_to_num(loss, nan=9999.0) # handle NaNs
+                        trial.report(loss, step)
+                        
+                        if trial.should_prune() or jnp.isnan(loss):
+                            raise optuna.exceptions.TrialPruned()
 
-                    # Terminate if loss is NaN
+                    # Terminate training if loss is NaN
                     if jnp.isnan(loss):
                         self.my_logger.warning(f'\nLoss is NaN at step {step}')
                         return loss
@@ -396,7 +404,8 @@ class Trainer:
             print(f'Epoch {epoch} done!')
             step_done = step # prepare for next epoch
 
-        self.wandb_logger.finish()
+        self.wandb_logger.finish() # Cleanup
+        
         return loss
 
     def generate(self, model: eqx.Module, input_arr: Array, metadata: dict, max_new_tokens: int, temperature: float = 0.5):

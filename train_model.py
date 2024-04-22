@@ -4,7 +4,6 @@ import jax
 if platform.processor() != 'arm':
     jax.distributed.initialize() # don't run on apple sillicon
 
-import jax.numpy as jnp
 import optuna
 from jax import config
 from jax.experimental.compilation_cache import compilation_cache
@@ -50,13 +49,20 @@ def main(key: PRNGKeyArray):
         trainloader = train_dataset.create_dataloader('40%')
         valloader = val_dataset.create_dataloader('40%')
 
-        study = optuna.create_study(direction='minimize',
-                                    study_name='ReAct_Jax',
-                                    load_if_exists=True,
-                                    sampler=optuna.samplers.TPESampler(
-                                        seed=69,
-                                        consider_magic_clip=True,
-                                    ))
+        # Create optuna hypertununing study
+        study = optuna.create_study(
+            direction="minimize",
+            load_if_exists=True,
+            sampler=optuna.samplers.TPESampler(
+                seed=69,
+                consider_magic_clip=True,
+                consider_endpoints=True,
+                n_startup_trials=5,
+            ),
+            pruner=optuna.pruners.MedianPruner(
+                n_startup_trials=5, n_warmup_steps=200, n_min_trials=10
+            ),
+        )
 
         wandb_kwargs = {
             "project": "ReAct_Jax",
@@ -79,7 +85,14 @@ def main(key: PRNGKeyArray):
             as_multirun=True
         )
 
-        study.optimize(lambda trial: kickoff_optuna(trial=trial, **trainer_kwargs), n_trials=50, callbacks=[wandbc])
+        study.optimize(
+            lambda trial: kickoff_optuna(trial=trial, **trainer_kwargs),
+            n_trials=50,
+            callbacks=[wandbc]
+        )
+        
+        print(f"Best trial: {study.best_trial}")
+        print(f'\nValue: {study.best_trial.value}\nParams: {study.best_trial.params}\n')
 
     else:
         trainloader = train_dataset.create_dataloader()
@@ -106,7 +119,7 @@ def kickoff_optuna(trial, **trainer_kwargs):
     args.epochs = 1
 
     args.lr = trial.suggest_float('lr', 1e-4, 1e-2)
-    args.drop_rate = trial.suggest_float('drop_rate', 0.0, 0.2)
+    args.drop_rate = trial.suggest_float('drop_rate', 0.0, 0.1)
     args.weight_decay = trial.suggest_float('weight_decay', 1e-5, 1e-3)
     args.warmup_steps = trial.suggest_int('warmup_steps', 0, 500, step=50)
 
@@ -124,9 +137,9 @@ def kickoff_optuna(trial, **trainer_kwargs):
     my_logger.info(f"Host id: {jax.process_index()}")
 
     with jax.spmd_mode('allow_all'):
-        loss = trainer.train()
-
-    return jnp.nan_to_num(loss, nan=9999.0) # return the loss
+        loss = trainer.train(trial)
+    
+    return loss
 
 if __name__ == '__main__':
     compilation_cache.initialize_cache('./compilation_cache')
