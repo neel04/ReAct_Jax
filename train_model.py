@@ -46,21 +46,15 @@ def main(key: PRNGKeyArray):
     if args.tune_hyperparams:
         args.group = 'Sweeps' if args.baseline else 'Sweeps_5i'
         
-        trainloader = train_dataset.create_dataloader()
-        valloader = val_dataset.create_dataloader()
+        trainloader = train_dataset.create_dataloader('50%')
+        valloader = val_dataset.create_dataloader('50%')
 
         # Create optuna hypertununing study
         study = optuna.create_study(
             direction="maximize",
-            load_if_exists=True,
-            sampler=optuna.samplers.TPESampler(
-                seed=69,
-                consider_magic_clip=True,
-                consider_endpoints=True,
-                n_startup_trials=5,
-            ),
+            sampler=optuna.samplers.BruteForceSampler(),
             pruner=optuna.pruners.MedianPruner(
-                n_startup_trials=5, n_warmup_steps=300, n_min_trials=10
+                n_startup_trials=5, n_warmup_steps=250, n_min_trials=10
             ),
         )
 
@@ -80,7 +74,7 @@ def main(key: PRNGKeyArray):
         }
 
         wandbc = WeightsAndBiasesCallback(
-            metric_name='Train/loss',
+            metric_name='Train/acc',
             wandb_kwargs=wandb_kwargs,
             as_multirun=True
         )
@@ -118,10 +112,10 @@ def kickoff_optuna(trial, **trainer_kwargs):
 
     args.epochs = 1
 
-    args.lr = trial.suggest_float('lr', 1e-4, 1e-2)
-    args.drop_rate = trial.suggest_float('drop_rate', 0.0, 0.1)
-    args.weight_decay = trial.suggest_float('weight_decay', 1e-5, 1e-3)
-    args.warmup_steps = trial.suggest_int('warmup_steps', 0, 500, step=50)
+    args.lr = trial.suggest_float('lr', 1e-4, 1e-3, step=1e-4)
+    args.drop_rate = trial.suggest_float('drop_rate', 0.0, 0.1, step=0.02)
+    args.weight_decay = trial.suggest_float('weight_decay', 1e-5, 1e-3, step=2e-4)
+    args.warmup_steps = trial.suggest_int('warmup_steps', 0, 500, step=100)
 
     args = trainer_kwargs['args']
 
