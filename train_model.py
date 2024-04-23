@@ -46,8 +46,8 @@ def main(key: PRNGKeyArray):
     if args.tune_hyperparams:
         args.group = 'Sweeps' if args.baseline else 'Sweeps_5i'
         
-        trainloader = train_dataset.create_dataloader('50%')
-        valloader = val_dataset.create_dataloader('50%')
+        trainloader = train_dataset.create_dataloader()
+        valloader = val_dataset.create_dataloader()
 
         # Create optuna hypertununing study
         study = optuna.create_study(
