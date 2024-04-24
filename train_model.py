@@ -46,15 +46,21 @@ def main(key: PRNGKeyArray):
     if args.tune_hyperparams:
         args.group = 'Sweeps' if args.baseline else 'Sweeps_5i'
         
-        trainloader = train_dataset.create_dataloader('50%')
-        valloader = val_dataset.create_dataloader('50%')
+        trainloader = train_dataset.create_dataloader('40%')
+        valloader = val_dataset.create_dataloader('40%')
 
         # Create optuna hypertununing study
         study = optuna.create_study(
-            direction="maximize",
-            sampler=optuna.samplers.BruteForceSampler(),
+            direction="minimize",
+            load_if_exists=True,
+            sampler=optuna.samplers.TPESampler(
+                seed=69,
+                consider_magic_clip=True,
+                consider_endpoints=True,
+                n_startup_trials=5,
+            ),
             pruner=optuna.pruners.MedianPruner(
-                n_startup_trials=5, n_warmup_steps=250, n_min_trials=10
+                n_startup_trials=5, n_warmup_steps=200, n_min_trials=10
             ),
         )
 
@@ -81,9 +87,12 @@ def main(key: PRNGKeyArray):
 
         study.optimize(
             lambda trial: kickoff_optuna(trial=trial, **trainer_kwargs),
-            n_trials=100,
+            n_trials=50,
             callbacks=[wandbc]
         )
+        
+        fig = optuna.visualization.plot_optimization_history(study)
+        fig.write_html("optuna_plot.html")
         
         print(f"Best trial: {study.best_trial}")
         print(f'\nValue: {study.best_trial.value}\nParams: {study.best_trial.params}\n')
@@ -132,6 +141,8 @@ def kickoff_optuna(trial, **trainer_kwargs):
 
     with jax.spmd_mode('allow_all'):
         loss = trainer.train(trial)
+    
+    trial.report(loss, 1)
     
     return loss
 

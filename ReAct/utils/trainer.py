@@ -346,12 +346,8 @@ class Trainer:
                         step=step
                     )
                     
-                    if trial is not None:
-                        loss = jnp.nan_to_num(loss, nan=9999.0) # handle NaNs
-                        trial.report(sum(train_acc) / len(train_acc), step)
-                        
-                        if trial.should_prune() or jnp.isnan(loss):
-                            raise optuna.exceptions.TrialPruned()
+                    if trial is not None and (trial.should_prune() or jnp.isnan(loss)):
+                        raise optuna.exceptions.TrialPruned()
 
                     # Terminate training if loss is NaN
                     if jnp.isnan(loss):
