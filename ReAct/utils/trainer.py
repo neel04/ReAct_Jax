@@ -397,9 +397,10 @@ class Trainer:
                     self.my_logger.info(f'Model saved at {filepath}')
                     self.wandb_logger.save(filepath)
 
-            print(f'Epoch {epoch} done!')
-            trial.report(train_acc, epoch) # report the accuracy for optuna
             step_done = step # prepare for next epoch
+            trial.report(loss, epoch) # report the loss for optuna
+            
+            print(f'Epoch {epoch} done!')
 
         self.wandb_logger.finish() # Cleanup
         

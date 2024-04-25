@@ -61,3 +61,9 @@ If you get errors regarding workers not being able to sync up at the distributed
 ```bash
 gcloud compute tpus tpu-vm ssh --zone "us-central2-b" $INSTANCE_NAME --worker 'all' --project "react-jax" --command 'sudo docker system prune -f && sudo rm -rf ~/.cache;'
 ```
+
+If Docker is unresponsive, just restart docker service:
+
+```bash
+gcloud compute tpus tpu-vm ssh --zone "us-central2-b" $INSTANCE_NAME --worker 'all' --project "react-jax" --command 'sudo systemctl restart docker'
+```
