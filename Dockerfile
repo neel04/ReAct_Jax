@@ -19,7 +19,7 @@ RUN pip3 install numpy pandas scipy
 
 RUN pip3 install -U -q jax[tpu] -f https://storage.googleapis.com/jax-releases/libtpu_releases.html
 RUN pip3 install -q transformers datasets scalax tokenizers icecream wandb einops torch tqdm jaxtyping optax optuna equinox rich
-RUN pip3 install tensorboard-plugin-profile comet-ml optuna-integration
+RUN pip3 install tensorboard-plugin-profile comet-ml optuna-integration plotly
 
 WORKDIR /ReAct_Jax
 

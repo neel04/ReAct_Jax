@@ -46,8 +46,8 @@ def main(key: PRNGKeyArray):
     if args.tune_hyperparams:
         args.group = 'Sweeps' if args.baseline else 'Sweeps_5i'
         
-        trainloader = train_dataset.create_dataloader('40%')
-        valloader = val_dataset.create_dataloader('40%')
+        trainloader = train_dataset.create_dataloader('20%')
+        valloader = val_dataset.create_dataloader('20%')
 
         # Create optuna hypertununing study
         study = optuna.create_study(
@@ -119,7 +119,7 @@ def main(key: PRNGKeyArray):
 def kickoff_optuna(trial, **trainer_kwargs):
     args = trainer_kwargs['args']
 
-    args.epochs = 1
+    args.epochs = 2
 
     args.lr = trial.suggest_float('lr', 1e-4, 1e-3, step=1e-4)
     args.drop_rate = trial.suggest_float('drop_rate', 0.0, 0.1, step=0.02)
@@ -141,8 +141,6 @@ def kickoff_optuna(trial, **trainer_kwargs):
 
     with jax.spmd_mode('allow_all'):
         loss = trainer.train(trial)
-    
-    trial.report(loss, 1)
     
     return loss
 
