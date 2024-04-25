@@ -42,6 +42,11 @@ def main(key: PRNGKeyArray):
     val_dataset = dataset(split='test', max_length=args.seqlen, bsz=args.batch_size)
 
     # ========= Training/Hypertuning =========
+    init_hyperparams = [
+        {"lr": 1e-3, "drop_rate": 0.01, "weight_decay": 8e-4, "warmup_steps": 100},
+        {"lr": 7e-3, "drop_rate": 0.01, "weight_decay": 2e-3, "warmup_steps": 0},
+        {"lr": 9e-3, "drop_rate": 0.02, "weight_decay": 4e-3, "warmup_steps": 0},
+    ]
 
     if args.tune_hyperparams:
         args.group = 'Sweeps' if args.baseline else 'Sweeps_5i'
@@ -85,6 +90,9 @@ def main(key: PRNGKeyArray):
             as_multirun=True
         )
 
+        # enqueue a few handpicked hyperparams for trials
+        _: None = [study.enqueue_trial(hyperparams) for hyperparams in init_hyperparams]
+
         study.optimize(
             lambda trial: kickoff_optuna(trial=trial, **trainer_kwargs),
             n_trials=50,
@@ -121,8 +129,8 @@ def kickoff_optuna(trial, **trainer_kwargs):
 
     args.epochs = 2
 
-    args.lr = trial.suggest_float('lr', 1e-4, 1e-3, step=1e-4)
-    args.drop_rate = trial.suggest_float('drop_rate', 0.0, 0.1, step=0.02)
+    args.lr = trial.suggest_float('lr', 1e-4, 1e-2, step=1e-4)
+    args.drop_rate = trial.suggest_float('drop_rate', 0.0, 0.1, step=0.01)
     args.weight_decay = trial.suggest_float('weight_decay', 1e-5, 1e-3, step=2e-4)
     args.warmup_steps = trial.suggest_int('warmup_steps', 0, 500, step=100)
 
