@@ -50,9 +50,9 @@ def main(key: PRNGKeyArray):
 
     if args.tune_hyperparams:
         args.group = 'Sweeps' if args.baseline else 'Sweeps_5i'
-        
-        trainloader = train_dataset.create_dataloader('20%')
-        valloader = val_dataset.create_dataloader('20%')
+
+        trainloader = train_dataset.create_dataloader("40%")
+        valloader = val_dataset.create_dataloader("40%")
 
         # Create optuna hypertununing study
         study = optuna.create_study(
@@ -96,9 +96,9 @@ def main(key: PRNGKeyArray):
         study.optimize(
             lambda trial: kickoff_optuna(trial=trial, **trainer_kwargs),
             n_trials=50,
-            callbacks=[wandbc]
+            callbacks=[wandbc],
         )
-        
+
         fig = optuna.visualization.plot_optimization_history(study)
         fig.write_html("optuna_plot.html")
         
@@ -109,13 +109,16 @@ def main(key: PRNGKeyArray):
         trainloader = train_dataset.create_dataloader()
         valloader = val_dataset.create_dataloader()
 
-        logger = UnifiedLogger(args, level='DEBUG')
+        logger = UnifiedLogger(args, level="DEBUG")
         my_logger, wandb_logger = logger.my_logger(), logger.wandb_logger(args)
 
-        trainer = Trainer(args, logger=(my_logger, wandb_logger),
-                            loaders=(trainloader, valloader),
-                            decode_fn=train_dataset.tok.decode,
-                            key=key)
+        trainer = Trainer(
+            args,
+            logger=(my_logger, wandb_logger),
+            loaders=(trainloader, valloader),
+            decode_fn=train_dataset.tok.decode,
+            key=key,
+        )
 
         my_logger.info(f"# of all devices: {jax.device_count()}")
         my_logger.info(f"# of hosts: {jax.process_count()}")
@@ -127,7 +130,7 @@ def main(key: PRNGKeyArray):
 def kickoff_optuna(trial, **trainer_kwargs):
     args = trainer_kwargs['args']
 
-    args.epochs = 2
+    args.epochs = 1
 
     args.lr = trial.suggest_float('lr', 1e-4, 1e-2, step=1e-4)
     args.drop_rate = trial.suggest_float('drop_rate', 0.0, 0.1, step=0.01)
