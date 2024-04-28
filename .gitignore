@@ -167,3 +167,4 @@ cython_debug/
 *.wandb
 *.eqx
 *cached_data
+*pyrightconfig.json

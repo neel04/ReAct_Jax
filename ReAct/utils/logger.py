@@ -40,16 +40,16 @@ class UnifiedLogger:
         if args.resume:
             # args.resume is of the form: "neel/ReAct_Jax/lxxn0x54 + 20"
             # we want to extract the run id, i.e "lxxn0x54"
-            id = args.resume.split("+")[0].split("/")[-1].strip()
+            wandb_id = args.resume.split("+")[0].split("/")[-1].strip()
         else:
-            id = None
+            wandb_id = None
 
         wandb.init(project='ReAct_Jax',
                    config=args,
                    group=args.group,
                    mode='online' if jax.process_index() == 0 and args.exp_logging else 'offline',
                    resume='allow',
-                   id=id,
+                   id=wandb_id,
                    reinit=True)
 
         wandb.run.log_code(

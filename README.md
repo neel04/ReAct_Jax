@@ -25,7 +25,7 @@ python3 inferencer.py --checkpoint_path '/Users/neel/Documents/research/ReAct_Ja
 First, get a preemptible TPUv4-8 node as a queued resource:
 
 ```bash
-gcloud alpha compute tpus queued-resources create node-v4 \
+gcloud alpha compute tpus queued-resources create $INSTANCE_NAME \
 --node-id node-v4 \
 --project react-jax \
 --zone us-central2-b \
@@ -38,7 +38,7 @@ gcloud alpha compute tpus queued-resources create node-v4 \
 Setup the TPU pod slice with basics:
 
 ```bash
-gcloud compute tpus tpu-vm ssh node-v4 \
+gcloud compute tpus tpu-vm ssh $INSTANCE_NAME \
 --zone=us-central2-b --worker=all --command="\
     sudo apt-get update; \
     sudo snap install nvim --classic; \
@@ -49,7 +49,7 @@ gcloud compute tpus tpu-vm ssh node-v4 \
 And then actually kickoff the training by downloading the script and running it:
 
 ```bash
-gcloud compute tpus tpu-vm ssh node-v4 \
+gcloud compute tpus tpu-vm ssh $INSTANCE_NAME \
 --zone=us-central2-b --worker=all --command="\
     tmux kill-server; sudo rm -rf ./*; \
     sleep 3s && wget https://gist.githubusercontent.com/neel04/3bfc7e4d9cd746829b7e72f1b6fac5de/raw/run.sh; \
@@ -59,7 +59,11 @@ gcloud compute tpus tpu-vm ssh node-v4 \
 If you get errors regarding workers not being able to sync up at the distributed barrier, do:
 
 ```bash
-gcloud compute tpus tpu-vm ssh --zone "us-central2-b" "ondem" \
---project "react-jax"  \ 
---command 'sudo docker system prune -f && sudo rm -rf ~/.cache;'
+gcloud compute tpus tpu-vm ssh --zone "us-central2-b" $INSTANCE_NAME --worker 'all' --project "react-jax" --command 'sudo docker system prune -f && sudo rm -rf ~/.cache;'
+```
+
+If Docker is unresponsive, just restart docker service:
+
+```bash
+gcloud compute tpus tpu-vm ssh --zone "us-central2-b" $INSTANCE_NAME --worker 'all' --project "react-jax" --command 'sudo systemctl restart docker'
 ```

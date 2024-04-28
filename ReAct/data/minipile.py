@@ -4,7 +4,6 @@ from typing import Dict, List
 
 import datasets
 import jax
-import jax.numpy as jnp
 import numpy as np
 from datasets import load_dataset, load_from_disk
 from jaxtyping import Array
@@ -15,6 +14,7 @@ class MiniPileDataset:
     def __init__(self, split: str = 'train', max_length: int = 512, bsz: int = 256, vocab_dir: str ='./ReAct/data'):    
         datasets.config.IN_MEMORY_MAX_SIZE = 1e+11
         
+        self.cpus = jax.devices("cpu")
         self.bsz = bsz
         self.max_length = max_length + 1
         self.split = split
@@ -93,12 +93,6 @@ class MiniPileDataset:
         
         return dataset
 
-    def numpify(self, dataset: datasets.Dataset) -> datasets.Dataset:
-        '''
-        Convert the dataset to numpy arrays
-        '''
-        return jax.tree_map(lambda x: jnp.asarray(x), dataset['text'])
-    
     def create_dataloader(self, slice: str = '100%'):
         data_path = Path(f'./cached_data/minipile_{self.split}.data')
         
@@ -110,13 +104,13 @@ class MiniPileDataset:
             
             dataset.set_format(type='numpy')
             
-            return self.numpify(dataset)
+            return dataset
         
         except (FileNotFoundError, ValueError):
             if os.path.exists(data_path):
                 print(f'Loading dataset from {data_path}...')
                 dataset = self.load_data(data_path)
-                return self.numpify(dataset)
+                return dataset
             else:
                 print(f'Building dataset from scratch... [split: {self.split}] | [bsz: {self.bsz}]')
                 
@@ -139,4 +133,4 @@ class MiniPileDataset:
                 self.upload_dataset(dataset,
                                     hub_path=f'Neel-Gupta/minipile-processed_{self.bsz}') # upload the processed dataset to the Hub
                 
-                return self.numpify(dataset)
+                return dataset

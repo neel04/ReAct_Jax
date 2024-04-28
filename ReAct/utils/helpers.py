@@ -1,11 +1,61 @@
+import math
 import os
+from typing import Callable, Optional, Tuple
+
 import equinox as eqx
 import jax
 import jax.numpy as jnp
-
 from jax import tree_util as jtu
 from jaxtyping import Array, PRNGKeyArray
-from typing import Optional
+
+def convert_flops(params: int) -> str:
+    if params == 0:
+        return "0"
+    
+    size_name = ("", "KFLOPs", "MFLOPs", "GFLOPs", "TFLOPs", "PFLOPs", "EFLOPs", "ZFLOPs", "YFLOPs")
+    i = int(math.floor(math.log(params, 1000)))
+    p = math.pow(1000, i)
+    s = round(params / p, 2)
+    
+    return "%s %s" % (s, size_name[i])
+
+def calc_performance_metrics(args, my_logger: Callable) -> None:
+    '''
+    Estimates FLOPs consumed during a single fwd + bwd pass.
+    Taken from EleutherAI's GPT-NeoX repo: https://rb.gy/33d6zg
+    
+    Returns: the total number of FLOPs
+    '''
+    iter_factor = 3
+    args.tokens = args.batch_size * args.seqlen
+    args.kv_size_ratio = 1
+    
+    my_logger.warning('! Ignoring activation checkpointing in FLOPs calculation !')
+        
+    qkv_flops = int(iter_factor * 2 * (1 + 2 * args.kv_size_ratio) * args.num_blocks * args.tokens * args.width * args.width)
+    attention_matrix_flops = iter_factor * 2 * args.num_blocks * args.tokens * args.seqlen * args.width
+    attention_over_values_flops = iter_factor * 2 * args.num_blocks * args.tokens * args.seqlen * args.width
+    linear_projection_flops = iter_factor * 2 * args.num_blocks * args.tokens * args.width * args.width
+    ffn_flops = iter_factor * 16 * args.num_blocks * args.tokens * args.width * args.width
+    
+    # handle NewGELU
+    ffn_flops *= 3.75
+    
+    embedding_flops = 6 * args.tokens * args.width * args.num_classes
+    total_flops = qkv_flops + attention_matrix_flops + attention_over_values_flops + linear_projection_flops + ffn_flops + embedding_flops
+    my_logger.info(f"Total FLOPs for the Model: {convert_flops(total_flops)} for a single fwd + bwd pass\n")
+    
+    
+def xla_calc_flops(fn: Callable, static_argnums: Tuple[int], args: Tuple, my_logger: Callable) -> None:
+    '''
+    Estimates FLOPs consumed during `fn` execution.
+    Use's XLA HLO analysis to estimate FLOPs.
+    
+    Returns: the total number of FLOPs
+    '''
+    compiled = jax.jit(fn, static_argnums=static_argnums).lower(*args).compile()
+    flops = compiled.cost_analysis()[0]['flops']
+    my_logger.info(f"XLA estimate of Total FLOPs for {fn.__name__}: {convert_flops(int(flops))}\n")
     
 def half_precision(model: eqx.Module) -> eqx.Module:
     return jtu.tree_map(lambda x: x.astype(jnp.bfloat16) if eqx.is_inexact_array(x) else x, model)
@@ -60,14 +110,3 @@ def inverted_freq(arr: Array):
     inv_weights = (counts.max() / counts) # scale it down
     
     return inv_weights[arr - arr.min()]
-
-if __name__ == '__main__':
-    import plotly.express as px
-    import pandas as pd
-    
-    key = jax.random.PRNGKey(0)
-    out: Array = get_rand_nums(key, 1, 10, 512, 4)
-    elems, counts = jnp.unique(out, return_counts=True)
-    df = pd.DataFrame({'elems': elems, 'counts': counts})
-    fig = px.bar(df, x='elems', y='counts')
-    fig.show()

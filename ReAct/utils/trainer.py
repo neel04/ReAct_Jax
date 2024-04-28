@@ -1,13 +1,15 @@
 import os
 from functools import partial
-from typing import Callable, List, Tuple
+from typing import Any, Callable, List, Optional, Tuple
 
 import equinox as eqx
 import jax
 import jax.numpy as jnp
 import optax
+import optuna
 from jaxtyping import Array, PRNGKeyArray, PyTree
-from scalax.sharding import MeshShardingHelper, PartitionSpec as P
+from scalax.sharding import MeshShardingHelper
+from scalax.sharding import PartitionSpec as P
 from torch.utils.data import DataLoader
 from tqdm.auto import tqdm
 
@@ -16,7 +18,7 @@ from ReAct.model.baseline import GPT
 from ReAct.model.react import React
 from ReAct.utils.helpers import count_params, load_eqx_obj, save_eqx_obj
 
-from .helpers import broad_to_bsz, half_precision
+from .helpers import broad_to_bsz, calc_performance_metrics, half_precision
 
 mesh = MeshShardingHelper(axis_dims=[-1], axis_names=['data']) # handle DDP + TP over multi-node
 
@@ -95,12 +97,12 @@ def make_step(model: eqx.Module,
 
     @eqx.filter_value_and_grad
     def compute_loss(model: eqx.Module, static_model: PyTree, x: Array, y: Array, pad_mask: Array,
-                    n: int, k: int, num_classes: int, keys: PRNGKeyArray = None) -> Tuple[int, PyTree]:
+                    n: int, k: int, num_classes: int, keys: PRNGKeyArray) -> int:
         '''
-        Computes the loss of the model w.r.t the input. Is a closure for accessing static_model 
+        Computes the loss of the model w.r.t the input. Is a closure for accessing static_model
         '''
         model = eqx.combine(model, static_model)
-        
+
         if model.__name__ == 'ReAct':
             forward = iters_fwd
         else:
@@ -114,7 +116,7 @@ def make_step(model: eqx.Module,
 
     diff_model, static_model = eqx.partition(model, filter_spec,
                                              is_leaf=lambda x: isinstance(x, eqx.nn.Dropout))
-    
+
     loss, grads = compute_loss(diff_model, static_model, x, y, pad_mask, n, k, num_classes, keys)
     updates, opt_state = optim.update(grads, opt_state, model)
     model = eqx.apply_updates(model, updates)
@@ -133,16 +135,18 @@ class Trainer:
         self.args = args
         self.key = key
 
-        # unpacking the loaders & loggers
         self.my_logger, self.wandb_logger = logger
         self.trainloader, self.valloader = loaders
         self.dataset_length = len(self.trainloader) * args.batch_size * args.seqlen
+
+        self.text_table = wandb.Table(
+            columns=["Step", "Prompt", "Model Generation", "Type"]
+        )
         
-        self.my_logger.info(f'Using Args: {self.args}\n')
+        self.my_logger.info(f"Using Args: {self.args}\n")
 
         # Assign each arg as a class attribute
-        for k, v in vars(self.args).items():
-                setattr(self, k, v)
+        self.__dict__.update(vars(self.args))
 
     def get_n_k(self, key: PRNGKeyArray) -> Tuple[Array, Array]:
         n_key, k_key = jax.random.split(key, 2)
@@ -162,10 +166,8 @@ class Trainer:
         metric = []
 
         for step, batch in tqdm(enumerate(loader), total=len(loader), desc='Validating'):
-            seq, label, pad_mask = batch
-
+            seq, label, pad_mask = jnp.asarray(batch['text'])
             acc, loss, ppl = self.compute_metrics(model, seq, label, pad_mask, eval_iters, self.num_classes, keys)
-
             metric.extend([acc, loss, ppl])
 
         # Compute cumulatives
@@ -202,7 +204,7 @@ class Trainer:
         '''
         Returns a filter spec for the model to filter out the trainable parameters.
         Can be used to freeze or unfreeze certain modules of the model depending on the step and epoch.
-        
+
         Args:
             model: The model to filter
         Returns:
@@ -213,9 +215,9 @@ class Trainer:
             lambda tree: tree.pos_enc, # pos_enc should be frozen
             filter_spec,
             replace=False)
-        
+
         return filter_spec
-    
+
     def init_model(self, key: PRNGKeyArray):
 
         if self.baseline:
@@ -228,9 +230,11 @@ class Trainer:
         # switch to half precision
         if self.bf16:
             model = half_precision(model)
-            
+
         _, opt_state, model = self.set_optim_and_scheduler(model)
+        
         count_params(model) # prints to stdout
+        calc_performance_metrics(self.args, self.my_logger) # logs via logger
 
         return opt_state, model
 
@@ -291,10 +295,14 @@ class Trainer:
 
         return accuracy, loss, perplexity
 
-    def train(self):
+    def train(self, trial: Optional[Any] = None) -> Tuple[float, int]:
         step_done = 0
+        
+        rndm_n, rndm_k = self.get_n_k(key=self.key) # initial n and k
+        
         opt_state, model = self.init_model(self.key)
         optim, _, _ = self.set_optim_and_scheduler(model)
+        filter_spec = self.get_filterspec(model)
 
         if self.resume:
             model, opt_state, epoch_done = self.resume_training(model, opt_state)
@@ -302,10 +310,7 @@ class Trainer:
             epoch_done = 0
 
         print(f'Model: {model}')
-
-        rndm_n, rndm_k = self.get_n_k(key=self.key) # initial n and k
-        filter_spec = self.get_filterspec(model)
-
+        
         for epoch in range(epoch_done, self.epochs):
             # init empty metrics
             epoch_key = jnp.array([epoch, epoch + 1]).astype(jnp.uint32)
@@ -315,17 +320,16 @@ class Trainer:
             
             for step, batch in tqdm(enumerate(self.trainloader), total=len(self.trainloader), desc=f'Epoch {epoch}'):
                 step += step_done # for multiple epochs
-                
-                seq, label, pad_mask = batch
-                
+
+                seq, label, pad_mask = jnp.asarray(batch['text'])
+
                 loss, model, opt_state = make_step(model, opt_state, filter_spec, seq, label, pad_mask,
                                                    rndm_n, rndm_k, optim, self.num_classes, keys)
 
-                if step % 75 == 0:
-                    # cycling through keys to get new n and k
+                if step % 100 == 0:
                     #rndm_n, rndm_k = self.get_n_k(key=keys[step % self.batch_size])
                     
-                    accuracy, loss, perplexity = self.compute_metrics(model, seq, label, pad_mask, 
+                    accuracy, loss, perplexity = self.compute_metrics(model, seq, label, pad_mask,
                                                                       self.max_iters, self.num_classes, keys)
 
                     train_acc.append(accuracy)
@@ -337,12 +341,15 @@ class Trainer:
                     self.wandb_logger.log(
                         {
                             'Train/loss': loss,
-                            'Train/Lr': self.schedule_fn(epoch + 1 * step).item(),
+                            'Train/Lr': self.schedule_fn(epoch + 1 * step).item()
                         },
                         step=step
                     )
+                    
+                    if trial is not None and (trial.should_prune() or jnp.isnan(loss)):
+                        raise optuna.exceptions.TrialPruned()
 
-                    # Terminate if loss is NaN
+                    # Terminate training if loss is NaN
                     if jnp.isnan(loss):
                         self.my_logger.warning(f'\nLoss is NaN at step {step}')
                         return loss
@@ -390,10 +397,13 @@ class Trainer:
                     self.my_logger.info(f'Model saved at {filepath}')
                     self.wandb_logger.save(filepath)
 
-            print(f'Epoch {epoch} done!')
             step_done = step # prepare for next epoch
+            trial.report(loss, epoch) # report the loss for optuna
+            
+            print(f'Epoch {epoch} done!')
 
-        self.wandb_logger.finish()
+        self.wandb_logger.finish() # Cleanup
+        
         return loss
 
     def generate(self, model: eqx.Module, input_arr: Array, metadata: dict, max_new_tokens: int, temperature: float = 0.5):
@@ -404,7 +414,6 @@ class Trainer:
         key = jax.random.PRNGKey(0)
         inference_model = eqx.nn.inference_mode(model)
 
-        text_table = wandb.Table(columns=["Step", "Prompt", "Model Generation", "Type"])
         prompt = f'Prompt: {self.decode_fn(input_arr)}'
 
         for _ in range(max_new_tokens):
@@ -435,7 +444,7 @@ class Trainer:
         self.my_logger.info(model_gen)
 
         # log to logger as a table
-        text_table.add_data(metadata['step'], prompt, model_gen, metadata['type'])
-        self.wandb_logger.log({'Generated Samples': text_table})
+        self.text_table.add_data(metadata["step"], prompt, model_gen, metadata["type"])
+        self.wandb_logger.log({"Generated Samples": self.text_table})
 
         return input_arr
