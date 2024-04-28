@@ -15,7 +15,7 @@ TRAIN_ARGS="--save_dir ./ReAct/outputs/ --dataset 'minipile' --group 'minipile' 
 # Stop all running Docker containers
 echo "Stopping all running Docker containers..."
 
-if ! timeout 300 sudo docker rm -f $CONTAINER_NAME; then
+if ! sudo sh -c "timeout 150s docker rm -f $CONTAINER_NAME"; then
     echo "Command timed out. Restarting Docker daemon & retrying..."
     sudo systemctl restart docker
     sleep 10s; sudo docker rm -f $CONTAINER_NAME

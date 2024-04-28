@@ -398,7 +398,7 @@ class Trainer:
                     self.wandb_logger.save(filepath)
 
             step_done = step # prepare for next epoch
-            trial.report(loss, epoch) # report the loss for optuna
+            trial.report(loss, epoch) if trial is not None else ...
             
             print(f'Epoch {epoch} done!')
 
