@@ -91,7 +91,7 @@ def main(key: PRNGKeyArray):
         )
 
         # enqueue a few handpicked hyperparams for trials
-        _: None = [study.enqueue_trial(hyperparams) for hyperparams in init_hyperparams]
+        [study.enqueue_trial(hyperparams) for hyperparams in init_hyperparams]
 
         study.optimize(
             lambda trial: kickoff_optuna(trial=trial, **trainer_kwargs),
