@@ -1,3 +1,4 @@
+from functools import partial
 from typing import Optional, Tuple, Union
 
 import equinox as eqx
@@ -5,7 +6,7 @@ import jax
 import jax.numpy as jnp
 from jaxtyping import Array, PRNGKeyArray, PyTree
 
-from .blocks import AttentionBlock, LinearProj, LiteAttention, MLP
+from .blocks import MLP, AttentionBlock, LinearProj, LiteAttention
 
 class RecurrentModule(eqx.Module):
     '''
@@ -121,7 +122,7 @@ class React(eqx.Module):
 
         return pe
 
-    @eqx.filter_jit
+    @partial(jax.jit, static_argnums=(4, 5, 6))
     def iterate_for_steps(self,
                           interim_thought: Array,
                           input_arr: Array,
@@ -145,7 +146,7 @@ class React(eqx.Module):
             return (latent, ctx_state), ctx_state
 
         final_val, history = eqx.internal.scan(
-            f=body_fun, init=(interim_thought, input_arr), xs=jnp.arange(5), kind="checkpointed"
+            f=body_fun, init=(interim_thought, input_arr), xs=jnp.arange(iters_to_do), kind="checkpointed"
         )
 
         return final_val[0]

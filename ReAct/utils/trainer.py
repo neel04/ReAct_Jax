@@ -49,10 +49,10 @@ def n_k_loop(model: eqx.Module, input_arr: Array, pad_mask: Array, n: Array, k: 
     return output
 
 @eqx.filter_jit
-def iters_fwd(model: eqx.Module, input_arr: Array, pad_mask: Array, n: int, k: int, key: PRNGKeyArray) -> Array:
+def iters_fwd(model: eqx.Module, input_arr: Array, pad_mask: Array, iters_to_do: int, key: PRNGKeyArray) -> Array:
     # Only n passes, but track the gradient
     output, _ = model(input_arr,
-                      iters_to_do=5,
+                      iters_to_do=iters_to_do,
                       pad_mask=pad_mask,
                       prev_thought=False,
                       is_training=True,
@@ -61,27 +61,25 @@ def iters_fwd(model: eqx.Module, input_arr: Array, pad_mask: Array, n: int, k: i
     return output
 
 @eqx.filter_jit
-def vanilla_fwd(model: eqx.Module, input_arr: Array, pad_mask: Array, n: int, k: int, key: PRNGKeyArray) -> Array:
+def vanilla_fwd(model: eqx.Module, input_arr: Array, pad_mask: Array, iters_to_do: int, key: PRNGKeyArray) -> Array:
     return model(input_arr, pad_mask, enable_dropout=True, key=key)
 
 @eqx.filter_jit
 def _compute_softmax_cross_entropy_loss(pred_y: Array, y_one_hot: Array,
-                                        pad_mask: Array, n: Array, k: Array) -> Array:
+                                        pad_mask: Array, iters_to_do: int) -> Array:
 
     loss = -jnp.sum(jax.nn.log_softmax(pred_y, axis=-1) * y_one_hot, axis=-1)
 
-    k = jnp.repeat(k[:, None], loss.shape[1], axis=-1)
-
-    loss = (loss * k).sum(-1) # across the sequence
+    loss = loss.sum(-1) # across the sequence
 
     return loss.mean() # across all the batches
 
 @partial(
     mesh.sjit,
-    in_shardings=(None, None, P('data'), P('data'), P('data')) + (None,) * 3,
-    args_sharding_constraint=(None, None, P('data'), P('data'), P('data')) + (None,) * 3,
+    in_shardings=(None, None, P('data'), P('data'), P('data'), None),
+    args_sharding_constraint=(None, None, P('data'), P('data'), P('data'), None),
     out_shardings=None,
-    static_argnums=(2, 8, 9)
+    static_argnums=(2, 6, 7, 8)
 )
 def make_step(model: eqx.Module,
               opt_state: Tuple[PyTree],
@@ -89,15 +87,14 @@ def make_step(model: eqx.Module,
               x: Array,
               y: Array,
               pad_mask: Array,
-              n: Array,
-              k: Array,
+              iters_to_do: int, # static
               optim: Callable, # static
               num_classes: int, # static
               keys: List[PRNGKeyArray]):
 
     @eqx.filter_value_and_grad
     def compute_loss(model: eqx.Module, static_model: PyTree, x: Array, y: Array, pad_mask: Array,
-                    n: int, k: int, num_classes: int, keys: PRNGKeyArray) -> int:
+                    iters_to_do: int, num_classes: int, keys: PRNGKeyArray) -> int:
         '''
         Computes the loss of the model w.r.t the input. Is a closure for accessing static_model
         '''
@@ -108,16 +105,16 @@ def make_step(model: eqx.Module,
         else:
             forward = vanilla_fwd
 
-        pred_y = jax.vmap(forward, in_axes=(None, 0, 0, 0, 0, 0))(model, x, pad_mask, n, k, keys) # (batch_size, seqlen, num_classes)
+        pred_y = jax.vmap(forward, in_axes=(None, 0, 0, None, 0))(model, x, pad_mask, iters_to_do, keys) # (batch_size, seqlen, num_classes)
         y_one_hot = jax.nn.one_hot(y, num_classes=num_classes) # (batch_size, seqlen, num_classes)
-        loss = _compute_softmax_cross_entropy_loss(pred_y, y_one_hot, pad_mask, n, k)
+        loss = _compute_softmax_cross_entropy_loss(pred_y, y_one_hot, pad_mask, iters_to_do)
 
         return loss
 
     diff_model, static_model = eqx.partition(model, filter_spec,
                                              is_leaf=lambda x: isinstance(x, eqx.nn.Dropout))
 
-    loss, grads = compute_loss(diff_model, static_model, x, y, pad_mask, n, k, num_classes, keys)
+    loss, grads = compute_loss(diff_model, static_model, x, y, pad_mask, iters_to_do, num_classes, keys)
     updates, opt_state = optim.update(grads, opt_state, model)
     model = eqx.apply_updates(model, updates)
 
@@ -274,13 +271,12 @@ class Trainer:
         '''
         Computes the accuracy, perplexity, loss of the model w.r.t batch
         '''
-        eval_iters = jnp.ones_like(input_arr[:, 0]) * eval_iters
         keys = keys[:input_arr.shape[0], ...] # take a batch_size sized slice of the keys
 
         if self.baseline:
             pred_y = jax.vmap(model, in_axes=(0, 0, None, 0))(input_arr, pad_mask, False, keys)
         else:
-            pred_y = jax.vmap(model, in_axes=(0, 0, 0, None, None, 0))(input_arr, eval_iters, pad_mask, False, False, keys)[0]
+            pred_y = jax.vmap(model, in_axes=(0, None, 0, None, None, 0))(input_arr, eval_iters, pad_mask, False, False, keys)[0]
 
         # compute accuracy
         y_hat = jax.nn.softmax(pred_y, axis=-1).argmax(-1) * pad_mask
@@ -297,8 +293,6 @@ class Trainer:
 
     def train(self, trial: Optional[Any] = None) -> Tuple[float, int]:
         step_done = 0
-        
-        rndm_n, rndm_k = self.get_n_k(key=self.key) # initial n and k
         
         opt_state, model = self.init_model(self.key)
         optim, _, _ = self.set_optim_and_scheduler(model)
@@ -324,7 +318,7 @@ class Trainer:
                 seq, label, pad_mask = jnp.asarray(batch['text'])
 
                 loss, model, opt_state = make_step(model, opt_state, filter_spec, seq, label, pad_mask,
-                                                   rndm_n, rndm_k, optim, self.num_classes, keys)
+                                                   self.max_iters, optim, self.num_classes, keys)
 
                 if step % 100 == 0:
                     #rndm_n, rndm_k = self.get_n_k(key=keys[step % self.batch_size])
