@@ -34,15 +34,15 @@ class RecurrentModule(eqx.Module):
             seqlen, n_heads, drop_rate, bottleneck, k
         )
 
-        self.reshape_layer = LinearProj(bottleneck * 2, bottleneck, key=key)
-        self.forget_gate = MLP(bottleneck, bottleneck, p=drop_rate, key=key)
-        self.ctx_gate = MLP(bottleneck, bottleneck, p=drop_rate, key=key)
+        self.reshape_layer = MLP(bottleneck * 2, bottleneck, p=0., key=keys[0])
+        self.forget_gate = MLP(bottleneck, bottleneck, p=drop_rate, key=keys[1])
+        self.ctx_gate = MLP(bottleneck, bottleneck, p=drop_rate, key=keys[2])
 
         self.attention_blocks = eqx.filter(eqx.filter_vmap(make_block)(keys), eqx.is_array_like)
     
     def __call__(self,
                  x: Array,
-                 input_arr: Array,
+                 ctx_state: Array,
                  pad_mask: Array,
                  enable_dropout: bool,
                  key: PRNGKeyArray) -> Tuple[Array, Array]:
@@ -51,7 +51,8 @@ class RecurrentModule(eqx.Module):
         dynamic_part, static_part = eqx.partition(self.attention_blocks, eqx.is_array_like,
                                                   is_leaf=lambda x: isinstance(x, eqx.nn.Dropout))
         
-        x = self.reshape_layer(x) # (seqlen, width * 2) -> (seqlen, width)
+        # (seqlen, width * 2) -> (seqlen, width)
+        x = self.reshape_layer(x, enable_dropout, key).astype(jnp.bfloat16)
         
         def f(input_tup: Tuple[Array, int], _dynamic_bl: PyTree) -> Tuple[Tuple[Array, int], None]:
             x, idx = input_tup # i is the iteration index
@@ -59,7 +60,7 @@ class RecurrentModule(eqx.Module):
             block = eqx.combine(_dynamic_bl, static_part) # reconstruct the block
             
             x = jax.lax.cond(idx == 0,
-                             lambda: block(x, input_arr, pad_mask, enable_dropout, keys[idx]),
+                             lambda: block(x, ctx_state, pad_mask, enable_dropout, keys[idx]),
                              lambda: block(x, x, pad_mask, enable_dropout, keys[idx]))
             
             return (x, idx + 1), x
@@ -67,10 +68,10 @@ class RecurrentModule(eqx.Module):
         out, history = eqx.internal.scan(f=f, init=(x, 0), xs=dynamic_part, kind='lax')
         history = history.mean(0)
         
-        input_arr *= jax.nn.sigmoid(self.forget_gate(history, True, key))
-        input_arr += self.ctx_gate(history, True, key)
+        ctx_state *= jax.nn.sigmoid(self.forget_gate(history, True, key))
+        ctx_state += self.ctx_gate(history, True, key)
 
-        return out[0], input_arr
+        return out[0], ctx_state
 
 class React(eqx.Module):
     '''
