@@ -151,7 +151,7 @@ class React(eqx.Module):
             f=body_fun, init=(interim_thought, input_arr), xs=jnp.arange(iters_to_do), kind="checkpointed"
         )
         
-        return self.alpha * final_val[0] + (1 - self.alpha) * history.mean(0)
+        return self.alpha * final_val[0] + (1 - self.alpha) * history.sum(0)
 
     @eqx.filter_jit
     def __call__(self,
