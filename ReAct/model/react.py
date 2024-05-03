@@ -66,7 +66,7 @@ class RecurrentModule(eqx.Module):
 
         out, history = eqx.internal.scan(f=f, init=(x, 0), xs=dynamic_part, kind='lax')
 
-        history = history.sum(0)
+        history = history.mean(0)
         ctx_state *= jax.nn.sigmoid(self.forget_gate(history, enable_dropout, key))
         ctx_state += self.ctx_gate(history, enable_dropout, key)
 
@@ -79,6 +79,7 @@ class React(eqx.Module):
     __name__ = 'ReAct'
 
     max_iters: int = eqx.field(static=True)
+    alpha: float
     
     pos_enc: Array
     embed_layer: eqx.nn.Embedding
@@ -103,6 +104,7 @@ class React(eqx.Module):
         self.pos_enc = jax.lax.stop_gradient(self.positional_encoding(seqlen, width))
 
         self.main_block = RecurrentModule(seqlen, drop_rate, n_heads, num_blocks, width, key=key2)
+        self.alpha = jnp.array([0.5], dtype=jnp.bfloat16)
 
         self.post_ln = eqx.nn.LayerNorm(width)
         self.out_head = LinearProj(width, vocab_size, key=key4)
@@ -143,13 +145,13 @@ class React(eqx.Module):
             latent, ctx_state = self.main_block(latent, ctx_state, mask, enable_dropout, key) # (seqlen, width)
             latent = jax.vmap(self.post_ln)(latent)  # Post-LN for stability 
             
-            return (latent, ctx_state), ctx_state
+            return (latent, ctx_state), latent
 
         final_val, history = eqx.internal.scan(
             f=body_fun, init=(interim_thought, input_arr), xs=jnp.arange(iters_to_do), kind="checkpointed"
         )
-
-        return final_val[0]
+        
+        return self.alpha * final_val[0] + (1 - self.alpha) * history.mean(0)
 
     @eqx.filter_jit
     def __call__(self,
