@@ -79,8 +79,9 @@ class React(eqx.Module):
     __name__ = 'ReAct'
 
     max_iters: int = eqx.field(static=True)
-    alpha: float
     
+    alpha: float
+    weights: Array
     pos_enc: Array
     embed_layer: eqx.nn.Embedding
     main_block: LiteAttention
@@ -105,6 +106,7 @@ class React(eqx.Module):
 
         self.main_block = RecurrentModule(seqlen, drop_rate, n_heads, num_blocks, width, key=key2)
         self.alpha = jnp.array([0.5], dtype=jnp.bfloat16)
+        self.weights = jax.random.normal(key3, (max_iters,), dtype=jnp.bfloat16)
 
         self.post_ln = eqx.nn.LayerNorm(width)
         self.out_head = LinearProj(width, vocab_size, key=key4)
@@ -150,8 +152,10 @@ class React(eqx.Module):
         final_val, history = eqx.internal.scan(
             f=body_fun, init=(interim_thought, input_arr), xs=jnp.arange(iters_to_do), kind="checkpointed"
         )
+
+        history = jnp.einsum('i, i j k -> j k', self.weights[:iters_to_do], history)
         
-        return self.alpha * final_val[0] + (1 - self.alpha) * history.sum(0)
+        return self.alpha * final_val[0] + (1 - self.alpha) * history
 
     @eqx.filter_jit
     def __call__(self,
