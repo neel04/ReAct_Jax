@@ -51,10 +51,9 @@ class RecurrentModule(eqx.Module):
         dynamic_part, static_part = eqx.partition(self.attention_blocks, eqx.is_array_like,
                                                   is_leaf=lambda x: isinstance(x, eqx.nn.Dropout))
         
-        # (seqlen, width * 2) -> (seqlen, width)
-        x = self.reshape_layer(x, enable_dropout, key).astype(jnp.bfloat16)
+        x = self.reshape_layer(x, enable_dropout, key)
         
-        def f(input_tup: Tuple[Array, int], _dynamic_bl: PyTree) -> Tuple[Tuple[Array, int], None]:
+        def f(input_tup: Tuple[Array, int], _dynamic_bl: PyTree) -> Tuple[Tuple[Array, int], Array]:
             x, idx = input_tup # i is the iteration index
             
             block = eqx.combine(_dynamic_bl, static_part) # reconstruct the block
@@ -66,10 +65,10 @@ class RecurrentModule(eqx.Module):
             return (x, idx + 1), x
 
         out, history = eqx.internal.scan(f=f, init=(x, 0), xs=dynamic_part, kind='lax')
-        history = history.mean(0)
-        
-        ctx_state *= jax.nn.sigmoid(self.forget_gate(history, True, key))
-        ctx_state += self.ctx_gate(history, True, key)
+
+        history = history.sum(0)
+        ctx_state *= jax.nn.sigmoid(self.forget_gate(history, enable_dropout, key))
+        ctx_state += self.ctx_gate(history, enable_dropout, key)
 
         return out[0], ctx_state
 
@@ -137,7 +136,7 @@ class React(eqx.Module):
         interim_thought = interim_thought.astype(jnp.bfloat16)
         mask = mask.astype(jnp.bfloat16)
 
-        def body_fun(carry: Tuple[Array, Array], idx: int) -> Tuple[Array, Array]:
+        def body_fun(carry: Tuple[Array, Array], idx: int) -> Tuple[Tuple, Array]:
             thought, ctx_state = carry
             
             latent = jnp.concatenate([input_arr, thought], axis=-1) # (seqlen, width * 2)

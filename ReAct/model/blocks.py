@@ -115,12 +115,10 @@ class MLP(eqx.Module):
                  enable_dropout: bool,
                  key: PRNGKeyArray):
         
-        x = x.astype(jnp.bfloat16)
-        
         for layer in self.layers:
             x = layer(x).astype(jnp.bfloat16)
         
-        return self.dropout(x, key=key, inference=enable_dropout)
+        return self.dropout(x, key=key, inference=enable_dropout).astype(jnp.bfloat16)
 
 class LinearProj(eqx.Module):
     bias: Optional[jax.Array]

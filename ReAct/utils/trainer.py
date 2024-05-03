@@ -335,7 +335,8 @@ class Trainer:
                     self.wandb_logger.log(
                         {
                             'Train/loss': loss,
-                            'Train/Lr': self.schedule_fn(epoch + 1 * step).item()
+                            'Train/Lr': self.schedule_fn(epoch + 1 * step).item(),
+                            'Train/tokens': step * self.batch_size * self.seqlen,
                         },
                         step=step
                     )
@@ -343,7 +344,6 @@ class Trainer:
                     if trial is not None and (trial.should_prune() or jnp.isnan(loss)):
                         raise optuna.exceptions.TrialPruned()
 
-                    # Terminate training if loss is NaN
                     if jnp.isnan(loss):
                         self.my_logger.warning(f'\nLoss is NaN at step {step}')
                         return loss
