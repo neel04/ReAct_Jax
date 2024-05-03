@@ -106,7 +106,7 @@ class React(eqx.Module):
 
         self.main_block = RecurrentModule(seqlen, drop_rate, n_heads, num_blocks, width, key=key2)
         self.alpha = jnp.array([0.5], dtype=jnp.bfloat16)
-        self.weights = jax.random.ones(key3, (max_iters,), dtype=jnp.bfloat16) / max_iters
+        self.weights = jnp.ones((max_iters,), dtype=jnp.bfloat16) / max_iters
 
         self.post_ln = eqx.nn.LayerNorm(width)
         self.out_head = LinearProj(width, vocab_size, key=key4)

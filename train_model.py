@@ -2,11 +2,11 @@ import platform
 import jax
 
 if platform.processor() != 'arm':
+    jax.config.update("jax_compilation_cache_dir", "/tmp/jax-cache")
     jax.distributed.initialize() # don't run on apple sillicon
 
 import optuna
 from jax import config
-from jax.experimental.compilation_cache import compilation_cache
 from jaxtyping import PRNGKeyArray
 from optuna.integration.wandb import WeightsAndBiasesCallback
 
@@ -17,11 +17,10 @@ from ReAct.utils.arg_parser import parse_args
 from ReAct.utils.logger import UnifiedLogger
 from ReAct.utils.trainer import Trainer
 
-
 def main(key: PRNGKeyArray):
     args = parse_args()
     jax.config.update('jax_threefry_partitionable', True) # for parallelization
-
+    
     # Enter debugging mode, disabling JIT
     if args.debug:
         config.update("jax_debug_nans", True)
@@ -156,6 +155,5 @@ def kickoff_optuna(trial, **trainer_kwargs):
     return loss
 
 if __name__ == '__main__':
-    compilation_cache.initialize_cache('./compilation_cache')
     key = jax.random.PRNGKey(69)
     main(key)

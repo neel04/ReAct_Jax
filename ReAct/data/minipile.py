@@ -95,11 +95,16 @@ class MiniPileDataset:
 
     def create_dataloader(self, slice: str = '100%'):
         data_path = Path(f'./cached_data/minipile_{self.split}.data')
-        
+
         try:
-            dataset = load_dataset(f'Neel-Gupta/minipile-processed_{self.bsz}', split=f'{self.split}[:{slice}]', ignore_verifications=True,
-                                   keep_in_memory=True, num_proc=None)
-            
+            dataset = load_dataset(
+                f"Neel-Gupta/minipile-processed_{self.bsz}",
+                split=f"{self.split}[:{slice}]",
+                verification_mode="no_checks",
+                keep_in_memory=True,
+                num_proc=None,
+            )
+
             print(f'Loaded {self.split} dataset from HuggingFace Hub')
             
             dataset.set_format(type='numpy')
@@ -113,10 +118,15 @@ class MiniPileDataset:
                 return dataset
             else:
                 print(f'Building dataset from scratch... [split: {self.split}] | [bsz: {self.bsz}]')
-                
-                dataset = load_dataset('JeanKaddour/minipile', split=f'{self.split}[:{slice}]', ignore_verifications=True,
-                                        keep_in_memory=True, num_proc=None)
-                
+
+                dataset = load_dataset(
+                    "JeanKaddour/minipile",
+                    split=f"{self.split}[:{slice}]",
+                    verification_mode='no_checks',
+                    keep_in_memory=True,
+                    num_proc=None,
+                )
+
                 dataset = self.take_subset(dataset, 2_000)
                 
                 dataset = dataset.map(self.chunk_examples, batched=True, batch_size=self.bsz,
@@ -129,8 +139,9 @@ class MiniPileDataset:
                                     keep_in_memory=True, drop_last_batch=True, num_proc=None)
                 
                 dataset.set_format(type='numpy')
-                
-                self.upload_dataset(dataset,
-                                    hub_path=f'Neel-Gupta/minipile-processed_{self.bsz}') # upload the processed dataset to the Hub
-                
+
+                self.upload_dataset(
+                    dataset, hub_path=f"Neel-Gupta/minipile-processed_{self.bsz}"
+                )  # upload the processed dataset to the Hub
+
                 return dataset
