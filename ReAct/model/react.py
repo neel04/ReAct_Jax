@@ -68,7 +68,7 @@ class RecurrentModule(eqx.Module):
 
         history = history.mean(0)
         ctx_state *= jax.nn.sigmoid(self.forget_gate(history, enable_dropout, key))
-        ctx_state += self.ctx_gate(history, enable_dropout, key)
+        ctx_state = self.ctx_gate(history, enable_dropout, key)
 
         return out[0], ctx_state
 
@@ -145,13 +145,13 @@ class React(eqx.Module):
             latent, ctx_state = self.main_block(latent, ctx_state, mask, enable_dropout, key) # (seqlen, width)
             latent = jax.vmap(self.post_ln)(latent)  # Post-LN for stability 
             
-            return (latent, ctx_state), ctx_state
+            return (latent, ctx_state), latent
 
-        final_val, ctx_hist = eqx.internal.scan(
+        final_val, history = eqx.internal.scan(
             f=body_fun, init=(interim_thought, input_arr), xs=jnp.arange(iters_to_do), kind="checkpointed"
         )
 
-        return self.alpha * final_val[0] + (1 - self.alpha) * ctx_hist.mean(0)
+        return self.alpha * final_val[0] + (1 - self.alpha) * history.mean(0)
 
     @eqx.filter_jit
     def __call__(self,
