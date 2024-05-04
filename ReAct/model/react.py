@@ -81,7 +81,6 @@ class React(eqx.Module):
     max_iters: int = eqx.field(static=True)
     
     alpha: float
-    weights: Array
     pos_enc: Array
     embed_layer: eqx.nn.Embedding
     main_block: LiteAttention
@@ -106,7 +105,6 @@ class React(eqx.Module):
 
         self.main_block = RecurrentModule(seqlen, drop_rate, n_heads, num_blocks, width, key=key2)
         self.alpha = jnp.array([0.5], dtype=jnp.bfloat16)
-        self.weights = jnp.ones((max_iters,), dtype=jnp.bfloat16) / max_iters
 
         self.post_ln = eqx.nn.LayerNorm(width)
         self.out_head = LinearProj(width, vocab_size, key=key4)
@@ -147,15 +145,13 @@ class React(eqx.Module):
             latent, ctx_state = self.main_block(latent, ctx_state, mask, enable_dropout, key) # (seqlen, width)
             latent = jax.vmap(self.post_ln)(latent)  # Post-LN for stability 
             
-            return (latent, ctx_state), latent
+            return (latent, ctx_state), ctx_state
 
-        final_val, history = eqx.internal.scan(
+        final_val, ctx_hist = eqx.internal.scan(
             f=body_fun, init=(interim_thought, input_arr), xs=jnp.arange(iters_to_do), kind="checkpointed"
         )
 
-        history = jnp.einsum('i, i j k -> j k', self.weights[:iters_to_do], history)
-        
-        return self.alpha * final_val[0] + (1 - self.alpha) * history
+        return self.alpha * final_val[0] + (1 - self.alpha) * ctx_hist.mean(0)
 
     @eqx.filter_jit
     def __call__(self,
