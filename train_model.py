@@ -1,8 +1,9 @@
 import platform
 import jax
 
+jax.config.update("jax_compilation_cache_dir", "/tmp/jax-cache")
+
 if platform.processor() != 'arm':
-    jax.config.update("jax_compilation_cache_dir", "/tmp/jax-cache")
     jax.distributed.initialize() # don't run on apple sillicon
 
 import optuna
@@ -17,9 +18,11 @@ from ReAct.utils.arg_parser import parse_args
 from ReAct.utils.logger import UnifiedLogger
 from ReAct.utils.trainer import Trainer
 
+# ruff: noqa: E402, E731
+
 def main(key: PRNGKeyArray):
     args = parse_args()
-    jax.config.update('jax_threefry_partitionable', True) # for parallelization
+    config.update('jax_threefry_partitionable', True) # for parallelization
     
     # Enter debugging mode, disabling JIT
     if args.debug:
