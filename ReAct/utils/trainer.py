@@ -33,7 +33,8 @@ def n_k_loop(model: eqx.Module, input_arr: Array, pad_mask: Array, n: Array, k: 
         pad_mask=pad_mask,
         prev_thought=False,
         is_training=True,
-        key=key1)
+        key=key1,
+    )
 
     intermediate_array = jax.lax.stop_gradient(intermediate_array)
 
@@ -44,7 +45,8 @@ def n_k_loop(model: eqx.Module, input_arr: Array, pad_mask: Array, n: Array, k: 
         pad_mask=pad_mask,
         prev_thought=True,
         is_training=True,
-        key=key2)
+        key=key2,
+    )
 
     return output
 
@@ -179,17 +181,19 @@ class Trainer:
 
         total_steps = self.epochs * len(self.trainloader)
 
-        self.schedule_fn = optax.warmup_cosine_decay_schedule(init_value=self.lr / 2,
-                                                              peak_value=self.lr,
-                                                              end_value=self.lr / 10,
-                                                              warmup_steps=self.warmup_steps,
-                                                              decay_steps=total_steps)
+        self.schedule_fn = optax.warmup_cosine_decay_schedule(
+            init_value=self.lr / 2,
+            peak_value=self.lr,
+            end_value=self.lr / 10,
+            warmup_steps=self.warmup_steps,
+            decay_steps=total_steps,
+        )
 
         # optimizer with weight decay
         optim = optax.chain(
             optax.adamw(learning_rate=self.schedule_fn, weight_decay=self.weight_decay),
             optax.clip_by_global_norm(self.grad_clip),
-            optax.apply_every(self.accum_steps)
+            optax.apply_every(self.accum_steps),
         )
 
         opt_state = optim.init(eqx.filter(model, eqx.is_array_like))
