@@ -67,8 +67,11 @@ class RecurrentModule(eqx.Module):
         out, history = eqx.internal.scan(f=f, init=(x, 0), xs=dynamic_part, kind='lax')
 
         history = history.mean(0)
-        ctx_state *= jax.nn.sigmoid(self.forget_gate(history, enable_dropout, key))
-        ctx_state = self.ctx_gate(history, enable_dropout, key)
+
+        ctx_state += self.ctx_gate(history, enable_dropout, key)
+        ctx_state *= jax.nn.sigmoid(
+            self.forget_gate(history + ctx_state, enable_dropout, key)
+        )
 
         return out[0], ctx_state
 
