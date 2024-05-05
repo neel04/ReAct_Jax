@@ -1,7 +1,7 @@
 import platform
 import jax
 
-jax.config.update("jax_compilation_cache_dir", "/tmp/jax-cache")
+jax.config.update("jax_compilation_cache_dir", "./ReAct/compilation_cache")
 
 if platform.processor() != 'arm':
     jax.distributed.initialize() # don't run on apple sillicon

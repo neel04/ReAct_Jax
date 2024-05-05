@@ -168,3 +168,4 @@ cython_debug/
 *.eqx
 *cached_data
 *pyrightconfig.json
+*compilation_cache*
