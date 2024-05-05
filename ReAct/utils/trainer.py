@@ -191,7 +191,12 @@ class Trainer:
 
         # optimizer with weight decay
         optim = optax.chain(
-            optax.adamw(learning_rate=self.schedule_fn, weight_decay=self.weight_decay),
+            optax.adamw(
+                learning_rate=self.schedule_fn,
+                weight_decay=self.weight_decay,
+                b1=self.beta_1,
+                b2=self.beta_2,
+            ),
             optax.clip_by_global_norm(self.grad_clip),
             optax.apply_every(self.accum_steps),
         )

@@ -51,6 +51,12 @@ def parse_args():
 
     parser.add_argument('--epochs', type=int, default=1,
                         help='Number of epochs. Default: 1')
+    
+    parser.add_argument('--beta_1', type=float, default=0.9,
+                        help='Adam beta 1. Default: 0.9')
+    
+    parser.add_argument('--beta_2', type=float, default=0.999,
+                        help='Adam beta 2. Default: 0.999')
 
     parser.add_argument('--save_interval', type=int, default=2500,
                         help='Save interval. Default: 2500')
