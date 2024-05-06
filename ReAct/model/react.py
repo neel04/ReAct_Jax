@@ -73,10 +73,10 @@ class RecurrentModule(eqx.Module):
 
         history = history.mean(0) * self.beta + (1 - self.beta) * ctx_state 
 
-        #ctx_state += self.ctx_gate(history, enable_dropout, key)
-        ctx_state *= jax.nn.sigmoid(
-            self.forget_gate(history, enable_dropout, key)
-        )
+        ctx_state += self.ctx_gate(history, enable_dropout, key)
+        #ctx_state *= jax.nn.sigmoid(
+            #self.forget_gate(history, enable_dropout, key)
+        #)
 
         return out[0], ctx_state
 

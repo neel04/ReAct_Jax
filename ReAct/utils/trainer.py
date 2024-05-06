@@ -196,6 +196,7 @@ class Trainer:
                 weight_decay=self.weight_decay,
                 b1=self.beta_1,
                 b2=self.beta_2,
+                nesterov=self.nesterov,
             ),
             optax.clip_by_global_norm(self.grad_clip),
             optax.apply_every(self.accum_steps),

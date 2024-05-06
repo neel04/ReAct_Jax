@@ -57,6 +57,9 @@ def parse_args():
     
     parser.add_argument('--beta_2', type=float, default=0.999,
                         help='Adam beta 2. Default: 0.999')
+    
+    parser.add_argument('--nesterov', action='store_true', default=False,
+                        help='Enable Nesterov momentum. Default: False')
 
     parser.add_argument('--save_interval', type=int, default=2500,
                         help='Save interval. Default: 2500')

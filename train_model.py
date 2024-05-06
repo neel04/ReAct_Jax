@@ -45,9 +45,9 @@ def main(key: PRNGKeyArray):
 
     # ========= Training/Hypertuning =========
     init_hyperparams = [
-        {"lr": 1e-3, "drop_rate": 0.01, "weight_decay": 8e-4, "warmup_steps": 100},
-        {"lr": 7e-3, "drop_rate": 0.01, "weight_decay": 8e-4, "warmup_steps": 0},
-        {"lr": 2e-2, "drop_rate": 0.01, "weight_decay": 8e-4, "warmup_steps": 0},
+        {"lr": 1e-3, "drop_rate": 0.01, "weight_decay": 8e-4, "warmup_steps": 100, "beta_1": 0.9, "beta_2": 0.999, "nesterov": False},
+        {"lr": 7e-3, "drop_rate": 0.01, "weight_decay": 8e-4, "warmup_steps": 0, "beta_1": 0.9, "beta_2": 0.999, "nesterov": True},
+        {"lr": 2e-2, "drop_rate": 0.01, "weight_decay": 8e-4, "warmup_steps": 0, "beta_1": 0.9, "beta_2": 0.999, "nesterov": False},
     ]
 
     if args.tune_hyperparams:
@@ -97,7 +97,7 @@ def main(key: PRNGKeyArray):
 
         study.optimize(
             lambda trial: kickoff_optuna(trial=trial, **trainer_kwargs),
-            n_trials=50,
+            n_trials=65,
             callbacks=[wandbc],
         )
 
@@ -133,11 +133,17 @@ def kickoff_optuna(trial, **trainer_kwargs):
     args = trainer_kwargs['args']
 
     args.epochs = 1
-
+    
+    # Regularization hyperparams
     args.lr = trial.suggest_float('lr', 1e-4, 1e-2, step=1e-4)
     args.drop_rate = trial.suggest_float('drop_rate', 0.0, 0.1, step=0.01)
     args.weight_decay = trial.suggest_float('weight_decay', 1e-5, 1e-3, step=2e-4)
     args.warmup_steps = trial.suggest_int('warmup_steps', 0, 500, step=100)
+
+    # Optimizer hyperparams
+    args.beta_1 = trial.suggest_categorical('beta_1', [0.9, 0.95, 0.98])
+    args.beta_2 = trial.suggest_categorical('beta_2', [0.9, 0.95, 0.98, 0.99, 0.999])
+    args.nesterov = trial.suggest_categorical('nesterov', [True, False])
 
     args = trainer_kwargs['args']
 
