@@ -16,8 +16,7 @@ class RecurrentModule(eqx.Module):
     '''
     num_blocks: int = eqx.field(static=True)
     
-    beta: Array
-    gamma: Array
+    beta: float
     attention_blocks: PyTree[AttentionBlock]
     forget_gate: LinearProj
     ctx_gate: LinearProj
@@ -34,8 +33,7 @@ class RecurrentModule(eqx.Module):
         keys = jax.random.split(key, num_blocks)
 
         self.num_blocks = num_blocks
-        self.beta = jnp.array([0.33], dtype=jnp.bfloat16)
-        self.gamma = jnp.array([0.33], dtype=jnp.bfloat16)
+        self.beta = jnp.array([0.], dtype=jnp.bfloat16)
         
         make_block: callable = lambda k: AttentionBlock(
             seqlen, n_heads, drop_rate, bottleneck, k
@@ -73,11 +71,7 @@ class RecurrentModule(eqx.Module):
 
         out, history = eqx.internal.scan(f=f, init=(x, 0), xs=dynamic_part, kind='lax')
 
-        history = (
-            history.mean(0) * self.beta
-            + self.gamma * ctx_state
-            + (1 - self.beta - self.gamma) * out[0]
-        )
+        history = history.mean(0) * self.beta + (1 - self.beta) * ctx_state 
 
         ctx_state += self.ctx_gate(history, enable_dropout, key)
         ctx_state *= jax.nn.sigmoid(
