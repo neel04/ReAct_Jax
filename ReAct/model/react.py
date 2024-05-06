@@ -33,7 +33,7 @@ class RecurrentModule(eqx.Module):
         keys = jax.random.split(key, num_blocks)
 
         self.num_blocks = num_blocks
-        self.beta = jnp.array([0.], dtype=jnp.bfloat16)
+        self.beta = jnp.array([0.5], dtype=jnp.bfloat16)
         
         make_block: callable = lambda k: AttentionBlock(
             seqlen, n_heads, drop_rate, bottleneck, k
@@ -63,7 +63,7 @@ class RecurrentModule(eqx.Module):
             
             block = eqx.combine(_dynamic_bl, static_part) # reconstruct the block
             
-            x = jax.lax.cond(idx == 0,
+            x = jax.lax.cond(idx == 0 or idx == 2,
                              lambda: block(x, ctx_state, pad_mask, enable_dropout, keys[idx]),
                              lambda: block(x, x, pad_mask, enable_dropout, keys[idx]))
             
@@ -73,10 +73,8 @@ class RecurrentModule(eqx.Module):
 
         history = history.mean(0) * self.beta + (1 - self.beta) * ctx_state 
 
-        #ctx_state += self.ctx_gate(history, enable_dropout, key)
-        #ctx_state *= jax.nn.sigmoid(
-            #self.forget_gate(history, enable_dropout, key)
-        #)
+        ctx_state *= jax.nn.sigmoid(self.forget_gate(history, enable_dropout, key))
+        ctx_state += self.ctx_gate(history, enable_dropout, key)
 
         return out[0], ctx_state
 
