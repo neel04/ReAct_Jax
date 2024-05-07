@@ -17,6 +17,7 @@ class RecurrentModule(eqx.Module):
     num_blocks: int = eqx.field(static=True)
     
     beta: float
+    hist_block: eqx.Module
     attention_blocks: PyTree[AttentionBlock]
     forget_gate: LinearProj
     ctx_gate: LinearProj
@@ -34,7 +35,8 @@ class RecurrentModule(eqx.Module):
 
         self.num_blocks = num_blocks
         self.beta = jnp.array([0.5], dtype=jnp.bfloat16)
-        
+        self.hist_block = MLP(bottleneck, num_blocks, drop_rate, key=keys[3])
+
         make_block: callable = lambda k: AttentionBlock(
             seqlen, n_heads, drop_rate, bottleneck, k
         )
@@ -63,7 +65,7 @@ class RecurrentModule(eqx.Module):
             
             block = eqx.combine(_dynamic_bl, static_part) # reconstruct the block
             
-            x = jax.lax.cond(idx % 2 == 0,
+            x = jax.lax.cond(idx == 0,
                              lambda: block(x, ctx_state, pad_mask, enable_dropout, keys[idx]),
                              lambda: block(x, x, pad_mask, enable_dropout, keys[idx]))
             
@@ -71,12 +73,15 @@ class RecurrentModule(eqx.Module):
 
         out, history = eqx.internal.scan(f=f, init=(x, 0), xs=dynamic_part, kind='lax')
 
-        history = history.mean(0) * self.beta + (1 - self.beta) * ctx_state 
+        hist_lerp = history.mean(0) * self.beta + (1 - self.beta) * ctx_state 
 
-        ctx_state *= jax.nn.sigmoid(self.forget_gate(history, enable_dropout, key))
-        ctx_state += self.ctx_gate(history, enable_dropout, key)
+        hist_w = self.hist_block(hist_lerp, enable_dropout, key).mean(0)
+        out = jnp.einsum('i j k, i -> j k', history, hist_w)
 
-        return out[0], ctx_state
+        ctx_state *= jax.nn.sigmoid(self.forget_gate(hist_lerp, enable_dropout, key))
+        ctx_state += self.ctx_gate(hist_lerp, enable_dropout, key)
+
+        return out, ctx_state
 
 class React(eqx.Module):
     '''
