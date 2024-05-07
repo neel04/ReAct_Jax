@@ -16,7 +16,6 @@ class RecurrentModule(eqx.Module):
     '''
     num_layers: int = eqx.field(static=True)
     
-    beta: float
     hist_layer: eqx.Module
     attention_layers: PyTree[AttentionBlock]
     forget_gate: LinearProj
@@ -34,7 +33,6 @@ class RecurrentModule(eqx.Module):
         keys = jax.random.split(key, num_layers)
 
         self.num_layers = num_layers
-        self.beta = jnp.array([0.5], dtype=jnp.bfloat16)
         self.hist_layer = MLP(bottleneck, num_layers, drop_rate, key=keys[3])
 
         make_layer: callable = lambda k: AttentionBlock(
@@ -73,9 +71,9 @@ class RecurrentModule(eqx.Module):
 
         out, history = eqx.internal.scan(f=f, init=(x, 0), xs=dynamic_part, kind='lax')
 
-        hist_lerp = history.mean(0) * self.beta + (1 - self.beta) * ctx_state 
+        hist_lerp = history.mean(0)
 
-        hist_w = self.hist_layer(ctx_state, enable_dropout, key).mean(0)
+        hist_w = self.hist_layer(ctx_state, enable_dropout, key).sum(0)
         out = jnp.einsum('i j k, i -> j k', history, hist_w)
 
         ctx_state *= jax.nn.sigmoid(self.forget_gate(hist_lerp, enable_dropout, key))
