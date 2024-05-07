@@ -63,7 +63,7 @@ class RecurrentModule(eqx.Module):
             
             block = eqx.combine(_dynamic_bl, static_part) # reconstruct the block
             
-            x = jax.lax.cond(idx == 0 or idx == 2,
+            x = jax.lax.cond(idx % 2 == 0,
                              lambda: block(x, ctx_state, pad_mask, enable_dropout, keys[idx]),
                              lambda: block(x, x, pad_mask, enable_dropout, keys[idx]))
             
