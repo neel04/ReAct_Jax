@@ -16,7 +16,6 @@ class RecurrentModule(eqx.Module):
     '''
     num_layers: int = eqx.field(static=True)
     
-    beta: float
     hist_gate: eqx.Module
     attention_layers: PyTree[AttentionBlock]
     forget_gate: LinearProj
@@ -31,15 +30,14 @@ class RecurrentModule(eqx.Module):
                  bottleneck: int,
                  key: PRNGKeyArray):
         
-        keys = jax.random.split(key, num_layers)
-
-        self.num_layers = num_layers
-        self.beta = jnp.array([0.5], dtype=jnp.bfloat16)
-        self.hist_gate = MLP(bottleneck, bottleneck, drop_rate, key=keys[3])
-
+        keys = jax.random.split(key, num_layers + 3)
+        
         make_layer: callable = lambda k: AttentionBlock(
             seqlen, n_heads, drop_rate, bottleneck, k
         )
+
+        self.num_layers = num_layers
+        self.hist_gate = make_layer(keys[3])
 
         self.reshape_layer = MLP(bottleneck * 2, bottleneck, p=0., key=keys[0])
         self.forget_gate = MLP(bottleneck, bottleneck, p=drop_rate, key=keys[1])
@@ -73,7 +71,7 @@ class RecurrentModule(eqx.Module):
 
         out, history = eqx.internal.scan(f=f, init=(x, 0), xs=dynamic_part, kind='lax')
 
-        hist_lerp = history.mean(0) * self.beta + (1 - self.beta) * self.hist_gate(ctx_state, enable_dropout, key) 
+        hist_lerp = self.hist_gate(history.mean(0), ctx_state, pad_mask, enable_dropout, key)
 
         ctx_state *= jax.nn.sigmoid(self.forget_gate(hist_lerp, enable_dropout, key))
         ctx_state += self.ctx_gate(hist_lerp, enable_dropout, key)
