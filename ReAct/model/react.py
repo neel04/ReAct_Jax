@@ -6,7 +6,7 @@ import jax
 import jax.numpy as jnp
 from jaxtyping import Array, PRNGKeyArray, PyTree
 
-from .blocks import MLP, AttentionBlock, LinearProj, LiteAttention
+from .blocks import MLP, AttentionBlock, LinearProj, LiteAttention, NewGELU
 
 # ruff: noqa: E402, E731
 
@@ -38,10 +38,10 @@ class RecurrentModule(eqx.Module):
 
         self.num_layers = num_layers
 
-        self.hist_gate = MLP(bottleneck * 2, bottleneck, p=0., key=keys[0])
         self.reshape_layer = MLP(bottleneck * 2, bottleneck, p=0., key=keys[0])
-        self.forget_gate = MLP(bottleneck, bottleneck, p=drop_rate, key=keys[1])
-        self.ctx_gate = MLP(bottleneck, bottleneck, p=drop_rate, key=keys[2])
+        self.hist_gate = LinearProj(bottleneck * 2, bottleneck, key=keys[1])
+        self.forget_gate = MLP(bottleneck, bottleneck, p=drop_rate, key=keys[2])
+        self.ctx_gate = MLP(bottleneck, bottleneck, p=drop_rate, key=keys[3])
 
         self.attention_layers = eqx.filter(eqx.filter_vmap(make_layer)(keys), eqx.is_array_like)
     
@@ -71,7 +71,7 @@ class RecurrentModule(eqx.Module):
 
         out, history = eqx.internal.scan(f=f, init=(x, 0), xs=dynamic_part, kind='lax')
 
-        hist_lerp = self.hist_gate(jnp.concat([history.mean(0), ctx_state], axis=-1), enable_dropout, key)
+        hist_lerp = NewGELU()(self.hist_gate(jnp.concat([history.mean(0), ctx_state], axis=-1)))
 
         ctx_state *= jax.nn.sigmoid(self.forget_gate(hist_lerp, enable_dropout, key))
         ctx_state += self.ctx_gate(hist_lerp, enable_dropout, key)
