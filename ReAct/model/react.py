@@ -17,7 +17,7 @@ class RecurrentModule(eqx.Module):
     num_layers: int = eqx.field(static=True)
     
     beta: float
-    hist_layer: eqx.Module
+    hist_gate: eqx.Module
     attention_layers: PyTree[AttentionBlock]
     forget_gate: LinearProj
     ctx_gate: LinearProj
@@ -35,7 +35,7 @@ class RecurrentModule(eqx.Module):
 
         self.num_layers = num_layers
         self.beta = jnp.array([0.5], dtype=jnp.bfloat16)
-        self.hist_layer = MLP(bottleneck, num_layers, drop_rate, key=keys[3])
+        self.hist_gate = MLP(bottleneck, bottleneck, drop_rate, key=keys[3])
 
         make_layer: callable = lambda k: AttentionBlock(
             seqlen, n_heads, drop_rate, bottleneck, k
@@ -73,15 +73,12 @@ class RecurrentModule(eqx.Module):
 
         out, history = eqx.internal.scan(f=f, init=(x, 0), xs=dynamic_part, kind='lax')
 
-        hist_lerp = history.mean(0) * self.beta + (1 - self.beta) * ctx_state 
-
-        hist_w = jax.nn.softmax(self.hist_layer(ctx_state, enable_dropout, key), axis=0).mean(0)
-        out = jnp.einsum('i j k, i -> j k', history, hist_w)
+        hist_lerp = history.mean(0) * self.beta + (1 - self.beta) * self.hist_gate(ctx_state, enable_dropout, key) 
 
         ctx_state *= jax.nn.sigmoid(self.forget_gate(hist_lerp, enable_dropout, key))
         ctx_state += self.ctx_gate(hist_lerp, enable_dropout, key)
 
-        return out, ctx_state
+        return out[0], ctx_state
 
 class React(eqx.Module):
     '''
