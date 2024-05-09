@@ -125,6 +125,8 @@ class GatedMLP(eqx.Module):
     Gated MLP, Mamba style
     '''
 
+    ln_1: eqx.Module
+    ln_2: eqx.Module
     up_proj: eqx.Module
     down_proj: eqx.Module
     gate: eqx.Module
@@ -140,12 +142,18 @@ class GatedMLP(eqx.Module):
         self.up_proj = LinearProj(input_dim, output_dim * 2, key=key_1)
         self.gate = LinearProj(input_dim, output_dim * 2, key=key_4)
         self.down_proj = LinearProj(output_dim * 2, output_dim, key=key_3)
+
+        self.ln_1 = eqx.nn.LayerNorm(output_dim)
+        self.ln_2 = eqx.nn.LayerNorm(output_dim)
+
         self.activation = NewGELU()
 
     def __call__(self, arr: Array) -> Array:
         
         x = self.activation(self.up_proj(arr))
+        x = self.ln_1(x)
         x = self.down_proj(x * jax.nn.silu(self.gate(arr)))
+        x = self.ln_2(x)
         
         return self.activation(x)
 
