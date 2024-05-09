@@ -8,6 +8,7 @@ import jax.numpy as jnp
 import optax
 import optuna
 from jaxtyping import Array, PRNGKeyArray, PyTree
+from jmp import Policy
 from scalax.sharding import MeshShardingHelper
 from scalax.sharding import PartitionSpec as P
 from torch.utils.data import DataLoader
@@ -18,9 +19,10 @@ from ReAct.model.baseline import GPT
 from ReAct.model.react import React
 from ReAct.utils.helpers import count_params, load_eqx_obj, save_eqx_obj
 
-from .helpers import broad_to_bsz, calc_performance_metrics, half_precision
+from .helpers import broad_to_bsz, calc_performance_metrics
 
 mesh = MeshShardingHelper(axis_dims=[-1], axis_names=['data']) # handle DDP + TP over multi-node
+policy = Policy(compute_dtype=jnp.bfloat16, param_dtype=jnp.float32, output_dtype=jnp.bfloat16)
 
 @eqx.filter_jit
 def n_k_loop(model: eqx.Module, input_arr: Array, pad_mask: Array, n: Array, k: Array, key: PRNGKeyArray) -> Array:
@@ -117,6 +119,7 @@ def make_step(model: eqx.Module,
                                              is_leaf=lambda x: isinstance(x, eqx.nn.Dropout))
 
     loss, grads = compute_loss(diff_model, static_model, x, y, pad_mask, iters_to_do, num_classes, keys)
+    grads = policy.cast_to_compute(grads) # cast to float32
     updates, opt_state = optim.update(grads, opt_state, model)
     model = eqx.apply_updates(model, updates)
 
@@ -236,7 +239,7 @@ class Trainer:
 
         # switch to half precision
         if self.bf16:
-            model = half_precision(model)
+            model = policy.cast_to_param(model)
 
         _, opt_state, model = self.set_optim_and_scheduler(model)
         
@@ -326,6 +329,7 @@ class Trainer:
                 step += step_done # for multiple epochs
 
                 seq, label, pad_mask = jnp.asarray(batch['text'])
+                seq, label, pad_mask = policy.cast_to_compute((seq, label, pad_mask))
 
                 loss, model, opt_state = make_step(model, opt_state, filter_spec, seq, label, pad_mask,
                                                    self.max_iters, optim, self.num_classes, keys)

@@ -5,11 +5,13 @@ import equinox as eqx
 import jax
 import jax.numpy as jnp
 from jaxtyping import Array, PRNGKeyArray, PyTree
+from jmp import Policy
 
-from .blocks import MLP, AttentionBlock, LinearProj, LiteAttention, NewGELU, GatedMLP
+from .blocks import MLP, AttentionBlock, GatedMLP, LinearProj, LiteAttention, NewGELU
+
+policy = Policy(compute_dtype=jnp.bfloat16, param_dtype=jnp.float32, output_dtype=jnp.bfloat16)
 
 # ruff: noqa: E402, E731
-
 class RecurrentModule(eqx.Module):
     '''
     Bunch of Attentionlayers in a pseuo-LSTM fashion
@@ -77,7 +79,7 @@ class RecurrentModule(eqx.Module):
 
         #ctx_state *= jax.nn.sigmoid(self.forget_gate(hist_lerp, enable_dropout, key))
         #ctx_state += self.ctx_gate(hist_lerp, enable_dropout, key)
-        ctx_state += self.ctx_gate(hist_lerp)
+        ctx_state = self.ctx_gate(hist_lerp)
 
         return out[0], ctx_state
 
@@ -113,7 +115,7 @@ class React(eqx.Module):
         self.pos_enc = jax.lax.stop_gradient(self.positional_encoding(seqlen, width))
 
         self.main_block = RecurrentModule(seqlen, drop_rate, n_heads, num_blocks, width, key=key2)
-        self.alpha = jnp.array([0.5], dtype=jnp.bfloat16)
+        self.alpha = jnp.array([0.5])
 
         self.post_ln = eqx.nn.LayerNorm(width)
         self.out_head = LinearProj(width, vocab_size, key=key4)
@@ -124,8 +126,8 @@ class React(eqx.Module):
         of shape (batch_size, max_seq_len, d_model) which would be added
         to the sequence embeddings.
         '''
-        position = jnp.arange(seq_len, dtype=jnp.bfloat16).reshape(-1, 1)
-        div_term = jnp.exp(jnp.arange(0, d_model, 2, dtype=jnp.bfloat16) * -(jnp.log(10000.0) / d_model))
+        position = jnp.arange(seq_len).reshape(-1, 1)
+        div_term = jnp.exp(jnp.arange(0, d_model, 2) * -(jnp.log(10000.0) / d_model))
         pe = jnp.zeros((seq_len, d_model))
 
         pe = pe.at[:, 0::2].set(jnp.sin(position * div_term))
@@ -142,17 +144,14 @@ class React(eqx.Module):
                           enable_dropout: bool,
                           key: PRNGKeyArray) -> Array:
 
-        # Declaring constants
-        input_arr = input_arr.astype(jnp.bfloat16)
-        interim_thought = interim_thought.astype(jnp.bfloat16)
-        mask = mask.astype(jnp.bfloat16)
-
         def body_fun(carry: Tuple[Array, Array], idx: int) -> Tuple[Tuple, Array]:
             thought, ctx_state = carry
             
             latent = jnp.concatenate([input_arr, thought], axis=-1) # (seqlen, width * 2)
             latent, ctx_state = self.main_block(latent, ctx_state, mask, enable_dropout, key) # (seqlen, width)
             latent = jax.vmap(self.post_ln)(latent)  # Post-LN for stability 
+
+            latent = policy.cast_to_output(latent) # mixed precision
             
             return (latent, ctx_state), latent
 
@@ -178,6 +177,8 @@ class React(eqx.Module):
         else:
             input_arr = jax.vmap(self.embed_layer)(input_arr) + self.pos_enc # (batch, seqlen, bottleneck)
             interim_thought = input_arr.copy() # has to be a copy of the embedded + projected input array
+
+        input_arr, interim_thought = policy.cast_to_compute((input_arr, interim_thought))
 
         output = self.iterate_for_steps(interim_thought, input_arr, pad_mask, iters_to_do, is_training, key) # (batch, seqlen, bottleneck)
 

@@ -87,8 +87,8 @@ class GPT(eqx.Module):
         of shape (batch_size, max_seq_len, d_model) which would be added
         to the sequence embeddings.
         '''
-        position = jnp.arange(seq_len, dtype=jnp.bfloat16).reshape(-1, 1)
-        div_term = jnp.exp(jnp.arange(0, d_model, 2, dtype=jnp.bfloat16) * -(jnp.log(10000.0) / d_model))
+        position = jnp.arange(seq_len).reshape(-1, 1)
+        div_term = jnp.exp(jnp.arange(0, d_model, 2) * -(jnp.log(10000.0) / d_model))
         pe = jnp.zeros((seq_len, d_model))
 
         pe = pe.at[:, 0::2].set(jnp.sin(position * div_term))
@@ -104,8 +104,6 @@ class GPT(eqx.Module):
                  key: PRNGKeyArray) -> Array:
         
         input_arr = jax.vmap(self.embed_layer)(input_arr) + self.pos_enc
-        input_arr = input_arr.astype(jnp.bfloat16)
-        
         output = self.main_block(input_arr, pad_mask, enable_dropout, key)
         
         return self.out_head(output)

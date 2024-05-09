@@ -5,6 +5,9 @@ import equinox as eqx
 import jax
 import jax.numpy as jnp
 from jaxtyping import Array, BFloat16, PRNGKeyArray
+from jmp import Policy
+
+policy = Policy(compute_dtype=jnp.bfloat16, param_dtype=jnp.float32, output_dtype=jnp.bfloat16)
 
 # ruff: noqa: F722
 class AttentionBlock(eqx.Module):
@@ -47,21 +50,11 @@ class AttentionBlock(eqx.Module):
         
         """Create self-attention mask from sequence-level mask."""
         
-        mask = jnp.ones((self.seqlen, self.seqlen), dtype=jnp.bfloat16)
+        mask = jnp.ones((self.seqlen, self.seqlen))
         mask = jnp.tril(mask)
         mask = jnp.expand_dims(mask, 0)
         return jnp.repeat(mask, self.n_heads, axis=0)
     
-    def _make_mixer_mask(self,
-                         pad_mask: Array):
-        
-        # Almost same, but we triu instead of tril
-        # and we don't need to merge with pad_mask
-        mask = jnp.ones((self.seqlen, self.seqlen)) * pad_mask
-        mask = jnp.triu(mask)
-        
-        return mask
-
     def __call__(self,
                  inp: BFloat16[Array, 'seqlen bottleneck'],
                  input_arr: Array,
@@ -70,7 +63,7 @@ class AttentionBlock(eqx.Module):
                  key: PRNGKeyArray):
         
         key_1, key_2 = jax.random.split(key, 2)
-        inp = inp.astype(jnp.bfloat16)
+        inp, input_arr, mask = policy.cast_to_compute((inp, input_arr, mask))
         
         x = jax.vmap(self.ln1)(inp)
         inp += self.attn_gate(x, input_arr, input_arr,
@@ -80,19 +73,26 @@ class AttentionBlock(eqx.Module):
         x = jax.vmap(self.ln2)(inp)
         inp += self.mlp(x, enable_dropout=True, key=key_2)
 
-        return inp.astype(jnp.bfloat16)
+        return policy.cast_to_output(inp)
     
     
 class NewGELU(eqx.Module):
     def __call__(self, x: jax.Array, *args) -> jax.Array:
         c: float = math.sqrt(2.0 / math.pi)
         a: float = 0.044715
-        return 0.5 * x * (1.0 + jax.nn.tanh(c * (x + a * jnp.power(x, 3.0))))
+
+        x = policy.cast_to_compute(x)
+        output =  0.5 * x * (1.0 + jax.nn.tanh(c * (x + a * jnp.power(x, 3.0))))
+        
+        return policy.cast_to_output(output)
 
 class MLP(eqx.Module):
     '''A simple MLP - w/ Dropout'''
-    layers: eqx.nn.Sequential
+
+    layer_1: eqx.Module
+    layer_2: eqx.Module
     dropout: eqx.nn.Dropout
+    act: callable
 
     def __init__(self,
                  input_dim: int,
@@ -102,11 +102,9 @@ class MLP(eqx.Module):
         
         key1, key2 = jax.random.split(key, 2)
 
-        self.layers = [
-            LinearProj(input_dim, output_dim * 4, key=key1),
-            eqx.nn.Lambda(NewGELU()),
-            LinearProj(output_dim * 4, output_dim, key=key2),
-            ]
+        self.layer_1 = LinearProj(input_dim, output_dim * 4, key=key1)
+        self.layer_2 = LinearProj(output_dim * 4, output_dim, key=key2)
+        self.act = NewGELU()
 
         self.dropout = eqx.nn.Dropout(p=p)
 
@@ -115,10 +113,14 @@ class MLP(eqx.Module):
                  enable_dropout: bool,
                  key: PRNGKeyArray):
         
-        for layer in self.layers:
-            x = layer(x).astype(jnp.bfloat16)
+        x = policy.cast_to_compute(x)
         
-        return self.dropout(x, key=key, inference=enable_dropout).astype(jnp.bfloat16)
+        x = self.act(self.layer_1(x))
+        x = self.layer_2(x)
+        
+        output = self.dropout(x, key=key, inference=enable_dropout)
+
+        return policy.cast_to_output(self.act(output))
 
 class GatedMLP(eqx.Module):
     '''
@@ -149,13 +151,15 @@ class GatedMLP(eqx.Module):
         self.activation = NewGELU()
 
     def __call__(self, arr: Array) -> Array:
+
+        x = policy.cast_to_compute(arr)
         
         x = self.activation(self.up_proj(arr))
         x = jax.vmap(self.ln_1)(x)
         x = self.down_proj(x * jax.nn.silu(self.gate(arr)))
-        x = jax.vmap(self.ln_2)(x)
+        x = self.activation(jax.vmap(self.ln_2)(x))
         
-        return self.activation(x)
+        return policy.cast_to_output(x)
 
 class LinearProj(eqx.Module):
     bias: Optional[jax.Array]
@@ -179,22 +183,24 @@ class LinearProj(eqx.Module):
         self.use_bias = use_bias
 
         lim = 1 / math.sqrt(input_dim)
-        self.weight = jax.random.uniform(wkey, (input_dim, output_dim), minval=-lim, maxval=lim).astype(jnp.bfloat16)
+        self.weight = jax.random.uniform(wkey, (input_dim, output_dim), minval=-lim, maxval=lim)
 
         if use_bias:
-            self.bias = jax.random.uniform(bkey, (output_dim,), minval=-lim, maxval=lim).astype(jnp.bfloat16)
+            self.bias = jax.random.uniform(bkey, (output_dim,), minval=-lim, maxval=lim)
         else:
-            self.bias = jnp.zeros((output_dim,)).astype(jnp.bfloat16)
+            self.bias = jnp.zeros((output_dim,))
     
     def __call__(self,
-                 input: BFloat16[Array, 'batch in_dim'],
+                 arr: BFloat16[Array, 'batch in_dim'],
+                 mask: Optional[Array] = None,
                  **kwargs) -> Array:
         
-        mask = kwargs.get('mask', None)
-        mask = jnp.ones_like(self.weight) if mask is None else mask
-        output = input @ (self.weight * mask.astype(input.dtype)) + self.bias
+        arr, mask = policy.cast_to_compute((arr, mask))
         
-        return output
+        mask = jnp.ones_like(self.weight) if mask is None else mask
+        output = arr @ (self.weight * mask.astype(arr.dtype)) + self.bias
+        
+        return policy.cast_to_output(output)
 
 class LiteAttention(eqx.Module):
     input_dim: int = eqx.field(static=True)
@@ -206,8 +212,10 @@ class LiteAttention(eqx.Module):
 
     @jax.jit
     def __call__(self, x: BFloat16[Array, 'seqlen in_dim'], mask: Array):
+        mask, x = policy.cast_to_compute((mask, x))
         attn_weights = jax.nn.softmax(self.weight(x.T, mask), axis=1) # type: ignore
-        return x * attn_weights.T
+        output = x * attn_weights.T
+        return policy.cast_to_output(output)
 
 class MixerBlock(eqx.Module):
     '''
@@ -231,14 +239,12 @@ class MixerBlock(eqx.Module):
         self.token_mixer = LinearProj(seqlen, seqlen, key=key2)
   
     def __call__(self, x: BFloat16[Array, 'seqlen in_dim'], mask: Array, key: PRNGKeyArray):
+        x, mask = policy.cast_to_compute((x, mask))
+        
         arr = x.T
         arr = self.act_1(self.token_mixer(arr, key=key, mask=mask))
         arr = jax.vmap(self.norm)(arr.T)
         x = x + arr
-        return x + self.act_2(self.channel_mixer(arr, key))
-    
-if __name__ == '__main__':
-    key = jax.random.PRNGKey(0)
-    LA = LiteAttention(256, key)
-    test = jax.random.normal(key, (128, 256))
-    print(LA(test).shape)
+        output = x + self.act_2(self.channel_mixer(arr, key))
+        
+        return policy.cast_to_output(output)
