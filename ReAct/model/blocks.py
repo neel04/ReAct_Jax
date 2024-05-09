@@ -120,6 +120,35 @@ class MLP(eqx.Module):
         
         return self.dropout(x, key=key, inference=enable_dropout).astype(jnp.bfloat16)
 
+class GatedMLP(eqx.Module):
+    '''
+    Gated MLP, Mamba style
+    '''
+
+    up_proj: eqx.Module
+    down_proj: eqx.Module
+    gate: eqx.Module
+    activation: callable
+
+    def __init__(self,
+                 input_dim: int,
+                 output_dim: int,
+                 key: PRNGKeyArray):
+
+        key_1, key_2, key_3, key_4 = jax.random.split(key, 4)
+
+        self.up_proj = LinearProj(input_dim, output_dim * 2, key=key_1)
+        self.gate = LinearProj(input_dim, output_dim * 2, key=key_4)
+        self.down_proj = LinearProj(output_dim * 2, output_dim, key=key_3)
+        self.activation = NewGELU()
+
+    def __call__(self, arr: Array) -> Array:
+        
+        x = self.activation(self.up_proj(arr))
+        x = self.down_proj(x * jax.nn.silu(self.gate(arr)))
+        
+        return self.activation(x)
+
 class LinearProj(eqx.Module):
     bias: Optional[jax.Array]
     weight: jax.Array
