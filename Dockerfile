@@ -24,5 +24,5 @@ RUN pip3 install git+https://github.com/deepmind/jmp
 
 WORKDIR /ReAct_Jax
 
-# Set the entry point to bash
+# Set the entry point to bash 
 ENTRYPOINT ["/bin/bash"]

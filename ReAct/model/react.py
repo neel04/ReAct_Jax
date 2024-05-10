@@ -79,7 +79,7 @@ class RecurrentModule(eqx.Module):
 
         #ctx_state *= jax.nn.sigmoid(self.forget_gate(hist_lerp, enable_dropout, key))
         #ctx_state += self.ctx_gate(hist_lerp, enable_dropout, key)
-        ctx_state = self.ctx_gate(hist_lerp)
+        ctx_state += self.ctx_gate(hist_lerp)
 
         return out[0], ctx_state
 
