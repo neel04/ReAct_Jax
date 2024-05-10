@@ -124,11 +124,10 @@ class MLP(eqx.Module):
 
 class GatedMLP(eqx.Module):
     '''
-    Gated MLP, Mamba style
+    Gated MLP, Mamba-ish style
     '''
 
-    ln_1: eqx.Module
-    ln_2: eqx.Module
+    ln: eqx.Module
     up_proj: eqx.Module
     down_proj: eqx.Module
     gate: eqx.Module
@@ -141,12 +140,11 @@ class GatedMLP(eqx.Module):
 
         key_1, key_2, key_3, key_4 = jax.random.split(key, 4)
 
-        self.up_proj = LinearProj(input_dim, output_dim * 2, key=key_1)
-        self.gate = LinearProj(input_dim, output_dim * 2, key=key_4)
-        self.down_proj = LinearProj(output_dim * 2, output_dim, key=key_3)
+        self.up_proj = LinearProj(input_dim, output_dim // 2, key=key_1)
+        self.gate = LinearProj(input_dim, output_dim // 2, key=key_4)
+        self.down_proj = LinearProj(output_dim // 2, output_dim, key=key_3)
 
-        self.ln_1 = eqx.nn.LayerNorm(output_dim * 2)
-        self.ln_2 = eqx.nn.LayerNorm(output_dim)
+        self.ln = eqx.nn.LayerNorm(output_dim // 2)
 
         self.activation = NewGELU()
 
@@ -155,9 +153,8 @@ class GatedMLP(eqx.Module):
         x = policy.cast_to_compute(arr)
         
         x = self.activation(self.up_proj(arr))
-        x = jax.vmap(self.ln_1)(x)
+        x = jax.vmap(self.ln)(x)
         x = self.down_proj(x * jax.nn.silu(self.gate(arr)))
-        x = self.activation(jax.vmap(self.ln_2)(x))
         
         return policy.cast_to_output(x)
 
