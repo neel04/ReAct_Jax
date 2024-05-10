@@ -453,6 +453,6 @@ class Trainer:
 
         # log to logger as a table
         self.text_table.add_data(metadata["step"], prompt, model_gen, metadata["type"])
-        self.wandb_logger.log({"Generated Samples": self.text_table})
+        self.wandb_logger.log({"Generated Samples": self.text_table}, step=metadata["step"])
 
         return input_arr
