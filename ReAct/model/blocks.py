@@ -140,11 +140,11 @@ class GatedMLP(eqx.Module):
 
         key_1, key_2, key_3, key_4 = jax.random.split(key, 4)
 
-        self.up_proj = LinearProj(input_dim, output_dim // 2, key=key_1)
-        self.gate = LinearProj(input_dim, output_dim // 2, key=key_4)
-        self.down_proj = LinearProj(output_dim // 2, output_dim, key=key_3)
+        self.up_proj = LinearProj(input_dim, output_dim // 4, key=key_1)
+        self.gate = LinearProj(input_dim, output_dim // 4, key=key_4)
+        self.down_proj = LinearProj(output_dim // 4, output_dim, key=key_3)
 
-        self.ln = eqx.nn.LayerNorm(output_dim // 2)
+        self.ln = eqx.nn.LayerNorm(output_dim // 4)
 
         self.activation = NewGELU()
 
