@@ -45,7 +45,8 @@ class RecurrentModule(eqx.Module):
         self.hist_gate = LinearProj(bottleneck * 2, bottleneck, key=keys[1])
         self.reshape_layer = MLP(bottleneck * 2, bottleneck, p=0., key=keys[0])
         self.forget_gate = MLP(bottleneck, bottleneck, p=drop_rate, key=keys[2])
-        self.ctx_gate = GatedMLP(bottleneck, bottleneck, key=keys[3])
+        #self.ctx_gate = GatedMLP(bottleneck, bottleneck, key=keys[3])
+        self.ctx_gate = MLP(bottleneck, bottleneck, p=drop_rate, key=keys[2])
 
         self.attention_layers = eqx.filter(eqx.filter_vmap(make_layer)(keys), eqx.is_array_like)
     
@@ -77,9 +78,9 @@ class RecurrentModule(eqx.Module):
 
         hist_lerp = self.hist_act(self.hist_gate(jnp.concat([history.mean(0), ctx_state], axis=-1)))
 
-        #ctx_state *= jax.nn.sigmoid(self.forget_gate(hist_lerp, enable_dropout, key))
-        #ctx_state += self.ctx_gate(hist_lerp, enable_dropout, key)
-        ctx_state += self.ctx_gate(hist_lerp)
+        ctx_state *= jax.nn.sigmoid(self.forget_gate(hist_lerp, enable_dropout, key))
+        ctx_state += self.ctx_gate(hist_lerp, enable_dropout, key)
+        #ctx_state += self.ctx_gate(hist_lerp)
 
         return out[0], ctx_state
 
