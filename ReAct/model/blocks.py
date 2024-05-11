@@ -154,7 +154,7 @@ class GatedMLP(eqx.Module):
         
         x = self.activation(self.up_proj(arr))
         x = jax.vmap(self.ln)(x)
-        x = self.down_proj(x * jax.nn.silu(self.gate(arr)))
+        x = self.activation(self.down_proj(x * jax.nn.silu(self.gate(arr))))
         
         return policy.cast_to_output(x)
 
