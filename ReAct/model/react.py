@@ -116,7 +116,7 @@ class React(eqx.Module):
         self.alpha = jnp.array([0.5])
 
         self.post_ln = eqx.nn.LayerNorm(width)
-        self.out_head = LinearProj(width, vocab_size, key=key4)
+        self.out_head = LinearProj(width * 3, vocab_size, key=key4)
 
     def positional_encoding(self, seq_len, d_model):
         '''
@@ -157,7 +157,10 @@ class React(eqx.Module):
             f=body_fun, init=(interim_thought, input_arr), xs=jnp.arange(iters_to_do), kind="checkpointed"
         )
 
-        return self.alpha * final_val[0] + (1 - self.alpha) * history.mean(0)
+        out, ctx_state = final_val
+
+        #return self.alpha * out + (1 - self.alpha) * history.mean(0)
+        return jnp.concatenate([out, history.mean(0), ctx_state], axis=-1)
 
     @eqx.filter_jit
     def __call__(self,
