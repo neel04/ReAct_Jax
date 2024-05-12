@@ -7,9 +7,9 @@ import jax.numpy as jnp
 from jaxtyping import Array, PRNGKeyArray, PyTree
 from jmp import Policy
 
-from .blocks import MLP, AttentionBlock, LinearProj, LiteAttention
+from .blocks import MLP, AttentionBlock, GatedMLP, LinearProj, LiteAttention, NewGELU
 
-policy = Policy(compute_dtype=jnp.bfloat16, param_dtype=jnp.float32, output_dtype=jnp.bfloat16)
+policy = Policy(compute_dtype=jnp.bfloat16, param_dtype=jnp.bfloat16, output_dtype=jnp.bfloat16)
 
 # ruff: noqa: E402, E731
 
@@ -20,7 +20,8 @@ class RecurrentModule(eqx.Module):
     num_layers: int = eqx.field(static=True)
     
     attention_layers: PyTree[AttentionBlock]
-    forget_gate: eqx.Module
+    hist_gate: eqx.Module
+    hist_act: eqx.Module
     ctx_gate: eqx.Module
     reshape_layer: eqx.Module
 
@@ -39,10 +40,11 @@ class RecurrentModule(eqx.Module):
         )
 
         self.num_layers = num_layers
+        self.hist_act = NewGELU()
 
-        self.reshape_layer = MLP(bottleneck * 2, bottleneck, p=0., key=keys[0])
-        self.forget_gate = MLP(bottleneck, bottleneck, p=0., key=keys[1])
-        self.ctx_gate = MLP(bottleneck, bottleneck, p=0., key=keys[2])
+        self.hist_gate = LinearProj(bottleneck * 2, bottleneck, key=keys[0])
+        self.reshape_layer = MLP(bottleneck * 2, bottleneck, p=0., key=keys[1])
+        self.ctx_gate = GatedMLP(bottleneck, bottleneck, key=keys[2])
 
         self.attention_layers = eqx.filter(eqx.filter_vmap(make_layer)(keys), eqx.is_array_like)
     
@@ -72,9 +74,8 @@ class RecurrentModule(eqx.Module):
 
         out, history = eqx.internal.scan(f=f, init=(x, 0), xs=dynamic_part, kind='lax')
 
-        history = history.mean(0)
-        ctx_state *= jax.nn.sigmoid(self.forget_gate(history, enable_dropout, key))
-        ctx_state += self.ctx_gate(history, enable_dropout, key)
+        hist_lerp = self.hist_act(self.hist_gate(jnp.concat([history.mean(0), ctx_state], axis=-1)))
+        ctx_state += self.ctx_gate(hist_lerp)
 
         return out[0], ctx_state
 

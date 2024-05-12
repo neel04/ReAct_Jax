@@ -10,6 +10,7 @@ from jmp import Policy
 policy = Policy(compute_dtype=jnp.bfloat16, param_dtype=jnp.float32, output_dtype=jnp.bfloat16)
 
 # ruff: noqa: F722
+
 class AttentionBlock(eqx.Module):
     """Basic Block for LiteAttention"""
 
