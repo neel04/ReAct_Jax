@@ -21,8 +21,9 @@ from ReAct.utils.helpers import count_params, load_eqx_obj, save_eqx_obj
 
 from .helpers import broad_to_bsz, calc_performance_metrics
 
+half, full = jnp.bfloat16, jnp.float32
 mesh = MeshShardingHelper(axis_dims=[-1], axis_names=['data']) # handle DDP + TP over multi-node
-policy = Policy(compute_dtype=jnp.bfloat16, param_dtype=jnp.float32, output_dtype=jnp.bfloat16)
+policy = Policy(compute_dtype=half, param_dtype=half, output_dtype=half)
 
 @eqx.filter_jit
 def n_k_loop(model: eqx.Module, input_arr: Array, pad_mask: Array, n: Array, k: Array, key: PRNGKeyArray) -> Array:
@@ -119,7 +120,7 @@ def make_step(model: eqx.Module,
                                              is_leaf=lambda x: isinstance(x, eqx.nn.Dropout))
 
     loss, grads = compute_loss(diff_model, static_model, x, y, pad_mask, iters_to_do, num_classes, keys)
-    grads = policy.cast_to_compute(grads) # cast to float32
+    grads = policy.cast_to_compute(grads) # cast to bfloat16
     updates, opt_state = optim.update(grads, opt_state, model)
     model = eqx.apply_updates(model, updates)
 
@@ -335,8 +336,6 @@ class Trainer:
                                                    self.max_iters, optim, self.num_classes, keys)
 
                 if step % 100 == 0:
-                    #rndm_n, rndm_k = self.get_n_k(key=keys[step % self.batch_size])
-                    
                     accuracy, loss, perplexity = self.compute_metrics(model, seq, label, pad_mask,
                                                                       self.max_iters, self.num_classes, keys)
 
