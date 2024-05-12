@@ -9,7 +9,7 @@ from jmp import Policy
 
 from .blocks import MLP, AttentionBlock, GatedMLP, LinearProj, LiteAttention, NewGELU
 
-policy = Policy(compute_dtype=jnp.bfloat16, param_dtype=jnp.bfloat16, output_dtype=jnp.bfloat16)
+policy = Policy(compute_dtype=jnp.bfloat16, param_dtype=jnp.float32, output_dtype=jnp.bfloat16)
 
 # ruff: noqa: E402, E731
 
