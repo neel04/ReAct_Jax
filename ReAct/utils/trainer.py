@@ -354,8 +354,8 @@ class Trainer:
                         step=step
                     )
                     
-                    if trial is not None and (trial.should_prune() or jnp.isnan(loss)):
-                        raise optuna.exceptions.TrialPruned()
+                    #if trial is not None and (trial.should_prune() or jnp.isnan(loss)):
+                        #raise optuna.exceptions.TrialPruned()
 
                     if jnp.isnan(loss):
                         self.my_logger.warning(f'\nLoss is NaN at step {step}')
