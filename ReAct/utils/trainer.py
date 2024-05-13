@@ -304,6 +304,15 @@ class Trainer:
         perplexity = jnp.exp(loss)
 
         return accuracy, loss, perplexity
+    
+    def optuna_log(self, trial: Optional[Any], metrics: Tuple[float, int]):
+        '''
+        Logs the metrics to the optuna trial
+        '''
+        loss, epoch = metrics
+
+        if trial is not None:
+            trial.report(loss, epoch)
 
     def train(self, trial: Optional[Any] = None) -> Tuple[float, int]:
         step_done = 0
@@ -354,8 +363,9 @@ class Trainer:
                         step=step
                     )
                     
-                    #if trial is not None and (trial.should_prune() or jnp.isnan(loss)):
-                        #raise optuna.exceptions.TrialPruned()
+                    if trial is not None and trial.should_prune():
+                        self.optuna_log(trial, (loss, epoch))
+                        raise optuna.exceptions.TrialPruned()
 
                     if jnp.isnan(loss):
                         self.my_logger.warning(f'\nLoss is NaN at step {step}')
@@ -405,7 +415,7 @@ class Trainer:
                     self.wandb_logger.save(filepath)
 
             step_done = step # prepare for next epoch
-            trial.report(loss, epoch) if trial is not None else ...
+            self.optuna_log(trial, (loss, epoch))
             
             print(f'Epoch {epoch} done!')
 

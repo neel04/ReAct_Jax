@@ -134,7 +134,7 @@ def kickoff_optuna(trial, **trainer_kwargs):
     # Regularization hyperparams
     args.lr = trial.suggest_float('lr', 1e-4, 1e-2)
     args.drop_rate = trial.suggest_float('drop_rate', 0.0, 0.1, step=0.01)
-    args.weight_decay = trial.suggest_float('weight_decay', 1e-5, 1e-3, step=2e-4)
+    args.weight_decay = trial.suggest_float('weight_decay', 1e-5, 1e-3)
     args.warmup_steps = trial.suggest_int('warmup_steps', 0, 500, step=100)
 
     # Optimizer hyperparams
@@ -158,7 +158,7 @@ def kickoff_optuna(trial, **trainer_kwargs):
     with jax.spmd_mode('allow_all'):
         loss = trainer.train(trial)
     
-    return loss
+    return jax.numpy.nan_to_num(loss, nan=9e9)
 
 if __name__ == '__main__':
     key = jax.random.PRNGKey(69)
