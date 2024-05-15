@@ -4,8 +4,11 @@ import equinox as eqx
 import jax
 import jax.numpy as jnp
 from jaxtyping import Array, PRNGKeyArray, PyTree
+from jmp import Policy
 
 from .blocks import AttentionBlock, LinearProj
+
+policy = Policy(compute_dtype=jnp.bfloat16, param_dtype=jnp.float32, output_dtype=jnp.bfloat16)
 
 class main_block(eqx.Module):
     '''
@@ -45,7 +48,8 @@ class main_block(eqx.Module):
         
         def f(input_arr: Array, _dynamic_bl: PyTree):
             block = eqx.combine(_dynamic_bl, static_part)
-            return block(input_arr, input_arr, pad_mask, enable_dropout, key), None
+            output = block(input_arr, input_arr, pad_mask, enable_dropout, key), None
+            return policy.cast_to_output(output) # mixed precision
 
         out, _ = eqx.internal.scan(f=f, init=input_arr, xs=dynamic_part, kind='lax')
         
@@ -104,6 +108,8 @@ class GPT(eqx.Module):
                  key: PRNGKeyArray) -> Array:
         
         input_arr = jax.vmap(self.embed_layer)(input_arr) + self.pos_enc
+
+        input_arr, pad_mask = policy.cast_to_compute((input_arr, pad_mask))
         output = self.main_block(input_arr, pad_mask, enable_dropout, key)
         
         return self.out_head(output)
