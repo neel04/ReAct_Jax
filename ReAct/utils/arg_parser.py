@@ -74,7 +74,7 @@ def parse_args():
                         help='Debug mode - disables JIT. Default: False')
     
     parser.add_argument('--bf16', action='store_true', default=False,
-                        help='Enable mixed precision training. Default: False')
+                        help='Switch model weights to bf16. Grads are always in bf16. Default: False (fp32)')
     
     parser.add_argument('--exp_logging', action='store_const', const='online', default='disabled',
                     help='Enable experiment logging in the cloud. Default: disabled')

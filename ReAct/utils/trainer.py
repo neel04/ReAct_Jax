@@ -23,7 +23,7 @@ from .helpers import broad_to_bsz, calc_performance_metrics
 
 half, full = jnp.bfloat16, jnp.float32
 mesh = MeshShardingHelper(axis_dims=[-1], axis_names=['data']) # handle DDP + TP over multi-node
-policy = Policy(compute_dtype=half, param_dtype=full, output_dtype=half)
+policy = Policy(compute_dtype=half, param_dtype=half, output_dtype=half)
 
 @eqx.filter_jit
 def n_k_loop(model: eqx.Module, input_arr: Array, pad_mask: Array, n: Array, k: Array, key: PRNGKeyArray) -> Array:
