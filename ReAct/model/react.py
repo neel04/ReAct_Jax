@@ -152,7 +152,7 @@ class React(eqx.Module):
             return (latent, ctx_state), latent
 
         final_val, history = jax.lax.scan(
-            f=body_fun, init=(interim_thought, input_arr), xs=jnp.arange(iters_to_do), unroll=iters_to_do
+            f=body_fun, init=(interim_thought, input_arr), xs=jnp.arange(iters_to_do), unroll=2
         )
 
         return self.alpha * final_val[0] + (1 - self.alpha) * history.mean(0)
