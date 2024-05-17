@@ -51,7 +51,7 @@ class main_block(eqx.Module):
             output = block(input_arr, input_arr, pad_mask, enable_dropout, key), None
             return policy.cast_to_output(output) # mixed precision
 
-        out, _ = eqx.internal.scan(f=f, init=input_arr, xs=dynamic_part, kind='lax')
+        out, _ = jax.lax.scan(f=f, init=input_arr, xs=dynamic_part, unroll=len(dynamic_part))
         
         return out
         
