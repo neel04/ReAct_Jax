@@ -1,4 +1,5 @@
 import os
+from functools import partial
 from pathlib import Path
 from typing import Dict, List
 
@@ -15,24 +16,26 @@ class MiniPileDataset:
         datasets.config.IN_MEMORY_MAX_SIZE = 1e+11
         
         self.cpus = jax.devices("cpu")
+        self.pad_tok = 50257
         self.bsz = bsz
         self.max_length = max_length + 1
         self.split = split
 
         self.tok = Tok(vocab_dir=None, max_length=self.max_length) # vocab_dir is None = GPT2 tokenizer
 
-    def tokenize_and_pad(self, text: List[str]) -> Dict[str, List[List[int]]]:
-        encoded = self.tok.encode(text['text'])['input_ids']
+    @staticmethod
+    def tokenize_and_pad(text: List[str], encode_fn: callable) -> Dict[str, List[List[int]]]:
+        encoded = encode_fn(text['text'])['input_ids']
 
         return {'text': encoded}
 
     @staticmethod
-    def shift_tokens(seq: Dict[str, Array]) -> Dict[str, List[Array]]:
+    def shift_tokens(seq: Dict[str, Array], pad_tok: int) -> Dict[str, List[Array]]:
         seq = np.asarray(seq['text'])
         
         targets = np.roll(seq, shift=-1)
         seq, targets = seq[:, :-1], targets[:, :-1]
-        pad_mask = np.where(seq != 50527, 1, 0)
+        pad_mask = np.where(seq != pad_tok, 1, 0)
 
         return {'text': [[seq, targets, pad_mask]]}
 
@@ -43,12 +46,13 @@ class MiniPileDataset:
         '''
         return {k: [v] for k, v in batch.items()}
 
-    def chunk_examples(self, examples: dict) -> dict:
+    @staticmethod
+    def chunk_examples(examples: dict, max_length: int) -> dict:
         '''
         Break long sequences into chunks of approx. ctxlen tokens
         '''
         chunks = []
-        chunk_size = (self.max_length - 1) * 4 #rought approx. for ~512 tokens
+        chunk_size = (max_length - 1) * 4 #rough approx. for ~512 tokens
 
         for sentence in examples["text"]:
             chunks += [sentence[i:i + chunk_size] for i in range(0, len(sentence), chunk_size)]
@@ -128,20 +132,24 @@ class MiniPileDataset:
                 )
 
                 dataset = self.take_subset(dataset, 2_000)
-                
-                dataset = dataset.map(self.chunk_examples, batched=True, batch_size=self.bsz,
-                                    keep_in_memory=True, drop_last_batch=True)
 
-                dataset = dataset.map(self.tokenize_and_pad, batched=True, batch_size=self.bsz,
-                                    keep_in_memory=True, drop_last_batch=True, num_proc=None)
+                def dataset_map_fn(func):
+                    return dataset.map(
+                        func,
+                        batched=True,
+                        batch_size=self.bsz,
+                        keep_in_memory=True,
+                        drop_last_batch=True,
+                        num_proc=None,
+                    )
 
-                dataset = dataset.map(self.shift_tokens, batched=True, batch_size=self.bsz,
-                                    keep_in_memory=True, drop_last_batch=True, num_proc=None)
-                
+                dataset = dataset_map_fn(partial(self.chunk_examples, max_length=self.max_length))
+                dataset = dataset_map_fn(partial(self.tokenize_and_pad, encode_fn=self.tok.encode))
+                dataset = dataset_map_fn(partial(self.shift_tokens, pad_tok=self.pad_tok))
+
                 dataset.set_format(type='numpy')
 
-                self.upload_dataset(
-                    dataset, hub_path=f"Neel-Gupta/minipile-processed_{self.bsz}"
-                )  # upload the processed dataset to the Hub
+                # Upload the processed dataset to the hub
+                self.upload_dataset(dataset, hub_path=f"Neel-Gupta/minipile-processed_{self.bsz}")
 
                 return dataset
