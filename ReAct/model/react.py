@@ -152,18 +152,9 @@ class React(eqx.Module):
             
             return (latent, ctx_state), latent
 
-        #final_val, history = jax.lax.scan(
-            #f=body_fun, init=(interim_thought, input_arr), xs=jnp.arange(iters_to_do)
-        #)
-        thought, ctx_state = interim_thought, input_arr
-        history = []
-        
-        for idx in range(iters_to_do):
-            (thought, ctx_state), latent = body_fun((thought, ctx_state), idx)
-            history.append(latent)
-            
-        history = jnp.stack(history, axis=0)
-        final_val = thought
+        final_val, history = eqx.internal.scan(
+            f=body_fun, init=(interim_thought, input_arr), xs=jnp.arange(iters_to_do), kind='checkpointed'
+        )
 
         return self.alpha * final_val[0] + (1 - self.alpha) * history.mean(0)
 

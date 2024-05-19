@@ -97,6 +97,7 @@ def make_step(model: eqx.Module,
               num_classes: int, # static
               keys: List[PRNGKeyArray]):
 
+    @eqx.filter_jit
     @eqx.filter_value_and_grad
     def compute_loss(model: eqx.Module, static_model: PyTree, x: Array, y: Array, pad_mask: Array,
                     iters_to_do: int, num_classes: int, keys: PRNGKeyArray) -> int:
