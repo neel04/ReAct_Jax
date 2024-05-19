@@ -141,10 +141,6 @@ class React(eqx.Module):
                           key: PRNGKeyArray) -> Array:
 
         @eqx.filter_jit
-        @partial(
-            jax.remat,
-            policy=jax.checkpoint_policies.dots_with_no_batch_dims_saveable,
-        )
         def body_fun(carry: Tuple[Array, Array], idx: int) -> Tuple[Tuple, Array]:
             thought, ctx_state = carry
             
