@@ -141,6 +141,10 @@ class React(eqx.Module):
                           key: PRNGKeyArray) -> Array:
 
         @eqx.filter_jit
+        @partial(
+            jax.remat,
+            policy=jax.checkpoint_policies.dots_with_no_batch_dims_saveable,
+        )
         def body_fun(carry: Tuple[Array, Array], idx: int) -> Tuple[Tuple, Array]:
             thought, ctx_state = carry
             
@@ -153,7 +157,7 @@ class React(eqx.Module):
             return (latent, ctx_state), latent
 
         final_val, history = eqx.internal.scan(
-            f=body_fun, init=(interim_thought, input_arr), xs=jnp.arange(iters_to_do), kind='checkpointed'
+            f=body_fun, init=(interim_thought, input_arr), xs=jnp.arange(iters_to_do), kind='lax'
         )
 
         return self.alpha * final_val[0] + (1 - self.alpha) * history.mean(0)
