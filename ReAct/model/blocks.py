@@ -172,7 +172,7 @@ class DynamicGatedMLP(eqx.Module):
 
         self.proj_1 = LinearProj(input_dim, output_dim, key=keys[0])
         self.proj_2 = LinearProj(output_dim, output_dim, key=keys[1])
-        self.ln = eqx.nn.LayerNorm(input_dim)
+        self.ln = eqx.nn.LayerNorm(output_dim)
         self.act = NewGELU()
 
     def __call__(
