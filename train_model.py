@@ -51,7 +51,7 @@ def main(key: PRNGKeyArray):
     ]
 
     if args.tune_hyperparams:
-        args.group = 'Sweeps' if args.baseline else 'Sweeps_5i'
+        args.group = 'Sweeps_base' if args.baseline else f'Sweeps_{args.max_iters}i'
 
         trainloader = train_dataset.create_dataloader("40%")
         valloader = val_dataset.create_dataloader("40%")

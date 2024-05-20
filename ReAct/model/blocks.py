@@ -162,6 +162,7 @@ class GatedMLP(eqx.Module):
 class DynamicGatedMLP(eqx.Module):
     proj_1: eqx.Module
     proj_2: eqx.Module
+    ln: eqx.Module
     act: callable
 
     def __init__(self, input_dim: int, key: PRNGKeyArray) -> Array:
@@ -171,6 +172,7 @@ class DynamicGatedMLP(eqx.Module):
 
         self.proj_1 = LinearProj(input_dim, output_dim, key=keys[0])
         self.proj_2 = LinearProj(output_dim, output_dim, key=keys[1])
+        self.ln = eqx.nn.LayerNorm(input_dim)
         self.act = NewGELU()
 
     def __call__(
@@ -180,6 +182,7 @@ class DynamicGatedMLP(eqx.Module):
         input_arr = policy.cast_to_compute(input_arr)
 
         dynamic_weights = self.proj_2(self.act(self.proj_1(input_arr)))
+        dynamic_weights = jax.vmap(self.ln)(dynamic_weights)
         dw_1, dw_2 = jnp.split(dynamic_weights, 2, axis=-1)
         output = (input_arr @ dw_2.T) @ dw_1
 
