@@ -7,7 +7,7 @@ import jax.numpy as jnp
 from jaxtyping import Array, PRNGKeyArray, PyTree
 from jmp import Policy
 
-from .blocks import MLP, AttentionBlock, GatedMLP, LinearProj, LiteAttention, NewGELU
+from .blocks import MLP, AttentionBlock, DynamicGatedMLP, LinearProj, LiteAttention, NewGELU
 
 policy = Policy(compute_dtype=jnp.bfloat16, param_dtype=jnp.float32, output_dtype=jnp.bfloat16)
 
@@ -44,7 +44,7 @@ class RecurrentModule(eqx.Module):
 
         self.hist_gate = LinearProj(bottleneck * 2, bottleneck, key=keys[0])
         self.reshape_layer = MLP(bottleneck * 2, bottleneck, p=0., key=keys[1])
-        self.ctx_gate = GatedMLP(bottleneck, bottleneck, key=keys[2])
+        self.ctx_gate = DynamicGatedMLP(bottleneck, key=keys[2])
 
         self.attention_layers = eqx.filter(eqx.filter_vmap(make_layer)(keys), eqx.is_array_like)
     

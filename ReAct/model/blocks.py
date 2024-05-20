@@ -4,10 +4,10 @@ from typing import Optional
 import equinox as eqx
 import jax
 import jax.numpy as jnp
-from jaxtyping import Array, BFloat16, PRNGKeyArray
+from jaxtyping import Array, Float, PRNGKeyArray
 from jmp import Policy
 
-policy = Policy(compute_dtype=jnp.bfloat16, param_dtype=jnp.float32, output_dtype=jnp.bfloat16)
+policy = Policy(compute_dtype=jnp.bfloat16, param_dtype=jnp.bfloat16, output_dtype=jnp.bfloat16)
 
 # ruff: noqa: F722
 
@@ -57,7 +57,7 @@ class AttentionBlock(eqx.Module):
         return jnp.repeat(mask, self.n_heads, axis=0)
     
     def __call__(self,
-                 inp: BFloat16[Array, 'seqlen bottleneck'],
+                 inp: Float[Array, 'seqlen bottleneck'],
                  input_arr: Array,
                  mask: Array,
                  enable_dropout: bool,
@@ -159,6 +159,32 @@ class GatedMLP(eqx.Module):
         
         return policy.cast_to_output(x)
 
+class DynamicGatedMLP(eqx.Module):
+    proj_1: eqx.Module
+    proj_2: eqx.Module
+    act: callable
+
+    def __init__(self, input_dim: int, key: PRNGKeyArray) -> Array:
+
+        keys = jax.random.split(key, 2)
+        output_dim = input_dim * 2
+
+        self.proj_1 = LinearProj(input_dim, output_dim, key=keys[0])
+        self.proj_2 = LinearProj(output_dim, output_dim, key=keys[1])
+        self.act = NewGELU()
+
+    def __call__(
+        self, input_arr: Float[Array, "seqlen width"]
+    ) -> Float[Array, "seqlen width"]:
+
+        input_arr = policy.cast_to_compute(input_arr)
+
+        dynamic_weights = self.proj_2(self.act(self.proj_1(input_arr)))
+        dw_1, dw_2 = jnp.split(dynamic_weights, 2, axis=-1)
+        output = (input_arr @ dw_2.T) @ dw_1
+
+        return policy.cast_to_output(output)
+
 class LinearProj(eqx.Module):
     bias: Optional[jax.Array]
     weight: jax.Array
@@ -189,7 +215,7 @@ class LinearProj(eqx.Module):
             self.bias = jnp.zeros((output_dim,))
     
     def __call__(self,
-                 arr: BFloat16[Array, 'batch in_dim'],
+                 arr: Float[Array, 'batch in_dim'],
                  mask: Optional[Array] = None,
                  **kwargs) -> Array:
         
@@ -209,7 +235,7 @@ class LiteAttention(eqx.Module):
         self.weight = LinearProj(input_dim, input_dim, use_bias=True, key=key)
 
     @jax.jit
-    def __call__(self, x: BFloat16[Array, 'seqlen in_dim'], mask: Array):
+    def __call__(self, x: Float[Array, 'seqlen in_dim'], mask: Array):
         mask, x = policy.cast_to_compute((mask, x))
         attn_weights = jax.nn.softmax(self.weight(x.T, mask), axis=1) # type: ignore
         output = x * attn_weights.T
@@ -236,7 +262,7 @@ class MixerBlock(eqx.Module):
         self.channel_mixer = MLP(input_dim, input_dim, drop_rate, key=key1)
         self.token_mixer = LinearProj(seqlen, seqlen, key=key2)
   
-    def __call__(self, x: BFloat16[Array, 'seqlen in_dim'], mask: Array, key: PRNGKeyArray):
+    def __call__(self, x: Float[Array, 'seqlen in_dim'], mask: Array, key: PRNGKeyArray):
         x, mask = policy.cast_to_compute((x, mask))
         
         arr = x.T

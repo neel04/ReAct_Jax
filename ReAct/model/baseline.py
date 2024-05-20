@@ -8,7 +8,7 @@ from jmp import Policy
 
 from .blocks import AttentionBlock, LinearProj
 
-policy = Policy(compute_dtype=jnp.bfloat16, param_dtype=jnp.float32, output_dtype=jnp.bfloat16)
+policy = Policy(compute_dtype=jnp.bfloat16, param_dtype=jnp.bfloat16, output_dtype=jnp.bfloat16)
 
 class main_block(eqx.Module):
     '''
@@ -78,12 +78,10 @@ class GPT(eqx.Module):
         keys = jax.random.split(key, 3)
         
         self.embed_layer = eqx.nn.Embedding(vocab_size, width, key=keys[0])
-
         self.pos_enc = jax.lax.stop_gradient(self.positional_encoding(seqlen, width))
 
         self.main_block = main_block(seqlen, width, n_heads, drop_rate, num_blocks, key=keys[1])
-        
-        self.out_head = LinearProj(width, vocab_size, key=key)
+        self.out_head = LinearProj(width, vocab_size, key=keys[2])
     
     def positional_encoding(self, seq_len: int, d_model: int):
         '''
