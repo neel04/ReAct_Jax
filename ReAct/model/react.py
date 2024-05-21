@@ -7,7 +7,7 @@ import jax.numpy as jnp
 from jaxtyping import Array, PRNGKeyArray, PyTree
 from jmp import Policy
 
-from .blocks import MLP, AttentionBlock, DynamicGatedMLP, LinearProj, LiteAttention, NewGELU
+from .blocks import MLP, AttentionBlock, LinearProj, LiteAttention, NewGELU, MixerBlock
 
 policy = Policy(compute_dtype=jnp.bfloat16, param_dtype=jnp.float32, output_dtype=jnp.bfloat16)
 
@@ -44,7 +44,8 @@ class RecurrentModule(eqx.Module):
 
         self.hist_gate = LinearProj(bottleneck * 2, bottleneck, key=keys[0])
         self.reshape_layer = MLP(bottleneck * 2, bottleneck, p=0., key=keys[1])
-        self.ctx_gate = DynamicGatedMLP(bottleneck, key=keys[2])
+        #self.ctx_gate = MLP(bottleneck, bottleneck, p=0., key=keys[2])
+        self.ctx_gate = MixerBlock(bottleneck, seqlen, drop_rate=0., key=keys[3])
 
         self.attention_layers = eqx.filter(eqx.filter_vmap(make_layer)(keys), eqx.is_array_like)
     
@@ -75,7 +76,7 @@ class RecurrentModule(eqx.Module):
         out, history = eqx.internal.scan(f=f, init=(x, 0), xs=dynamic_part, kind='lax')
 
         hist_lerp = self.hist_act(self.hist_gate(jnp.concat([history.mean(0), ctx_state], axis=-1)))
-        ctx_state += self.ctx_gate(hist_lerp)
+        ctx_state += self.ctx_gate(hist_lerp, mask=None, enable_dropout=enable_dropout, key=key)
 
         return out[0], ctx_state
 

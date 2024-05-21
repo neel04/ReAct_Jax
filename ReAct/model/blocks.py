@@ -266,13 +266,13 @@ class MixerBlock(eqx.Module):
         self.channel_mixer = MLP(input_dim, input_dim, drop_rate, key=key1)
         self.token_mixer = LinearProj(seqlen, seqlen, key=key2)
   
-    def __call__(self, x: Float[Array, 'seqlen in_dim'], mask: Array, key: PRNGKeyArray):
+    def __call__(self, x: Float[Array, 'seqlen in_dim'], mask: Array, enable_dropout: bool, key: PRNGKeyArray) -> Array:
         x, mask = policy.cast_to_compute((x, mask))
         
         arr = x.T
         arr = self.act_1(self.token_mixer(arr, key=key, mask=mask))
         arr = jax.vmap(self.norm)(arr.T)
         x = x + arr
-        output = x + self.act_2(self.channel_mixer(arr, key))
+        output = x + self.act_2(self.channel_mixer(arr, enable_dropout, key=key))
         
         return policy.cast_to_output(output)
