@@ -30,7 +30,7 @@ cd ReAct_Jax/; git pull --all; cd ..
 
 # Run the Docker container
 echo "Running Docker container..."
-docker run --pull 'always' -v $(pwd)/ReAct_Jax/:/ReAct_Jax/ -e EQX_ON_ERROR=nan -e PJRT_DEVICE=TPU -e XLA_USE_SPMD=1 --privileged --rm --net=host --name $CONTAINER_NAME -it -d $IMAGE_NAME
+docker run --pull 'always' -v $(pwd)/ReAct_Jax/:/ReAct_Jax/ -e EQX_ON_ERROR=nan --privileged --rm --net=host --name $CONTAINER_NAME -it -d $IMAGE_NAME
 
 # Get docker container ID to copy files
 CONTAINER_ID=$(docker ps -aqf "name=$CONTAINER_NAME")

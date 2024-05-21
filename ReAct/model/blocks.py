@@ -7,7 +7,7 @@ import jax.numpy as jnp
 from jaxtyping import Array, Float, PRNGKeyArray
 from jmp import Policy
 
-policy = Policy(compute_dtype=jnp.bfloat16, param_dtype=jnp.bfloat16, output_dtype=jnp.bfloat16)
+policy = Policy(compute_dtype=jnp.bfloat16, param_dtype=jnp.float32, output_dtype=jnp.bfloat16)
 
 # ruff: noqa: F722
 
@@ -179,9 +179,10 @@ class DynamicGatedMLP(eqx.Module):
         self, input_arr: Float[Array, "seqlen width"]
     ) -> Float[Array, "seqlen width"]:
 
-        input_arr = policy.cast_to_compute(input_arr)
+        input_arr = policy.cast_to_param(input_arr)
 
         dynamic_weights = self.proj_2(self.act(self.proj_1(input_arr)))
+        dynamic_weights = policy.cast_to_param(dynamic_weights)
         dynamic_weights = jax.vmap(self.ln)(dynamic_weights)
         dw_1, dw_2 = jnp.split(dynamic_weights, 2, axis=-1)
         output = (input_arr @ dw_2.T) @ dw_1
