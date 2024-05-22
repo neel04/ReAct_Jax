@@ -66,6 +66,10 @@ def main(key: PRNGKeyArray):
                 consider_endpoints=True,
                 n_startup_trials=5,
             ),
+            pruner=optuna.pruners.MedianPruner(
+                n_startup_trials=5,
+                n_min_trials=5
+            )
         )
 
         wandb_kwargs = {

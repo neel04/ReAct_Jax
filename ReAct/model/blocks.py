@@ -120,6 +120,40 @@ class MLP(eqx.Module):
 
         return policy.cast_to_output(self.act(output))
 
+class GatedAttentionBlock(eqx.Module):
+    """Gated Attention Block"""
+    
+    gate: eqx.Module
+    block: eqx.Module
+    ln: eqx.Module
+    activation: callable
+    
+    def __init__(
+        self,
+        seqlen: int,
+        n_heads: int,
+        drop_rate: float,
+        in_dim: int,
+        key: PRNGKeyArray,
+    ):
+
+        keys = jax.random.split(key, 2)
+        
+        self.block = AttentionBlock(seqlen, n_heads, drop_rate, in_dim, keys[0])
+
+        self.gate = LinearProj(in_dim, in_dim, key=keys[1])
+        self.ln = eqx.nn.LayerNorm(in_dim)
+        self.activation = NewGELU()
+    
+    def __call__(self, x: Array, ctx: Array, pad_mask: Array, enable_dropout: bool, key: PRNGKeyArray) -> Array:
+        x, ctx = policy.cast_to_compute((x, ctx))
+        
+        x = self.block(x, x, pad_mask, enable_dropout, key)
+        x = jax.vmap(self.ln)(x)
+        x *= jax.nn.silu(self.gate(ctx))
+
+        return policy.cast_to_output(x)
+
 class GatedMLP(eqx.Module):
     '''
     Gated MLP, Mamba-ish style
