@@ -16,60 +16,61 @@ class AttentionBlock(eqx.Module):
 
     seqlen: int = eqx.field(static=True)
     n_heads: int = eqx.field(static=True)
-    bottleneck: int = eqx.field(static=True)
-    
+    in_dim: int = eqx.field(static=True)
+
     attn_gate: eqx.Module
     ln1: eqx.Module
     ln2: eqx.Module
     mlp: eqx.Module
 
-    def __init__(self,
-                 seqlen: int,
-                 n_heads: int,
-                 drop_rate: float,
-                 bottleneck: int,
-                 key: PRNGKeyArray):
-        
+    def __init__(
+        self,
+        seqlen: int,
+        n_heads: int,
+        drop_rate: float,
+        in_dim: int,
+        key: PRNGKeyArray = jax.random.PRNGKey(69),
+    ):
         key1, key2 = jax.random.split(key, 2)
 
         self.seqlen = seqlen
         self.n_heads = n_heads
-        self.bottleneck = bottleneck
+        self.in_dim = in_dim
 
-        self.attn_gate = eqx.nn.MultiheadAttention(num_heads=n_heads, query_size=bottleneck,
+        self.attn_gate = eqx.nn.MultiheadAttention(num_heads=n_heads, query_size=in_dim,
                                                    use_query_bias=True, use_key_bias=True,
                                                    use_value_bias=True, use_output_bias=True, 
                                                    dropout_p=drop_rate, key=key1)
 
-        self.ln1 = eqx.nn.LayerNorm(self.bottleneck)
-        self.ln2 = eqx.nn.LayerNorm(self.bottleneck)
+        self.ln1 = eqx.nn.LayerNorm(self.in_dim)
+        self.ln2 = eqx.nn.LayerNorm(self.in_dim)
 
-        self.mlp = MLP(self.bottleneck, self.bottleneck, drop_rate, key2)
+        self.mlp = MLP(self.in_dim, self.in_dim, drop_rate, key2)
 
-    def _make_self_attention_mask(self,
-                                  pad_mask: Array) -> Array:
-        
+    def _make_self_attention_mask(self, pad_mask: Array) -> Array:
         """Create self-attention mask from sequence-level mask."""
-        
+
         mask = jnp.ones((self.seqlen, self.seqlen))
         mask = jnp.tril(mask)
         mask = jnp.expand_dims(mask, 0)
         return jnp.repeat(mask, self.n_heads, axis=0)
-    
-    def __call__(self,
-                 inp: Float[Array, 'seqlen bottleneck'],
-                 input_arr: Array,
-                 mask: Array,
-                 enable_dropout: bool,
-                 key: PRNGKeyArray):
-        
+
+    def __call__(
+        self,
+        inp: Float[Array, "seqlen in_dim"],
+        input_arr: Array,
+        mask: Array,
+        enable_dropout: bool,
+        key: PRNGKeyArray,
+    ) -> Float[Array, "seqlen in_dim"]:
+
         key_1, key_2 = jax.random.split(key, 2)
         inp, input_arr, mask = policy.cast_to_compute((inp, input_arr, mask))
         
         x = jax.vmap(self.ln1)(inp)
         inp += self.attn_gate(x, input_arr, input_arr,
-                            mask=self._make_self_attention_mask(mask),
-                            key=key_1, inference=enable_dropout)
+                              mask=self._make_self_attention_mask(mask),
+                              key=key_1, inference=enable_dropout)
         
         x = jax.vmap(self.ln2)(inp)
         inp += self.mlp(x, enable_dropout=True, key=key_2)
@@ -109,11 +110,7 @@ class MLP(eqx.Module):
 
         self.dropout = eqx.nn.Dropout(p=p)
 
-    def __call__(self,
-                 x: Array,
-                 enable_dropout: bool,
-                 key: PRNGKeyArray):
-        
+    def __call__(self, x: Array, enable_dropout: bool, key: PRNGKeyArray):
         x = policy.cast_to_compute(x)
         
         x = self.act(self.layer_1(x))
@@ -134,11 +131,7 @@ class GatedMLP(eqx.Module):
     gate: eqx.Module
     activation: callable
 
-    def __init__(self,
-                 input_dim: int,
-                 output_dim: int,
-                 key: PRNGKeyArray):
-
+    def __init__(self, input_dim: int, output_dim: int, key: PRNGKeyArray):
         key_1, key_2, key_3, key_4 = jax.random.split(key, 4)
 
         self.up_proj = LinearProj(input_dim, output_dim // 4, key=key_1)
@@ -150,7 +143,6 @@ class GatedMLP(eqx.Module):
         self.activation = NewGELU()
 
     def __call__(self, arr: Array) -> Array:
-
         x = policy.cast_to_compute(arr)
         
         x = self.activation(self.up_proj(arr))

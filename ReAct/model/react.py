@@ -1,13 +1,13 @@
 from functools import partial
-from typing import Optional, Tuple, Union
+from typing import Optional, Tuple, Union, List
 
 import equinox as eqx
 import jax
 import jax.numpy as jnp
-from jaxtyping import Array, PRNGKeyArray, PyTree
+from jaxtyping import Array, PRNGKeyArray, PyTree, Int
 from jmp import Policy
 
-from .blocks import MLP, AttentionBlock, LinearProj, LiteAttention, NewGELU, MixerBlock
+from .blocks import MLP, AttentionBlock, LinearProj, LiteAttention, NewGELU
 
 policy = Policy(compute_dtype=jnp.bfloat16, param_dtype=jnp.float32, output_dtype=jnp.bfloat16)
 
@@ -18,12 +18,13 @@ class RecurrentModule(eqx.Module):
     Bunch of Attentionlayers in a pseuo-LSTM fashion
     '''
     num_layers: int = eqx.field(static=True)
-    
-    attention_layers: PyTree[AttentionBlock]
+
+    attention_layers: Array
+    reshape_layers: List
+    initial_layer: eqx.Module
     hist_gate: eqx.Module
-    hist_act: eqx.Module
+    act: eqx.Module
     ctx_gate: eqx.Module
-    reshape_layer: eqx.Module
 
     def __init__(self,
                  seqlen: int,
@@ -33,20 +34,57 @@ class RecurrentModule(eqx.Module):
                  bottleneck: int,
                  key: PRNGKeyArray):
         
-        keys = jax.random.split(key, num_layers + 3)
-        
-        make_layer: callable = lambda k: AttentionBlock(
-            seqlen, n_heads, drop_rate, bottleneck, k
-        )
+        keys = jax.random.split(key, num_layers)
+        in_dims, out_dims = self.generate_dims(bottleneck, num_layers)
 
+        self.act = NewGELU()
         self.num_layers = num_layers
-        self.hist_act = NewGELU()
 
-        self.reshape_layer = MLP(bottleneck * 2, bottleneck, p=0., key=keys[1])
-        self.hist_gate = LinearProj(bottleneck * 2, bottleneck // 2, key=keys[0])
-        self.ctx_gate = MLP(bottleneck // 2, bottleneck, p=0., key=keys[2])
+        self.reshape_layers = eqx.nn.Sequential([
+            LinearProj(in_dim, out_dim, key=key)
+            for in_dim, out_dim in zip(out_dims, in_dims[::-1])
+        ])
 
-        self.attention_layers = eqx.filter(eqx.filter_vmap(make_layer)(keys), eqx.is_array_like)
+        self.initial_layer = MLP(bottleneck * 2, bottleneck, p=0.0, key=keys[0])
+        self.hist_gate = LinearProj(bottleneck * 2, bottleneck, key=keys[1])
+        self.ctx_gate = MLP(bottleneck, bottleneck, p=0.0, key=keys[2])
+
+        make_layer: callable = partial(self.make_layer, seqlen, n_heads, drop_rate)
+
+        self.attention_layers = [
+            make_layer(bottleneck, key)
+            for bottleneck, key in zip(out_dims, keys)
+        ]
+
+    @staticmethod
+    def make_layer(seqlen: int, n_heads: int, drop_rate: float, bottleneck: int, key: PRNGKeyArray) -> AttentionBlock:
+        return AttentionBlock(seqlen, n_heads, drop_rate, bottleneck, key=key)
+
+    @staticmethod
+    def generate_dims(bottleneck: int, num_layers: int) -> List[int]:
+        out_dims = [bottleneck // (2**i) for i in range(num_layers // 2)]
+        out_dims += out_dims[::-1] if num_layers % 2 == 0 else out_dims[:-1][::-1]
+        in_dims = [bottleneck] + out_dims[:-1]
+
+        return in_dims, out_dims
+    
+    @staticmethod
+    def unroll_scan(f: callable, init: Tuple, xs):
+        carry = init
+        ys = []
+        
+        for x in xs:
+            carry, y = f(carry, x)
+            ys.append(y)
+
+        # Pad the output tensors to the same rank
+        max_rank = max([y.shape[-1] for y in ys])
+        ys = [
+            jnp.pad(y, ((0, 0),) * (y.ndim - 1) + ((0, max_rank - y.shape[-1]),))
+            for y in ys
+        ]
+
+        return carry, jnp.stack(ys)
     
     def __call__(self,
                  x: Array,
@@ -56,25 +94,25 @@ class RecurrentModule(eqx.Module):
                  key: PRNGKeyArray) -> Tuple[Array, Array]:
 
         keys = jax.random.split(key, self.num_layers)
-        dynamic_part, static_part = eqx.partition(self.attention_layers, eqx.is_array_like,
-                                                  is_leaf=lambda x: isinstance(x, eqx.nn.Dropout))
         
-        x = self.reshape_layer(x, enable_dropout, key)
+        x = self.initial_layer(x, enable_dropout, key)
         
-        def f(input_tup: Tuple[Array, int], _dynamic_bl: PyTree) -> Tuple[Tuple[Array, int], Array]:
-            x, idx = input_tup # i is the iteration index
+        def f(input_tup: Tuple[Array, int], layer: callable) -> Tuple[Tuple[Array, int], Array]:
+            x, idx = input_tup
             
-            layer = eqx.combine(_dynamic_bl, static_part) # reconstruct the layer
+            if idx == 0:
+                x = layer(x, ctx_state, pad_mask, enable_dropout, keys[idx])
+            else:
+                x = layer(x, x, pad_mask, enable_dropout, keys[idx])
             
-            x = jax.lax.cond(idx == 0,
-                             lambda: layer(x, ctx_state, pad_mask, enable_dropout, keys[idx]),
-                             lambda: layer(x, x, pad_mask, enable_dropout, keys[idx]))
+            # Up/Down-sampling
+            x = self.act(self.reshape_layers[idx](x))
             
             return (x, idx + 1), x
 
-        out, history = eqx.internal.scan(f=f, init=(x, 0), xs=dynamic_part, kind='lax')
+        out, history = self.unroll_scan(f=f, init=(x, 0), xs=self.attention_layers)
 
-        hist_lerp = self.hist_act(self.hist_gate(jnp.concat([history.mean(0), ctx_state], axis=-1)))
+        hist_lerp = self.act(self.hist_gate(jnp.concat([history.mean(0), ctx_state], axis=-1)))
         ctx_state = self.ctx_gate(hist_lerp, enable_dropout=enable_dropout, key=key)
 
         return out[0], ctx_state
