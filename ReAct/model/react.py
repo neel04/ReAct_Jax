@@ -73,7 +73,7 @@ class RecurrentModule(eqx.Module):
             
             return (x, idx + 1), x
 
-        out, history = jax.lax.scan(f=f, init=(x, 0), xs=dynamic_part, unroll=2)
+        out, history = jax.lax.scan(f=f, init=(x, 0), xs=dynamic_part, unroll=True)
 
         hist_lerp = self.act(self.hist_gate(jnp.concat([history.mean(0), ctx_state], axis=-1)))
         ctx_state = self.ctx_gate(hist_lerp, enable_dropout=enable_dropout, key=key)
