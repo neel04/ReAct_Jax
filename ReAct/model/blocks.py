@@ -145,10 +145,14 @@ class GatedAttentionBlock(eqx.Module):
         self.ln = eqx.nn.LayerNorm(in_dim)
         self.activation = NewGELU()
     
-    def __call__(self, x: Array, ctx: Array, pad_mask: Array, enable_dropout: bool, key: PRNGKeyArray) -> Array:
+    def __call__(self, x: Array, ctx: Array, pad_mask: Array, enable_dropout: bool, key: PRNGKeyArray, xattn: bool = False) -> Array:
         x, ctx = policy.cast_to_compute((x, ctx))
         
-        x = self.block(x, x, pad_mask, enable_dropout, key)
+        if xattn:
+            x = self.block(x, ctx, pad_mask, enable_dropout, key)
+        else:
+            x = self.block(x, x, pad_mask, enable_dropout, key)
+
         x = jax.vmap(self.ln)(x)
         x *= jax.nn.silu(self.gate(ctx))
 

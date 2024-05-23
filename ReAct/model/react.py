@@ -69,7 +69,9 @@ class RecurrentModule(eqx.Module):
             x, idx = input_tup
             layer = eqx.combine(_dynamic_bl, static_part) # reconstruct the layer
 
-            x = layer(x, ctx_state, pad_mask, enable_dropout, keys[idx])
+            x = jax.lax.cond(idx == 0,
+                             lambda : layer(x, ctx_state, pad_mask, enable_dropout, keys[idx], xattn=True),
+                             lambda : layer(x, ctx_state, pad_mask, enable_dropout, keys[idx], xattn=False))
             
             return (x, idx + 1), x
 
