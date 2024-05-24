@@ -19,6 +19,7 @@ class RecurrentModule(eqx.Module):
     '''
     num_layers: int = eqx.field(static=True)
 
+    alpha: float
     attention_layers: Array
     initial_layer: eqx.Module
     hist_gate: eqx.Module
@@ -38,6 +39,7 @@ class RecurrentModule(eqx.Module):
 
         self.act = NewGELU()
         self.num_layers = num_layers
+        self.alpha = jnp.array([0.5])
 
         self.initial_layer = MLP(bottleneck * 2, bottleneck, p=0.0, key=keys[0])
         self.hist_gate = LinearProj(bottleneck * 2, bottleneck // 2, key=keys[1])
@@ -66,7 +68,9 @@ class RecurrentModule(eqx.Module):
                                                   is_leaf=lambda x: isinstance(x, eqx.nn.Dropout))
         
         x = self.initial_layer(x, enable_dropout, key)
-        ctx_state = self.pre_ctx_gate(ctx_state + x, enable_dropout, key)
+
+        ctx_interp = ctx_state * self.alpha + (1 - self.alpha) * x
+        ctx_state = self.pre_ctx_gate(ctx_interp, enable_dropout, key)
         
         def f(input_tup: Tuple[Array, int], _dynamic_bl: PyTree) -> Tuple[Tuple[Array, int], Array]:
             x, idx = input_tup
@@ -96,6 +100,7 @@ class React(eqx.Module):
     alpha: float
     pos_enc: Array
     embed_layer: eqx.nn.Embedding
+    iteration_index_pe: eqx.nn.Embedding
     main_block: LiteAttention
     post_ln: eqx.nn.LayerNorm
     out_head: eqx.Module
@@ -114,6 +119,7 @@ class React(eqx.Module):
 
         self.max_iters = max_iters
         self.embed_layer = eqx.nn.Embedding(vocab_size, width, key=key1)
+        self.iteration_index_pe = eqx.nn.Embedding(max_iters, width, key=key2)
         self.pos_enc = jax.lax.stop_gradient(self.positional_encoding(seqlen, width))
 
         self.main_block = RecurrentModule(seqlen, drop_rate, n_heads, num_blocks, width, key=key3)
@@ -151,6 +157,7 @@ class React(eqx.Module):
         @eqx.filter_jit
         def body_fun(carry: Tuple[Array, Array], idx: int) -> Tuple[Tuple, Array]:
             thought, ctx_state = carry
+            ctx_state += self.iteration_index_pe(idx)
             
             latent = jnp.concatenate([input_arr, thought], axis=-1) # (seqlen, width * 2)
             latent, ctx_state = self.main_block(latent, ctx_state, mask, enable_dropout, key) # (seqlen, width)
