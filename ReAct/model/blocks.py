@@ -1,5 +1,5 @@
 import math
-from typing import Optional
+from typing import Optional, Tuple, Callable
 
 import equinox as eqx
 import jax
@@ -120,43 +120,39 @@ class MLP(eqx.Module):
 
         return policy.cast_to_output(self.act(output))
 
-class GatedAttentionBlock(eqx.Module):
-    """Gated Attention Block"""
+class GatedBlock(eqx.Module):
+    """Gated Block for any general function"""
     
     gate: eqx.Module
     block: eqx.Module
     ln: eqx.Module
-    activation: callable
+    activation: Callable
     
     def __init__(
         self,
-        seqlen: int,
-        n_heads: int,
-        drop_rate: float,
+        fun: Callable,
+        args: Tuple,
         in_dim: int,
         key: PRNGKeyArray,
     ):
 
-        keys = jax.random.split(key, 2)
-        
-        self.block = AttentionBlock(seqlen, n_heads, drop_rate, in_dim, keys[0])
+        self.block = fun(*args) if args else fun
 
-        self.gate = LinearProj(in_dim, in_dim, key=keys[1])
+        self.gate = LinearProj(in_dim, in_dim, key=key)
         self.ln = eqx.nn.LayerNorm(in_dim)
         self.activation = NewGELU()
     
-    def __call__(self, x: Array, ctx: Array, pad_mask: Array, enable_dropout: bool, key: PRNGKeyArray, xattn: bool = False) -> Array:
+    def __call__(self, x: Array, ctx: Array, call_args: Tuple) -> Array:
         x, ctx = policy.cast_to_compute((x, ctx))
         
-        if xattn:
-            x = self.block(x, ctx, pad_mask, enable_dropout, key)
-        else:
-            x = self.block(x, x, pad_mask, enable_dropout, key)
+        x, other = self.block(*call_args)
 
         x = jax.vmap(self.ln)(x)
         x *= jax.nn.silu(self.gate(ctx))
 
-        return policy.cast_to_output(x)
+        x, other = policy.cast_to_output((x, other))
+
+        return x, other
 
 class GatedMLP(eqx.Module):
     '''
