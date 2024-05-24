@@ -96,7 +96,6 @@ class React(eqx.Module):
     alpha: float
     pos_enc: Array
     embed_layer: eqx.nn.Embedding
-    iteration_index_pe: eqx.nn.Embedding
     main_block: LiteAttention
     post_ln: eqx.nn.LayerNorm
     out_head: eqx.Module
@@ -115,7 +114,6 @@ class React(eqx.Module):
 
         self.max_iters = max_iters
         self.embed_layer = eqx.nn.Embedding(vocab_size, width, key=key1)
-        self.iteration_index_pe = eqx.nn.Embedding(max_iters, width, key=key2)
         self.pos_enc = jax.lax.stop_gradient(self.positional_encoding(seqlen, width))
 
         self.main_block = RecurrentModule(seqlen, drop_rate, n_heads, num_blocks, width, key=key3)
@@ -153,7 +151,6 @@ class React(eqx.Module):
         @eqx.filter_jit
         def body_fun(carry: Tuple[Array, Array], idx: int) -> Tuple[Tuple, Array]:
             thought, ctx_state = carry
-            ctx_state += self.iteration_index_pe(idx)
             
             latent = jnp.concatenate([input_arr, thought], axis=-1) # (seqlen, width * 2)
             latent, ctx_state = self.main_block(latent, ctx_state, mask, enable_dropout, key) # (seqlen, width)
