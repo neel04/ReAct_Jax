@@ -24,6 +24,7 @@ class RecurrentModule(eqx.Module):
     hist_gate: eqx.Module
     act: eqx.Module
     ctx_gate: eqx.Module
+    pre_ctx_gate: eqx.Module
 
     def __init__(self,
                  seqlen: int,
@@ -40,7 +41,8 @@ class RecurrentModule(eqx.Module):
 
         self.initial_layer = MLP(bottleneck * 2, bottleneck, p=0.0, key=keys[0])
         self.hist_gate = LinearProj(bottleneck * 2, bottleneck // 2, key=keys[1])
-        self.ctx_gate = MLP(bottleneck // 2, bottleneck, p=0.0, key=keys[2])
+        self.pre_ctx_gate = MLP(bottleneck, bottleneck, p=0.0, key=keys[2])
+        self.ctx_gate = MLP(bottleneck // 2, bottleneck, p=0.0, key=keys[3])
 
         make_layer: callable = lambda k: self.make_layer(
             seqlen, n_heads, drop_rate, bottleneck, k
@@ -64,6 +66,7 @@ class RecurrentModule(eqx.Module):
                                                   is_leaf=lambda x: isinstance(x, eqx.nn.Dropout))
         
         x = self.initial_layer(x, enable_dropout, key)
+        ctx_state = self.pre_ctx_gate(ctx_state + x, enable_dropout, key)
         
         def f(input_tup: Tuple[Array, int], _dynamic_bl: PyTree) -> Tuple[Tuple[Array, int], Array]:
             x, idx = input_tup
