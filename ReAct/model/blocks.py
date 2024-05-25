@@ -120,6 +120,19 @@ class MLP(eqx.Module):
 
         return policy.cast_to_output(self.act(output))
 
+class lerp(eqx.Module):
+    alpha: Array
+
+    def __init__(self, alpha: float = 0.5):
+        self.alpha = jnp.array([alpha])
+
+    def __call__(self, x: Array, y: Array) -> Array:
+        x, y = policy.cast_to_compute((x, y))
+
+        output = self.alpha * x + (1 - self.alpha) * y
+
+        return policy.cast_to_output(output)
+
 class GatedBlock(eqx.Module):
     """Gated Block for any general function"""
     

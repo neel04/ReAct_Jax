@@ -7,7 +7,7 @@ import jax.numpy as jnp
 from jaxtyping import Array, PRNGKeyArray, PyTree
 from jmp import Policy
 
-from .blocks import MLP, LinearProj, LiteAttention, NewGELU, GatedBlock, AttentionBlock
+from .blocks import MLP, LinearProj, LiteAttention, NewGELU, AttentionBlock, lerp
 
 policy = Policy(compute_dtype=jnp.bfloat16, param_dtype=jnp.float32, output_dtype=jnp.bfloat16)
 
@@ -19,13 +19,9 @@ class RecurrentModule(eqx.Module):
     '''
     num_layers: int = eqx.field(static=True)
 
-    alpha: float
     attention_layers: Array
     initial_layer: eqx.Module
-    hist_gate: eqx.Module
-    act: eqx.Module
     ctx_gate: eqx.Module
-    pre_ctx_gate: eqx.Module
 
     def __init__(
         self,
@@ -38,14 +34,10 @@ class RecurrentModule(eqx.Module):
     ):
         keys = jax.random.split(key, num_layers)
 
-        self.act = NewGELU()
         self.num_layers = num_layers
-        self.alpha = jnp.array([0.5])
 
         self.initial_layer = MLP(bottleneck * 2, bottleneck, p=0.0, key=keys[0])
-        self.hist_gate = LinearProj(bottleneck * 2, bottleneck // 2, key=keys[1])
-        self.pre_ctx_gate = MLP(bottleneck, bottleneck, p=0.0, key=keys[2])
-        self.ctx_gate = MLP(bottleneck // 2, bottleneck, p=0.0, key=keys[3])
+        self.ctx_gate = MLP(bottleneck, bottleneck, p=0.0, key=keys[1])
 
         make_layer: callable = lambda k: self.make_layer(
             seqlen, n_heads, drop_rate, bottleneck, k
@@ -72,20 +64,17 @@ class RecurrentModule(eqx.Module):
         
         x = self.initial_layer(x, enable_dropout, key)
 
-        ctx_interp = ctx_state * self.alpha + (1 - self.alpha) * x
-        ctx_state = self.pre_ctx_gate(ctx_interp, enable_dropout, key)
-        
         def f(input_tup: Tuple[Array, int], _dynamic_bl: PyTree) -> Tuple[Tuple[Array, int], Array]:
             x, idx = input_tup
             layer = eqx.combine(_dynamic_bl, static_part) # reconstruct the layer
 
-            x = layer(x, ctx_state, pad_mask, enable_dropout, keys[idx])
+            x += layer(x, ctx_state, pad_mask, enable_dropout, keys[idx])
             
             return (x, idx + 1), x
 
         out, history = jax.lax.scan(f=f, init=(x, 0), xs=dynamic_part, unroll=True)
 
-        hist_lerp = self.act(self.hist_gate(jnp.concat([history.mean(0), ctx_state], axis=-1)))
+        hist_lerp = lerp()(history.mean(0), ctx_state)
         ctx_state = self.ctx_gate(hist_lerp, enable_dropout=enable_dropout, key=key)
 
         return out[0], ctx_state
@@ -99,7 +88,6 @@ class React(eqx.Module):
     max_iters: int = eqx.field(static=True)
     width: int = eqx.field(static=True)
     
-    alpha: float
     pos_enc: Array
     embed_layer: eqx.nn.Embedding
     iteration_index_pe: eqx.nn.Embedding
@@ -128,7 +116,6 @@ class React(eqx.Module):
         self.pos_enc = jax.lax.stop_gradient(self.positional_encoding(seqlen, width))
 
         self.main_block = RecurrentModule(seqlen, drop_rate, n_heads, num_blocks, width, key=key3)
-        self.alpha = jnp.array([0.5])
 
         self.post_ln = eqx.nn.LayerNorm(width)
         self.out_head = LinearProj(width, vocab_size, key=key4)
@@ -148,26 +135,6 @@ class React(eqx.Module):
 
         return pe
 
-    @eqx.filter_jit
-    def recurrent_module_call(
-        self,
-        ctx_state: Array,
-        input_arr: Array,
-        thought: Array,
-        mask: Array,
-        enable_dropout: bool,
-        key: PRNGKeyArray
-    ) -> Array:
-        '''
-        Holds the logic for interactions of the recurrent module
-        on every iteration
-        '''
-        latent = jnp.concatenate([input_arr, thought], axis=-1)  # (seqlen, width * 2)
-        latent, ctx_state = self.main_block(latent, ctx_state, mask, enable_dropout, key)# (seqlen, width)
-        latent = jax.vmap(self.post_ln)(latent)  # Post-LN for stability
-
-        return latent, ctx_state
-
     @partial(jax.jit, static_argnums=(4, 5, 6))
     def iterate_for_steps(
         self,
@@ -180,16 +147,16 @@ class React(eqx.Module):
     ) -> Array:
         
         input_arr, interim_thought, mask = policy.cast_to_compute((input_arr, interim_thought, mask))
-        gated_module = GatedBlock(self.recurrent_module_call, args=(), in_dim=self.width, key=key)
 
         @eqx.filter_jit
         def body_fun(carry: Tuple[Array, Array], idx: int) -> Tuple[Tuple, Array]:
             thought, ctx_state = carry
 
             ctx_state += self.iteration_index_pe(idx)
-            #latent, ctx_state = gated_module(thought, ctx_state,
-                                             #call_args=(ctx_state, input_arr, thought, mask, enable_dropout, key))
-            latent, ctx_state = self.recurrent_module_call(ctx_state, input_arr, thought, mask, enable_dropout, key)
+
+            latent = jnp.concatenate([input_arr, thought], axis=-1)  # (seqlen, width * 2)
+            latent, ctx_state = self.main_block(latent, ctx_state, mask, enable_dropout, key)# (seqlen, width)
+            latent = jax.vmap(self.post_ln)(latent)  # Post-LN for stability
 
             latent = policy.cast_to_output(latent) # mixed precision
             
@@ -199,7 +166,7 @@ class React(eqx.Module):
             f=body_fun, init=(interim_thought, input_arr), xs=jnp.arange(iters_to_do), kind='checkpointed'
         )
 
-        return self.alpha * final_val[0] + (1 - self.alpha) * history.mean(0)
+        return final_val[0]
 
     @eqx.filter_jit
     def __call__(
