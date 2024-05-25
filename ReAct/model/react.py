@@ -20,6 +20,7 @@ class RecurrentModule(eqx.Module):
     num_layers: int = eqx.field(static=True)
 
     attention_layers: Array
+    reshape_layer: eqx.Module
     ctx_gate: eqx.Module
 
     def __init__(
@@ -35,7 +36,8 @@ class RecurrentModule(eqx.Module):
 
         self.num_layers = num_layers
 
-        self.ctx_gate = MLP(bottleneck, bottleneck, p=0.0, key=keys[1])
+        self.reshape_layer = LinearProj(bottleneck * 2, bottleneck, key=keys[0])
+        self.ctx_gate = MLP(bottleneck, bottleneck, p=drop_rate, key=keys[1])
 
         make_layer: callable = lambda k: self.make_layer(
             seqlen, n_heads, drop_rate, bottleneck, k
@@ -59,6 +61,8 @@ class RecurrentModule(eqx.Module):
         keys = jax.random.split(key, self.num_layers)
         dynamic_part, static_part = eqx.partition(self.attention_layers, eqx.is_array_like,
                                                   is_leaf=lambda x: isinstance(x, eqx.nn.Dropout))
+        
+        x = policy.cast_to_compute(self.reshape_layer(x)) # (seqlen, bottleneck)
         
         def f(input_tup: Tuple[Array, int], _dynamic_bl: PyTree) -> Tuple[Tuple[Array, int], Array]:
             x, idx = input_tup
@@ -90,6 +94,7 @@ class React(eqx.Module):
     main_block: LiteAttention
     post_ln: eqx.nn.LayerNorm
     out_head: eqx.Module
+    ctx_mixing: eqx.Module
 
     def __init__(
         self,
@@ -112,6 +117,7 @@ class React(eqx.Module):
         self.pos_enc = jax.lax.stop_gradient(self.positional_encoding(seqlen, width))
 
         self.main_block = RecurrentModule(seqlen, drop_rate, n_heads, num_blocks, width, key=key3)
+        self.ctx_mixing = MLP(width * 2, width, p=drop_rate, key=key4)
 
         self.post_ln = eqx.nn.LayerNorm(width)
         self.out_head = LinearProj(width, vocab_size, key=key4)
@@ -150,8 +156,7 @@ class React(eqx.Module):
 
             ctx_state += self.iteration_index_pe(idx)
 
-            # latent = jnp.concatenate([input_arr, thought], axis=-1)  # (seqlen, width * 2)
-            latent = lerp()(input_arr, thought) # (seqlen, width)
+            latent = jnp.concatenate([input_arr, thought], axis=-1)  # (seqlen, width * 2)
             out_latent, ctx_state = self.main_block(latent, ctx_state, mask, enable_dropout, key)  # (seqlen, width)
             latent = jax.vmap(self.post_ln)(out_latent)  # Post-LN for stability
 
@@ -163,7 +168,9 @@ class React(eqx.Module):
             f=body_fun, init=(interim_thought, input_arr), xs=jnp.arange(iters_to_do), kind='checkpointed'
         )
 
-        return final_val[0]
+        output = jnp.concatenate([final_val[0], final_val[1]], axis=-1)  # (seqlen, width * 2)
+
+        return self.ctx_mixing(output, enable_dropout, key)
 
     @eqx.filter_jit
     def __call__(
