@@ -7,7 +7,7 @@ import jax.numpy as jnp
 from jaxtyping import Array, PRNGKeyArray, PyTree
 from jmp import Policy
 
-from .blocks import MLP, LinearProj, LiteAttention, NewGELU, AttentionBlock, lerp
+from .blocks import MLP, LinearProj, LiteAttention, AttentionBlock, lerp
 
 policy = Policy(compute_dtype=jnp.bfloat16, param_dtype=jnp.float32, output_dtype=jnp.bfloat16)
 
@@ -20,7 +20,6 @@ class RecurrentModule(eqx.Module):
     num_layers: int = eqx.field(static=True)
 
     attention_layers: Array
-    initial_layer: eqx.Module
     ctx_gate: eqx.Module
 
     def __init__(
@@ -36,7 +35,6 @@ class RecurrentModule(eqx.Module):
 
         self.num_layers = num_layers
 
-        self.initial_layer = MLP(bottleneck * 2, bottleneck, p=0.0, key=keys[0])
         self.ctx_gate = MLP(bottleneck, bottleneck, p=0.0, key=keys[1])
 
         make_layer: callable = lambda k: self.make_layer(
@@ -62,13 +60,11 @@ class RecurrentModule(eqx.Module):
         dynamic_part, static_part = eqx.partition(self.attention_layers, eqx.is_array_like,
                                                   is_leaf=lambda x: isinstance(x, eqx.nn.Dropout))
         
-        x = self.initial_layer(x, enable_dropout, key)
-
         def f(input_tup: Tuple[Array, int], _dynamic_bl: PyTree) -> Tuple[Tuple[Array, int], Array]:
             x, idx = input_tup
             layer = eqx.combine(_dynamic_bl, static_part) # reconstruct the layer
 
-            x += layer(x, ctx_state, pad_mask, enable_dropout, keys[idx])
+            x = layer(x, ctx_state, pad_mask, enable_dropout, keys[idx])
             
             return (x, idx + 1), x
 
@@ -154,7 +150,8 @@ class React(eqx.Module):
 
             ctx_state += self.iteration_index_pe(idx)
 
-            latent = jnp.concatenate([input_arr, thought], axis=-1)  # (seqlen, width * 2)
+            #latent = jnp.concatenate([input_arr, thought], axis=-1)  # (seqlen, width * 2)
+            latent = input_arr
             latent, ctx_state = self.main_block(latent, ctx_state, mask, enable_dropout, key)# (seqlen, width)
             latent = jax.vmap(self.post_ln)(latent)  # Post-LN for stability
 
