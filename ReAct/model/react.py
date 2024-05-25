@@ -156,8 +156,7 @@ class React(eqx.Module):
         thought: Array,
         mask: Array,
         enable_dropout: bool,
-        key: PRNGKeyArray,
-        idx: int,
+        key: PRNGKeyArray
     ) -> Array:
         '''
         Holds the logic for interactions of the recurrent module
@@ -188,8 +187,9 @@ class React(eqx.Module):
             thought, ctx_state = carry
 
             ctx_state += self.iteration_index_pe(idx)
-            latent, ctx_state = gated_module(thought, ctx_state,
-                                             call_args=(ctx_state, input_arr, thought, mask, enable_dropout, key, idx))
+            #latent, ctx_state = gated_module(thought, ctx_state,
+                                             #call_args=(ctx_state, input_arr, thought, mask, enable_dropout, key))
+            latent, ctx_state = self.recurrent_module_call(ctx_state, input_arr, thought, mask, enable_dropout, key)
 
             latent = policy.cast_to_output(latent) # mixed precision
             
