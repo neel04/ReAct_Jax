@@ -150,10 +150,10 @@ class React(eqx.Module):
 
             ctx_state += self.iteration_index_pe(idx)
 
-            #latent = jnp.concatenate([input_arr, thought], axis=-1)  # (seqlen, width * 2)
-            latent = input_arr
-            latent, ctx_state = self.main_block(latent, ctx_state, mask, enable_dropout, key)# (seqlen, width)
-            latent = jax.vmap(self.post_ln)(latent)  # Post-LN for stability
+            # latent = jnp.concatenate([input_arr, thought], axis=-1)  # (seqlen, width * 2)
+            latent = input_arr + thought
+            out_latent, ctx_state = self.main_block(latent, ctx_state, mask, enable_dropout, key)  # (seqlen, width)
+            latent += jax.vmap(self.post_ln)(out_latent)  # Post-LN for stability
 
             latent = policy.cast_to_output(latent) # mixed precision
             
