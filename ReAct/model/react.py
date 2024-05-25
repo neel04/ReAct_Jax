@@ -77,7 +77,7 @@ class RecurrentModule(eqx.Module):
         out, history = jax.lax.scan(f=f, init=(x, 0), xs=dynamic_part, unroll=True)
 
         hist_lerp = lerp()(history.mean(0), ctx_state)
-        ctx_state = self.ctx_gate(hist_lerp, enable_dropout=enable_dropout, key=key)
+        ctx_state += self.ctx_gate(hist_lerp, enable_dropout=enable_dropout, key=key)
 
         return out[0], ctx_state
 
@@ -156,7 +156,7 @@ class React(eqx.Module):
         def body_fun(carry: Tuple[Array, Array], idx: int) -> Tuple[Tuple, Array]:
             thought, ctx_state = carry
 
-            ctx_state += self.iteration_index_pe(idx)
+            ctx_state = lerp()(ctx_state, self.iteration_index_pe(idx))
 
             latent = jnp.concatenate([input_arr, thought], axis=-1)  # (seqlen, width * 2)
             out_latent, ctx_state = self.main_block(latent, ctx_state, mask, enable_dropout, key)  # (seqlen, width)
