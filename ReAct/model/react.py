@@ -7,7 +7,7 @@ import jax.numpy as jnp
 from jaxtyping import Array, PRNGKeyArray, PyTree
 from jmp import Policy
 
-from .blocks import MLP, LinearProj, LiteAttention, AttentionBlock, lerp
+from .blocks import LinearProj, LiteAttention, AttentionBlock, lerp, GatedBlock
 
 policy = Policy(compute_dtype=jnp.bfloat16, param_dtype=jnp.float32, output_dtype=jnp.bfloat16)
 
@@ -21,7 +21,6 @@ class RecurrentModule(eqx.Module):
 
     attention_layers: Array
     reshape_layer: eqx.Module
-    history_weight: Array
     ctx_gate: eqx.Module
 
     def __init__(
@@ -35,17 +34,17 @@ class RecurrentModule(eqx.Module):
     ):
         keys = jax.random.split(key, num_layers)
 
-        self.num_layers = num_layers
-
-        self.reshape_layer = LinearProj(bottleneck * 2, bottleneck, key=keys[0])
-        self.ctx_gate = MLP(bottleneck, bottleneck, p=drop_rate, key=keys[1])
-        self.history_weight = jnp.ones(num_layers, dtype=jnp.bfloat16)
-
-        make_layer: callable = lambda k: self.make_layer(
+        make_attn: callable = lambda k: self.make_layer(
             seqlen, n_heads, drop_rate, bottleneck, k
         )
 
-        self.attention_layers = eqx.filter(eqx.filter_vmap(make_layer)(keys), eqx.is_array_like)
+        self.num_layers = num_layers
+
+        self.reshape_layer = LinearProj(bottleneck * 2, bottleneck, key=keys[0])
+
+        self.ctx_gate = GatedBlock(make_attn, args=(key,), in_dim=bottleneck, key=key)
+
+        self.attention_layers = eqx.filter(eqx.filter_vmap(make_attn)(keys), eqx.is_array_like)
 
     @staticmethod
     def make_layer(seqlen: int, n_heads: int, drop_rate: float, bottleneck: int, key: PRNGKeyArray) -> AttentionBlock:
@@ -74,14 +73,17 @@ class RecurrentModule(eqx.Module):
                              lambda : layer(x, ctx_state, pad_mask, enable_dropout, keys[idx]),
                              lambda : layer(x, x, pad_mask, enable_dropout, keys[idx]))
             
-            ctx = self.ctx_gate(x, enable_dropout=enable_dropout, key=keys[idx])
-            
-            return (x, idx + 1), ctx
+            return (x, idx + 1), x
 
-        out, ctx_history = jax.lax.scan(f=f, init=(x, 0), xs=dynamic_part, unroll=True)
-        ctx_state += jnp.einsum('i j k, i -> j k', ctx_history, self.history_weight)
+        out, history = jax.lax.scan(f=f, init=(x, 0), xs=dynamic_part, unroll=True)
+        out = out[0]
 
-        return out[0], ctx_state
+        ctx_state += self.ctx_gate(
+            x=ctx_state, ctx=out,
+            call_args=(ctx_state, ctx_state, pad_mask, enable_dropout, keys[-1]),
+        )
+
+        return out, ctx_state
 
 class React(eqx.Module):
     '''
@@ -98,7 +100,6 @@ class React(eqx.Module):
     main_block: LiteAttention
     post_ln: eqx.nn.LayerNorm
     out_head: eqx.Module
-    ctx_mixing: eqx.Module
 
     def __init__(
         self,
@@ -121,7 +122,6 @@ class React(eqx.Module):
         self.pos_enc = jax.lax.stop_gradient(self.positional_encoding(seqlen, width))
 
         self.main_block = RecurrentModule(seqlen, drop_rate, n_heads, num_blocks, width, key=key3)
-        self.ctx_mixing = MLP(width * 2, width, p=drop_rate, key=key4)
 
         self.post_ln = eqx.nn.LayerNorm(width)
         self.out_head = LinearProj(width, vocab_size, key=key4)
@@ -166,15 +166,13 @@ class React(eqx.Module):
 
             latent = policy.cast_to_output(latent) # mixed precision
             
-            return (latent, ctx_state), latent
+            return (latent, ctx_state), ctx_state
 
-        final_val, history = eqx.internal.scan(
+        final_val, ctx_hist = eqx.internal.scan(
             f=body_fun, init=(interim_thought, input_arr), xs=jnp.arange(iters_to_do), kind='checkpointed'
         )
 
-        output = jnp.concatenate([final_val[0], final_val[1]], axis=-1)  # (seqlen, width * 2)
-
-        return self.ctx_mixing(output, enable_dropout, key)
+        return lerp()(final_val[0], ctx_hist.sum(0))
 
     @eqx.filter_jit
     def __call__(

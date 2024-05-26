@@ -158,14 +158,12 @@ class GatedBlock(eqx.Module):
     def __call__(self, x: Array, ctx: Array, call_args: Tuple) -> Array:
         x, ctx = policy.cast_to_compute((x, ctx))
         
-        x, other = self.block(*call_args)
-
+        x = self.block(*call_args)
         x = jax.vmap(self.ln)(x)
+
         x *= jax.nn.silu(self.gate(ctx))
-
-        x, other = policy.cast_to_output((x, other))
-
-        return x, other
+        
+        return policy.cast_to_output(x)
 
 class GatedMLP(eqx.Module):
     '''
@@ -181,20 +179,21 @@ class GatedMLP(eqx.Module):
     def __init__(self, input_dim: int, output_dim: int, key: PRNGKeyArray):
         key_1, key_2, key_3, key_4 = jax.random.split(key, 4)
 
-        self.up_proj = LinearProj(input_dim, output_dim // 4, key=key_1)
-        self.gate = LinearProj(input_dim, output_dim // 4, key=key_4)
-        self.down_proj = LinearProj(output_dim // 4, output_dim, key=key_3)
+        self.up_proj = LinearProj(input_dim, output_dim, key=key_1)
+        self.gate = LinearProj(input_dim, output_dim, key=key_4)
+        self.down_proj = LinearProj(output_dim, output_dim, key=key_3)
 
-        self.ln = eqx.nn.LayerNorm(output_dim // 4)
+        self.ln = eqx.nn.LayerNorm(output_dim)
 
         self.activation = NewGELU()
 
-    def __call__(self, arr: Array) -> Array:
-        x = policy.cast_to_compute(arr)
+    def __call__(self, arr: Array, cond: Optional[Array] = None) -> Array:
+        cond = arr if cond is None else cond
+        x, cond = policy.cast_to_compute((arr, cond))
         
         x = self.activation(self.up_proj(arr))
         x = jax.vmap(self.ln)(x)
-        x = self.down_proj(x * jax.nn.silu(self.gate(arr)))
+        x = self.down_proj(x * jax.nn.silu(self.gate(cond)))
         
         return policy.cast_to_output(x)
 
