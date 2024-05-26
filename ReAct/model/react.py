@@ -21,6 +21,7 @@ class RecurrentModule(eqx.Module):
 
     attention_layers: Array
     reshape_layer: eqx.Module
+    history_weight: Array
     ctx_gate: eqx.Module
 
     def __init__(
@@ -38,6 +39,7 @@ class RecurrentModule(eqx.Module):
 
         self.reshape_layer = LinearProj(bottleneck * 2, bottleneck, key=keys[0])
         self.ctx_gate = MLP(bottleneck, bottleneck, p=drop_rate, key=keys[1])
+        self.history_weight = jnp.ones(num_layers, dtype=jnp.bfloat16)
 
         make_layer: callable = lambda k: self.make_layer(
             seqlen, n_heads, drop_rate, bottleneck, k
@@ -72,12 +74,12 @@ class RecurrentModule(eqx.Module):
                              lambda : layer(x, ctx_state, pad_mask, enable_dropout, keys[idx]),
                              lambda : layer(x, x, pad_mask, enable_dropout, keys[idx]))
             
-            return (x, idx + 1), x
+            ctx = self.ctx_gate(x, enable_dropout=enable_dropout, key=keys[idx])
+            
+            return (x, idx + 1), ctx
 
-        out, history = jax.lax.scan(f=f, init=(x, 0), xs=dynamic_part, unroll=True)
-
-        hist_lerp = lerp()(history.mean(0), ctx_state)
-        ctx_state += self.ctx_gate(hist_lerp, enable_dropout=enable_dropout, key=key)
+        out, ctx_history = jax.lax.scan(f=f, init=(x, 0), xs=dynamic_part, unroll=True)
+        ctx_state += jnp.einsum('i j k, i -> j k', ctx_history, self.history_weight)
 
         return out[0], ctx_state
 
