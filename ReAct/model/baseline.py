@@ -48,8 +48,9 @@ class main_block(eqx.Module):
         
         def f(input_arr: Array, _dynamic_bl: PyTree):
             block = eqx.combine(_dynamic_bl, static_part)
-            output = block(input_arr, input_arr, pad_mask, enable_dropout, key), None
-            return policy.cast_to_output(output) # mixed precision
+            output = block(input_arr, input_arr, pad_mask, enable_dropout, key)
+
+            return policy.cast_to_output(output), None
 
         out, _ = jax.lax.scan(f=f, init=input_arr, xs=dynamic_part, unroll=2)
         

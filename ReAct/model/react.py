@@ -41,9 +41,7 @@ class RecurrentModule(eqx.Module):
         self.num_layers = num_layers
 
         self.reshape_layer = LinearProj(bottleneck * 2, bottleneck, key=keys[0])
-
         self.ctx_gate = GatedBlock(make_attn, args=(key,), in_dim=bottleneck, key=key)
-
         self.attention_layers = eqx.filter(eqx.filter_vmap(make_attn)(keys), eqx.is_array_like)
 
     @staticmethod
@@ -156,15 +154,15 @@ class React(eqx.Module):
 
         @eqx.filter_jit
         def body_fun(carry: Tuple[Array, Array], idx: int) -> Tuple[Tuple, Array]:
-            thought, ctx_state = carry
+            latent, ctx_state = carry
 
-            ctx_state = lerp()(ctx_state, self.iteration_index_pe(idx))
+            ctx_state += self.iteration_index_pe(idx)
 
-            latent = jnp.concatenate([input_arr, thought], axis=-1)  # (seqlen, width * 2)
-            out_latent, ctx_state = self.main_block(latent, ctx_state, mask, enable_dropout, key)  # (seqlen, width)
-            latent = jax.vmap(self.post_ln)(out_latent)  # Post-LN for stability
+            latent = jnp.concatenate([input_arr, latent], axis=-1)  # (seqlen, width * 2)
+            latent, ctx_state = self.main_block(latent, ctx_state, mask, enable_dropout, key)  # (seqlen, width)
+            latent = jax.vmap(self.post_ln)(latent)  # Post-LN for stability
 
-            latent = policy.cast_to_output(latent) # mixed precision
+            latent = policy.cast_to_output(latent)
             
             return (latent, ctx_state), ctx_state
 
