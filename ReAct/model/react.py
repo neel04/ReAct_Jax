@@ -162,7 +162,7 @@ class React(eqx.Module):
             latent, ctx_state = self.main_block(latent, ctx_state, mask, enable_dropout, key)  # (seqlen, width)
             latent = jax.vmap(self.post_ln)(latent)  # Post-LN for stability
 
-            latent = policy.cast_to_output(latent)
+            latent, ctx_state = policy.cast_to_output((latent, ctx_state))
             
             return (latent, ctx_state), ctx_state
 
