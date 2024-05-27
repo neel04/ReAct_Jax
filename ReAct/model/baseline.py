@@ -110,7 +110,6 @@ class GPT(eqx.Module):
 
         input_arr, pad_mask = policy.cast_to_compute((input_arr, pad_mask))
         output = self.main_block(input_arr, pad_mask, enable_dropout, key)
-        output = self.main_block(output, pad_mask, enable_dropout, key)
         
         return self.out_head(output)
 

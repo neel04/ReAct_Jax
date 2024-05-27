@@ -170,7 +170,7 @@ class React(eqx.Module):
             f=body_fun, init=(interim_thought, input_arr), xs=jnp.arange(iters_to_do), kind='checkpointed'
         )
 
-        return lerp()(final_val[0], ctx_hist.sum(0))
+        return ctx_hist.sum(0)
 
     @eqx.filter_jit
     def __call__(
