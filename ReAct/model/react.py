@@ -61,7 +61,7 @@ class RecurrentModule(eqx.Module):
         dynamic_part, static_part = eqx.partition(self.attention_layers, eqx.is_array_like,
                                                   is_leaf=lambda x: isinstance(x, eqx.nn.Dropout))
         
-        x = policy.cast_to_compute(self.reshape_layer(x)) # (seqlen, bottleneck)
+        x = policy.cast_to_compute(lerp()(self.reshape_layer(x)), ctx_state) # (seqlen, bottleneck)
         
         def f(input_tup: Tuple[Array, int], _dynamic_bl: PyTree) -> Tuple[Tuple[Array, int], Array]:
             x, idx = input_tup
