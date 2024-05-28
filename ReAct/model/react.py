@@ -60,9 +60,11 @@ class RecurrentModule(eqx.Module):
         keys = jax.random.split(key, self.num_layers)
         dynamic_part, static_part = eqx.partition(self.attention_layers, eqx.is_array_like,
                                                   is_leaf=lambda x: isinstance(x, eqx.nn.Dropout))
-        
-        x = policy.cast_to_compute(lerp()(self.reshape_layer(x), ctx_state)) # (seqlen, bottleneck)
-        
+
+        x, ctx_state, pad_mask = policy.cast_to_compute((x, ctx_state, pad_mask))  # (seqlen, bottleneck)
+
+        x = lerp()(self.reshape_layer(x), ctx_state)
+
         def f(input_tup: Tuple[Array, int], _dynamic_bl: PyTree) -> Tuple[Tuple[Array, int], Array]:
             x, idx = input_tup
             layer = eqx.combine(_dynamic_bl, static_part) # reconstruct the layer
@@ -76,12 +78,12 @@ class RecurrentModule(eqx.Module):
         out, history = jax.lax.scan(f=f, init=(x, 0), xs=dynamic_part, unroll=True)
         out = out[0]
 
-        ctx_state += self.ctx_gate(
+        ctx_state = self.ctx_gate(
             x=ctx_state, ctx=out,
-            call_args=(ctx_state, ctx_state, pad_mask, enable_dropout, keys[-1]),
+            call_args=(ctx_state, out, pad_mask, enable_dropout, keys[-1]),
         )
 
-        return out, ctx_state
+        return policy.cast_to_output((out, ctx_state))
 
 class React(eqx.Module):
     '''
