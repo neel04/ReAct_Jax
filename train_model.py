@@ -88,7 +88,7 @@ def main(key: PRNGKeyArray):
         }
 
         wandbc = WeightsAndBiasesCallback(
-            metric_name='Train/acc',
+            metric_name='Train/loss',
             wandb_kwargs=wandb_kwargs,
             as_multirun=True
         )
