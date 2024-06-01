@@ -172,7 +172,7 @@ class React(eqx.Module):
             f=body_fun, init=(interim_thought, input_arr), xs=jnp.arange(iters_to_do), kind='checkpointed'
         )
 
-        return ctx_hist.sum(0)
+        return ctx_hist
 
     @eqx.filter_jit
     def __call__(
@@ -197,4 +197,4 @@ class React(eqx.Module):
 
         output = self.iterate_for_steps(interim_thought, input_arr, pad_mask, iters_to_do, is_training, key) # (batch, seqlen, bottleneck)
 
-        return self.out_head(output), output
+        return jax.vmap(self.out_head)(output), output

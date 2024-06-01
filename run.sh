@@ -7,7 +7,7 @@ CONTAINER_NAME="react_container"
 TRAIN_ARGS="--save_dir ./ReAct/outputs/ --dataset 'minipile' --group 'minipile' \
 --num_blocks 4 --width 384 --n_heads 8 --max_iters 5 --epochs 2 --num_classes 50304 \
 --log_interval 500 --save_interval 2000 --seqlen 512 \
---bf16 --accum_steps 2 --batch_size 512 \
+--accum_steps 2 --batch_size 512 \
 --warmup_steps 500 --lr 4.5e-3 \
 --weight_decay 5e-4 --drop_rate 0.01 \
 --exp_logging"

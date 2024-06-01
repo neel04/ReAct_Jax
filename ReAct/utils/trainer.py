@@ -73,11 +73,13 @@ def vanilla_fwd(model: eqx.Module, input_arr: Array, pad_mask: Array, iters_to_d
 def _compute_softmax_cross_entropy_loss(pred_y: Array, y_one_hot: Array,
                                         pad_mask: Array, iters_to_do: int) -> Array:
 
+    y_one_hot = jnp.repeat(y_one_hot[:, None], iters_to_do, axis=1)
+
     loss = -jnp.sum(jax.nn.log_softmax(pred_y, axis=-1) * y_one_hot, axis=-1)
 
-    loss = loss.sum(-1) # across the sequence
+    loss = loss.mean() # across the sequence
 
-    return loss.mean() # across all the batches
+    return loss # across all the batches
 
 @partial(
     mesh.sjit,
@@ -293,7 +295,12 @@ class Trainer:
             pred_y = jax.vmap(model, in_axes=(0, None, 0, None, None, 0))(input_arr, eval_iters, pad_mask, False, False, keys)[0]
 
         # compute accuracy
-        y_hat = jax.nn.softmax(pred_y, axis=-1).argmax(-1) * pad_mask
+        y_hat = jax.nn.softmax(pred_y, axis=-1).argmax(-1) 
+
+        # reshape stuff to the correct shape
+        y_hat *= jnp.repeat(pad_mask[:, None, :], eval_iters, axis=1)
+        label = jnp.repeat(label[:, None, :], eval_iters, axis=1)
+        
         accuracy = jnp.mean(y_hat == label)
 
         # compute loss
