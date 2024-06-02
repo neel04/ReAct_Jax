@@ -73,7 +73,9 @@ def vanilla_fwd(model: eqx.Module, input_arr: Array, pad_mask: Array, iters_to_d
 def _compute_softmax_cross_entropy_loss(pred_y: Array, y_one_hot: Array,
                                         pad_mask: Array, iters_to_do: int) -> Array:
 
-    y_one_hot = jnp.repeat(y_one_hot[:, None], iters_to_do, axis=1)
+    y_one_hot = jnp.repeat(y_one_hot[:, None], iters_to_do, axis=1) * jnp.expand_dims(
+        (1 / (jnp.arange(iters_to_do) + 1)), axis=(-1, -2)
+    )
 
     loss = -jnp.sum(jax.nn.log_softmax(pred_y, axis=-1) * y_one_hot, axis=-1)
 
