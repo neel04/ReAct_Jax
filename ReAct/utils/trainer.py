@@ -77,9 +77,9 @@ def _compute_softmax_cross_entropy_loss(pred_y: Array, y_one_hot: Array,
 
     loss = -jnp.sum(jax.nn.log_softmax(pred_y, axis=-1) * y_one_hot, axis=-1)
 
-    loss = loss.mean() # across the sequence
+    loss = loss.sum((-1, -2)) # across the sequence
 
-    return loss # across all the batches
+    return loss.mean(-1) # across all the batches
 
 @partial(
     mesh.sjit,
