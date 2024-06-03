@@ -1,8 +1,9 @@
-from typing import List, Optional, Dict
+from typing import Dict, List, Optional
+
 from tokenizers import normalizers
-from transformers import AutoTokenizer
 from tokenizers.normalizers import NFD, Lowercase, StripAccents
 from tokenizers.processors import TemplateProcessing
+from transformers import AutoTokenizer
 
 class Tok:
     def __init__(self, vocab_dir: Optional[str], max_length: int):

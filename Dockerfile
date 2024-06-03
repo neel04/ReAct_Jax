@@ -2,7 +2,7 @@ FROM python:3.11
 
 # Set environment variables
 ENV WANDB_API_KEY=78c7285b02548bf0c06dca38776c08bb6018593f
-ENV HF_TOKEN=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
+ENV HF_TOKEN=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
 ENV jax_threefry_partitionable=1
 
 # Install base utilities
