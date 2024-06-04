@@ -70,16 +70,17 @@ def vanilla_fwd(model: eqx.Module, input_arr: Array, pad_mask: Array, iters_to_d
     return model(input_arr, pad_mask, enable_dropout=True, key=key)
 
 @eqx.filter_jit
-def _compute_softmax_cross_entropy_loss(pred_y: Array, y_one_hot: Array,
-                                        pad_mask: Array, iters_to_do: int) -> Array:
+def _compute_softmax_cross_entropy_loss(
+    pred_y: Array, y_one_hot: Array, pad_mask: Array, iters_to_do: int
+) -> Array:
 
-    y_one_hot = jnp.repeat(y_one_hot[:, None], iters_to_do, axis=1)
+    y_one_hot = jnp.repeat(y_one_hot[:, None], iters_to_do, axis=1).squeeze()
 
     loss = -jnp.sum(jax.nn.log_softmax(pred_y, axis=-1) * y_one_hot, axis=-1)
 
     loss = loss.sum((-1, -2)) # across the sequence
 
-    return loss.mean(-1) # across all the batches
+    return loss.mean() # across all the batches
 
 @partial(
     mesh.sjit,
@@ -234,6 +235,8 @@ class Trainer:
     def init_model(self, key: PRNGKeyArray):
 
         if self.baseline:
+            self.max_iters = 1 # baseline model only does one pass
+
             model = GPT(self.n_heads, self.seqlen, self.num_blocks, self.width,
                         self.drop_rate, self.num_classes, key)
         else:
