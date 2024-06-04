@@ -41,8 +41,8 @@ class main_block(eqx.Module):
         enable_dropout: bool = True
         key: PRNGKeyArray = key
         
-        # static_part are activations etc.
-        # dynamic_part are the parameters
+        input_arr, pad_mask = policy.cast_to_compute((input_arr, pad_mask))
+        
         dynamic_part, static_part = eqx.partition(self.attention_blocks, eqx.is_array_like,
                                                   is_leaf=lambda x: isinstance(x, eqx.nn.Dropout))
         
@@ -52,9 +52,9 @@ class main_block(eqx.Module):
 
             return policy.cast_to_output(output), None
 
-        out, _ = jax.lax.scan(f=f, init=input_arr, xs=dynamic_part, unroll=2)
+        out, _ = jax.lax.scan(f=f, init=input_arr, xs=dynamic_part)
         
-        return out
+        return policy.cast_to_output(out)
         
 class GPT(eqx.Module):
     '''
@@ -109,25 +109,7 @@ class GPT(eqx.Module):
         input_arr = jax.vmap(self.embed_layer)(input_arr) + self.pos_enc
 
         input_arr, pad_mask = policy.cast_to_compute((input_arr, pad_mask))
-        output = self.main_block(input_arr, pad_mask, enable_dropout, key)
-        
-        return self.out_head(output)
 
-if __name__ == '__main__':
-    # Testing the model
-    bsz: int = 128
-    key = jax.random.PRNGKey(69)
-    
-    input_arr = jnp.ones((bsz, 512), dtype=jnp.int32) # (batch_size, seq_len)
-    pad_mask = jnp.ones((bsz, 512), dtype=jnp.int32)
-    
-    mygpt = GPT(n_heads=4,
-                seqlen=512,
-                num_blocks=4,
-                width=64,
-                drop_rate=0.1,
-                vocab_size=50257,
-                key=key)
-    
-    output = jax.vmap(mygpt, (0, 0, None))(input_arr, pad_mask, key)
-    print(f'Output shape: {output.shape}')
+        output = self.out_head(self.main_block(input_arr, pad_mask, enable_dropout, key))
+
+        return policy.cast_to_output(output)
