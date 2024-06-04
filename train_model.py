@@ -45,9 +45,9 @@ def main(key: PRNGKeyArray):
 
     # ========= Training/Hypertuning =========
     init_hyperparams = [
-        {"lr": 1e-3, "drop_rate": 0.01, "weight_decay": 8e-4, "warmup_steps": 100, "beta_1": 0.9, "beta_2": 0.999, "nesterov": False},
-        {"lr": 7e-3, "drop_rate": 0.01, "weight_decay": 8e-4, "warmup_steps": 0, "beta_1": 0.9, "beta_2": 0.999, "nesterov": True},
-        {"lr": 2e-2, "drop_rate": 0.01, "weight_decay": 8e-4, "warmup_steps": 0, "beta_1": 0.9, "beta_2": 0.999, "nesterov": False},
+        {"lr": 1e-3, "drop_rate": 0.00, "weight_decay": 8e-4, "warmup_steps": 100, "beta_1": 0.9, "beta_2": 0.999, "nesterov": False},
+        {"lr": 7e-3, "drop_rate": 0.00, "weight_decay": 8e-4, "warmup_steps": 0, "beta_1": 0.9, "beta_2": 0.999, "nesterov": True},
+        {"lr": 2e-2, "drop_rate": 0.00, "weight_decay": 3e-4, "warmup_steps": 300, "beta_1": 0.8, "beta_2": 0.99, "nesterov": False},
     ]
 
     if args.tune_hyperparams:
