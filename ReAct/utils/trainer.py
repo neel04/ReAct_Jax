@@ -298,11 +298,11 @@ class Trainer:
             pred_y = jax.vmap(model, in_axes=(0, None, 0, None, None, 0))(input_arr, eval_iters, pad_mask, False, False, keys)[0]
 
         # compute accuracy
-        y_hat = jax.nn.softmax(pred_y, axis=-1).argmax(-1) 
+        y_hat = jax.nn.softmax(pred_y, axis=-1).argmax(-1) * pad_mask
 
         # reshape stuff to the correct shape
-        y_hat *= jnp.repeat(pad_mask[:, None, :], eval_iters, axis=1)
-        label = jnp.repeat(label[:, None, :], eval_iters, axis=1)
+        y_hat *= jnp.repeat(pad_mask[:, None, :], eval_iters, axis=1).squeeze()
+        label = jnp.repeat(label[:, None, :], eval_iters, axis=1).squeeze()
         
         accuracy = jnp.mean(y_hat == label)
 
