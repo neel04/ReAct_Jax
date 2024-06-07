@@ -138,6 +138,7 @@ class Trainer:
                  key: PRNGKeyArray = jax.random.PRNGKey(69)):
 
         self.decode_fn = decode_fn # decode the ids to text
+        self.text_data: list = []
         self.args = args
         self.key = key
 
@@ -466,12 +467,17 @@ class Trainer:
             gen = jax.nn.softmax(logits / temperature).argmax() # greedy decoding
             input_arr = jnp.concatenate([input_arr, gen.reshape(-1)]) # append the generated token for AR
 
+        # Format the generated text
         model_gen = f'model generation: {self.decode_fn(input_arr[-max_new_tokens:-1])}\n'
         self.my_logger.info(prompt)
         self.my_logger.info(model_gen)
 
-        # log to logger as a table
-        self.text_table.add_data(metadata["step"], prompt, model_gen, metadata["type"])
+        # Log prompts-gen pairs to wandb
+        self.text_data.append([metadata["step"], prompt, model_gen, metadata["type"]])
+
+        for row in self.text_data:
+            self.text_table.add_data(*row)
+
         self.wandb_logger.log({"Generated Samples": self.text_table}, step=metadata["step"])
 
         return input_arr

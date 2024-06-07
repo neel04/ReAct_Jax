@@ -136,13 +136,13 @@ def kickoff_optuna(trial, **trainer_kwargs):
     args.epochs = 1
     
     # Regularization hyperparams
-    args.lr = trial.suggest_float('lr', 1e-4, 9e-2)
-    args.drop_rate = trial.suggest_float('drop_rate', 0.0, 0.1, step=0.01)
-    args.weight_decay = trial.suggest_float('weight_decay', 1e-5, 1e-3)
+    args.lr = trial.suggest_float('lr', 1e-4, 9e-1)
+    args.drop_rate = trial.suggest_float('drop_rate', 0.0, 0.05, step=0.01)
+    args.weight_decay = trial.suggest_float('weight_decay', 1e-6, 1e-3)
     args.warmup_steps = trial.suggest_int('warmup_steps', 0, 500, step=100)
 
     # Optimizer hyperparams
-    args.beta_1 = trial.suggest_categorical('beta_1', [0.8, 0.85, 0.9, 0.95, 0.98])
+    args.beta_1 = trial.suggest_categorical('beta_1', [0.8, 0.85, 0.9, 0.95, 0.98, 0.99])
     args.beta_2 = trial.suggest_categorical('beta_2', [0.9, 0.95, 0.98, 0.99, 0.999])
     args.nesterov = trial.suggest_categorical('nesterov', [True, False])
 
