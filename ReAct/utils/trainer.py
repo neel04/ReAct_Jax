@@ -216,7 +216,7 @@ class Trainer:
 
     @staticmethod
     def get_filterspec(model: eqx.Module) -> PyTree[bool]:
-        '''
+        """
         Returns a filter spec for the model to filter out the trainable parameters.
         Can be used to freeze or unfreeze certain modules of the model depending on the step and epoch.
 
@@ -224,12 +224,9 @@ class Trainer:
             model: The model to filter
         Returns:
             filter_spec: The filter spec as a PyTree[bool] marking trainable parameters
-        '''
-        filter_spec = jax.tree_util.tree_map(lambda _: True, model) # all trainable
-        filter_spec = eqx.tree_at(
-            lambda tree: tree.pos_enc, # pos_enc should be frozen
-            filter_spec,
-            replace=False)
+        """
+        filter_spec = jax.tree_util.tree_map(lambda _: True, model)  # all trainable
+        #filter_spec = eqx.tree_at(lambda tree: tree.pos_enc, filter_spec, replace=False)
 
         return filter_spec
 

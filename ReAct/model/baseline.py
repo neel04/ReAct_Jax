@@ -63,7 +63,6 @@ class GPT(eqx.Module):
     __name__ = 'GPT'
     
     embed_layer: eqx.Module
-    pos_enc: Array
     main_block: eqx.Module
     out_head: eqx.Module
     
@@ -79,7 +78,6 @@ class GPT(eqx.Module):
         keys = jax.random.split(key, 3)
         
         self.embed_layer = eqx.nn.Embedding(vocab_size, width, key=keys[0])
-        self.pos_enc = jax.lax.stop_gradient(self.positional_encoding(seqlen, width))
 
         self.main_block = main_block(seqlen, width, n_heads, drop_rate, num_blocks, key=keys[1])
         self.out_head = LinearProj(width, vocab_size, key=keys[2])
@@ -106,7 +104,7 @@ class GPT(eqx.Module):
                  enable_dropout: bool,
                  key: PRNGKeyArray) -> Array:
         
-        input_arr = jax.vmap(self.embed_layer)(input_arr) + self.pos_enc
+        input_arr = jax.vmap(self.embed_layer)(input_arr)
 
         input_arr, pad_mask = policy.cast_to_compute((input_arr, pad_mask))
 

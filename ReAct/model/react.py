@@ -94,7 +94,6 @@ class React(eqx.Module):
     max_iters: int = eqx.field(static=True)
     width: int = eqx.field(static=True)
     
-    pos_enc: Array
     embed_layer: eqx.nn.Embedding
     iteration_index_pe: eqx.nn.Embedding
     main_block: LiteAttention
@@ -119,7 +118,6 @@ class React(eqx.Module):
 
         self.embed_layer = eqx.nn.Embedding(vocab_size, width, key=key1)
         self.iteration_index_pe = eqx.nn.Embedding(max_iters, width, key=key2)
-        self.pos_enc = jax.lax.stop_gradient(self.positional_encoding(seqlen, width))
 
         self.main_block = RecurrentModule(seqlen, drop_rate, n_heads, num_blocks, width, key=key3)
 
@@ -188,9 +186,9 @@ class React(eqx.Module):
         if prev_thought:
             assert isinstance(input_arr, tuple), 'prev_thought is True, but input_arr is not a tuple'
             input_arr, interim_thought = input_arr
-            input_arr = jax.vmap(self.embed_layer)(input_arr) + self.pos_enc # (batch, seqlen, bottleneck)
+            input_arr = jax.vmap(self.embed_layer)(input_arr) # (batch, seqlen, bottleneck)
         else:
-            input_arr = jax.vmap(self.embed_layer)(input_arr) + self.pos_enc # (batch, seqlen, bottleneck)
+            input_arr = jax.vmap(self.embed_layer)(input_arr) # (batch, seqlen, bottleneck)
             interim_thought = input_arr.copy() # has to be a copy of the embedded + projected input array
 
         input_arr, interim_thought = policy.cast_to_compute((input_arr, interim_thought))

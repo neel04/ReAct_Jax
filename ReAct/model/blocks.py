@@ -1,5 +1,5 @@
 import math
-from typing import Optional, Tuple, Callable
+from typing import Callable, Optional, Tuple
 
 import equinox as eqx
 import jax
@@ -19,6 +19,7 @@ class AttentionBlock(eqx.Module):
     in_dim: int = eqx.field(static=True)
 
     attn_gate: eqx.Module
+    rope_embed: eqx.Module
     ln1: eqx.Module
     ln2: eqx.Module
     mlp: eqx.Module
@@ -37,6 +38,8 @@ class AttentionBlock(eqx.Module):
         self.n_heads = n_heads
         self.in_dim = in_dim
 
+        self.rope_embed = eqx.nn.RotaryPositionalEmbedding(embedding_size=in_dim // n_heads)
+
         self.attn_gate = eqx.nn.MultiheadAttention(num_heads=n_heads, query_size=in_dim,
                                                    use_query_bias=True, use_key_bias=True,
                                                    use_value_bias=True, use_output_bias=True, 
@@ -46,6 +49,22 @@ class AttentionBlock(eqx.Module):
         self.ln2 = eqx.nn.LayerNorm(self.in_dim)
 
         self.mlp = MLP(self.in_dim, self.in_dim, drop_rate, key2)
+
+    def process_heads(
+        self,
+        query_heads: Float[Array, "seq_length num_heads qk_size"],
+        key_heads: Float[Array, "seq_length num_heads qk_size"],
+        value_heads: Float[Array, "seq_length num_heads vo_size"],
+    ) -> tuple[
+        Float[Array, "seq_length num_heads qk_size"],
+        Float[Array, "seq_length num_heads qk_size"],
+        Float[Array, "seq_length num_heads vo_size"],
+    ]:
+        query_heads = jax.vmap(self.rope_embed, in_axes=1, out_axes=1)(query_heads)
+
+        key_heads = jax.vmap(self.rope_embed, in_axes=1, out_axes=1)(key_heads)
+
+        return query_heads, key_heads, value_heads
 
     def _make_self_attention_mask(self, pad_mask: Array) -> Array:
         """Create self-attention mask from sequence-level mask."""
@@ -68,11 +87,14 @@ class AttentionBlock(eqx.Module):
         inp, input_arr, mask = policy.cast_to_compute((inp, input_arr, mask))
         
         x = jax.vmap(self.ln1)(inp)
+
         inp += self.attn_gate(x, input_arr, input_arr,
                               mask=self._make_self_attention_mask(mask),
-                              key=key_1, inference=enable_dropout)
+                              inference=enable_dropout,
+                              process_heads=self.process_heads, key=key_1)
         
         x = jax.vmap(self.ln2)(inp)
+
         inp += self.mlp(x, enable_dropout=True, key=key_2)
 
         return policy.cast_to_output(inp)
