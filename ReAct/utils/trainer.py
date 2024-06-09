@@ -413,8 +413,8 @@ class Trainer:
                     self.my_logger.info(f'Validation accuracy: {val_metrics[0]} | using {self.max_iters} iterations')
                     self.my_logger.info(f'Cumulative Training accuracy: {cum_train_acc}\n')
 
-                    self.generate(model, sample_x, metadata={'type': 'train', 'step': step}, max_new_tokens=96)
-                    self.generate(model, val_sample_x, metadata={'type': 'val', 'step': step}, max_new_tokens=96)
+                    self.generate(model, sample_x, metadata={'type': 'train', 'step': step}, max_new_tokens=64)
+                    self.generate(model, val_sample_x, metadata={'type': 'val', 'step': step}, max_new_tokens=64)
 
                 if not self.tune_hyperparams and (step + 1) % self.save_interval == 0:
                     filepath = f"{self.save_dir}model_{epoch}_{step}.eqx"
@@ -462,6 +462,7 @@ class Trainer:
                 logits = inference_model(padded_array, pad_mask, False, key)
             else:
                 logits = inference_model(padded_array, self.max_iters, pad_mask, False, False, key)[0]
+                logits = logits[:, -1] if logits.ndim == 3 else logits
             
             logits = logits[zero_idx - 1, :] # extract the logits for the last token
             gen = jax.nn.softmax(logits / temperature).argmax() # greedy decoding

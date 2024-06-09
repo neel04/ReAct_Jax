@@ -167,3 +167,4 @@ def kickoff_optuna(trial, **trainer_kwargs):
 if __name__ == '__main__':
     key = jax.random.PRNGKey(69)
     main(key)
+    exit(0)
