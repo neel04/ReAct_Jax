@@ -458,8 +458,7 @@ class Trainer:
             if self.baseline:
                 logits = inference_model(padded_array, pad_mask, False, key)
             else:
-                logits = inference_model(padded_array, self.max_iters, pad_mask, False, False, key)[0]
-                logits = logits[:, -1] if logits.ndim == 3 else logits
+                logits = inference_model(padded_array, self.max_iters, pad_mask, False, False, key)[0][-1]
             
             logits = logits[zero_idx - 1, :] # extract the logits for the last token
             gen = jax.nn.softmax(logits / temperature).argmax() # greedy decoding

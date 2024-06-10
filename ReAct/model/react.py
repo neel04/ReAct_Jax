@@ -95,7 +95,6 @@ class React(eqx.Module):
     width: int = eqx.field(static=True)
     
     embed_layer: eqx.nn.Embedding
-    iteration_index_pe: eqx.nn.Embedding
     main_block: LiteAttention
     post_ln: eqx.nn.LayerNorm
     out_head: eqx.Module
@@ -117,8 +116,6 @@ class React(eqx.Module):
         self.width = width
 
         self.embed_layer = eqx.nn.Embedding(vocab_size, width, key=key1)
-        self.iteration_index_pe = eqx.nn.Embedding(max_iters, width, key=key2)
-
         self.main_block = RecurrentModule(seqlen, drop_rate, n_heads, num_blocks, width, key=key3)
 
         self.post_ln = eqx.nn.LayerNorm(width)
@@ -156,8 +153,6 @@ class React(eqx.Module):
         def body_fun(carry: Tuple[Array, Array], idx: int) -> Tuple[Tuple, Array]:
             latent, ctx_state = carry
 
-            ctx_state += self.iteration_index_pe(idx)
-
             latent = jnp.concatenate([input_arr, latent], axis=-1)  # (seqlen, width * 2)
             latent, ctx_state = self.main_block(latent, ctx_state, mask, enable_dropout, key)  # (seqlen, width)
             latent = jax.vmap(self.post_ln)(latent)  # Post-LN for stability
@@ -166,7 +161,7 @@ class React(eqx.Module):
             
             return (latent, ctx_state), ctx_state
 
-        final_val, ctx_hist = eqx.internal.scan(
+        _, ctx_hist = eqx.internal.scan(
             f=body_fun, init=(interim_thought, input_arr), xs=jnp.arange(iters_to_do), kind='checkpointed'
         )
 
