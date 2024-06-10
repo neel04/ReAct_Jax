@@ -226,7 +226,6 @@ class Trainer:
             filter_spec: The filter spec as a PyTree[bool] marking trainable parameters
         """
         filter_spec = jax.tree_util.tree_map(lambda _: True, model)  # all trainable
-        #filter_spec = eqx.tree_at(lambda tree: tree.pos_enc, filter_spec, replace=False)
 
         return filter_spec
 
@@ -295,13 +294,13 @@ class Trainer:
         else:
             pred_y = jax.vmap(model, in_axes=(0, None, 0, None, None, 0))(input_arr, eval_iters, pad_mask, False, False, keys)[0]
 
-        # compute accuracy
         y_hat = jax.nn.softmax(pred_y, axis=-1).argmax(-1)
 
         # reshape stuff to the correct shape
         y_hat *= jnp.repeat(pad_mask[:, None, :], eval_iters, axis=1).squeeze()
         label = jnp.repeat(label[:, None, :], eval_iters, axis=1).squeeze()
         
+        # compute accuracy
         accuracy = jnp.mean(y_hat == label)
 
         # compute loss

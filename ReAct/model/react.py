@@ -121,7 +121,7 @@ class React(eqx.Module):
         self.post_ln = eqx.nn.LayerNorm(width)
         self.out_head = LinearProj(width, vocab_size, key=key4)
 
-    def positional_encoding(self, seq_len, d_model):
+    def positional_encoding(self, seq_len: int, d_model: int):
         '''
         Generates the positional encoding for the input sequence
         of shape (batch_size, max_seq_len, d_model) which would be added
@@ -159,7 +159,7 @@ class React(eqx.Module):
 
             latent, ctx_state = policy.cast_to_output((latent, ctx_state))
             
-            return (latent, ctx_state), ctx_state
+            return (latent, ctx_state), latent
 
         _, ctx_hist = eqx.internal.scan(
             f=body_fun, init=(interim_thought, input_arr), xs=jnp.arange(iters_to_do), kind='checkpointed'
