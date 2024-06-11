@@ -109,8 +109,8 @@ def main(key: PRNGKeyArray):
         print(f'\nValue: {study.best_trial.value}\nParams: {study.best_trial.params}\n')
 
     else:
-        trainloader = train_dataset.create_dataloader("10%")
-        valloader = val_dataset.create_dataloader("10%")
+        trainloader = train_dataset.create_dataloader()
+        valloader = val_dataset.create_dataloader()
 
         logger = UnifiedLogger(args, level="DEBUG")
         my_logger, wandb_logger = logger.my_logger(), logger.wandb_logger(args)
