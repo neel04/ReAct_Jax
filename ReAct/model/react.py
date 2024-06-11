@@ -162,7 +162,11 @@ class React(eqx.Module):
             return (latent, ctx_state), latent
 
         _, ctx_hist = eqx.internal.scan(
-            f=body_fun, init=(interim_thought, input_arr), xs=jnp.arange(iters_to_do), kind='checkpointed'
+            f=body_fun,
+            init=(interim_thought, input_arr),
+            xs=jnp.arange(iters_to_do),
+            kind="checkpointed",
+            checkpoints=iters_to_do,
         )
 
         return ctx_hist
