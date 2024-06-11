@@ -53,8 +53,8 @@ def main(key: PRNGKeyArray):
     if args.tune_hyperparams:
         args.group = 'Sweeps_base' if args.baseline else f'Sweeps_{args.max_iters}i'
 
-        trainloader = train_dataset.create_dataloader("40%")
-        valloader = val_dataset.create_dataloader("40%")
+        trainloader = train_dataset.create_dataloader()
+        valloader = val_dataset.create_dataloader()
 
         # Create optuna hypertununing study
         study = optuna.create_study(
@@ -109,8 +109,8 @@ def main(key: PRNGKeyArray):
         print(f'\nValue: {study.best_trial.value}\nParams: {study.best_trial.params}\n')
 
     else:
-        trainloader = train_dataset.create_dataloader()
-        valloader = val_dataset.create_dataloader()
+        trainloader = train_dataset.create_dataloader("10%")
+        valloader = val_dataset.create_dataloader("10%")
 
         logger = UnifiedLogger(args, level="DEBUG")
         my_logger, wandb_logger = logger.my_logger(), logger.wandb_logger(args)
@@ -133,7 +133,7 @@ def main(key: PRNGKeyArray):
 def kickoff_optuna(trial, **trainer_kwargs):
     args = trainer_kwargs['args']
 
-    args.epochs = 3
+    args.epochs = 2
     
     # Regularization hyperparams
     args.lr = trial.suggest_float('lr', 1e-4, 9e-1)
