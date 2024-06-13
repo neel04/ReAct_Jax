@@ -88,7 +88,7 @@ def main(key: PRNGKeyArray):
         }
 
         wandbc = WeightsAndBiasesCallback(
-            metric_name='Train/loss',
+            metric_name='Val/loss',
             wandb_kwargs=wandb_kwargs,
             as_multirun=True
         )
@@ -160,9 +160,9 @@ def kickoff_optuna(trial, **trainer_kwargs):
     my_logger.info(f"Host id: {jax.process_index()}")
 
     with jax.spmd_mode('allow_all'):
-        loss = trainer.train(trial)
+        output = trainer.train(trial)
     
-    return jax.numpy.nan_to_num(loss, nan=9e9)
+    return jax.numpy.nan_to_num(output, nan=9e9)
 
 if __name__ == '__main__':
     key = jax.random.PRNGKey(69)

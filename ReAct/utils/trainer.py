@@ -316,10 +316,10 @@ class Trainer:
         '''
         Logs the metrics to the optuna trial
         '''
-        loss, epoch = metrics
+        loss, progress = metrics
 
         if trial is not None:
-            trial.report(loss, epoch)
+            trial.report(loss, progress)
 
     def train(self, trial: Optional[Any] = None) -> Tuple[float, int]:
         step_done = 0
@@ -370,10 +370,6 @@ class Trainer:
                         step=step
                     )
                     
-                    if trial is not None and trial.should_prune():
-                        self.optuna_log(trial, (loss, epoch))
-                        raise optuna.exceptions.TrialPruned()
-
                     if jnp.isnan(loss):
                         self.my_logger.warning(f'\nLoss is NaN at step {step}')
                         return loss
@@ -384,29 +380,34 @@ class Trainer:
                     cum_train_loss = sum(train_loss) / len(train_loss)
                     cum_train_ppl = sum(train_ppl) / len(train_ppl)
 
-                    ## clear the metrics
+                    # clear the metrics
                     train_acc, train_loss, train_ppl = [], [], []
 
                     ## Validation
-                    val_metrics, val_sample = self.evaluate_acc(model, self.valloader, self.max_iters, keys)
+                    (val_acc, val_loss, val_ppl), val_sample = self.evaluate_acc(model, self.valloader, self.max_iters, keys)
 
                     self.wandb_logger.log(
                         {
                             'Train/acc': cum_train_acc,
                             'Train/cum_loss': cum_train_loss,
                             'Train/ppl': cum_train_ppl,
-                            'Val/acc': val_metrics[0],
-                            'Val/loss': val_metrics[1],
-                            'Val/ppl': val_metrics[2],
+                            'Val/acc': val_acc,
+                            'Val/loss': val_loss,
+                            'Val/ppl': val_ppl,
                         },
                         step=step
                     )
+                    
+                    # Report metrics to optuna
+                    if trial is not None and trial.should_prune():
+                        self.optuna_log(trial, (val_loss, step))
+                        raise optuna.exceptions.TrialPruned()
 
                     ## Visualize one sample and model prediction
                     sample_x, val_sample_x = seq[0][:16], val_sample[:16]
 
                     self.my_logger.info(f"epoch={epoch}, step={step}, loss={loss}")
-                    self.my_logger.info(f'Validation accuracy: {val_metrics[0]} | using {self.max_iters} iterations')
+                    self.my_logger.info(f'Validation accuracy: {val_acc} | using {self.max_iters} iterations')
                     self.my_logger.info(f'Cumulative Training accuracy: {cum_train_acc}\n')
 
                     self.generate(model, sample_x, metadata={'type': 'train', 'step': step}, max_new_tokens=64)
@@ -415,20 +416,19 @@ class Trainer:
                 if not self.tune_hyperparams and (step + 1) % self.save_interval == 0:
                     filepath = f"{self.save_dir}model_{epoch}_{step}.eqx"
                     
-                    #model = jax.experimental.multihost_utils.process_allgather(model) # all-gather the model
                     save_eqx_obj(self.save_dir, filepath, (model, opt_state))
                     
                     self.my_logger.info(f'Model saved at {filepath}')
                     self.wandb_logger.save(filepath)
 
-            step_done = step # prepare for next epoch
-            self.optuna_log(trial, (loss, epoch))
+            step_done = step
+            self.optuna_log(trial, (val_loss, step))
             
             print(f'Epoch {epoch} done!')
 
         self.wandb_logger.finish() # Cleanup
         
-        return loss
+        return val_loss
 
     def generate(self, model: eqx.Module, input_arr: Array, metadata: dict, max_new_tokens: int, temperature: float = 0.5):
         '''
