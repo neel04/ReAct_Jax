@@ -48,9 +48,9 @@ def main(key: PRNGKeyArray):
 
     # ========= Training/Hypertuning =========
     init_hyperparams = [
-        {"lr": 1e-3, "drop_rate": 0.00, "weight_decay": 8e-4, "warmup_steps": 100, "beta_1": 0.9, "beta_2": 0.999, "nesterov": False},
-        {"lr": 7e-3, "drop_rate": 0.00, "weight_decay": 8e-4, "warmup_steps": 0, "beta_1": 0.9, "beta_2": 0.999, "nesterov": True},
-        {"lr": 2e-2, "drop_rate": 0.00, "weight_decay": 3e-4, "warmup_steps": 300, "beta_1": 0.8, "beta_2": 0.99, "nesterov": False},
+        {"lr": 4e-3, "drop_rate": 0.00, "weight_decay": 8e-4, "warmup_steps": 100, "beta_1": 0.98, "beta_2": 0.98, "nesterov": False},
+        {"lr": 7e-3, "drop_rate": 0.00, "weight_decay": 5e-4, "warmup_steps": 250, "beta_1": 0.9, "beta_2": 0.98, "nesterov": True},
+        {"lr": 8e-2, "drop_rate": 0.00, "weight_decay": 3e-4, "warmup_steps": 30, "beta_1": 0.95, "beta_2": 0.9, "nesterov": False},
     ]
 
     if args.tune_hyperparams:
@@ -112,7 +112,7 @@ def main(key: PRNGKeyArray):
         print(f'\nValue: {study.best_trial.value}\nParams: {study.best_trial.params}\n')
 
     else:
-        trainloader = train_dataset.create_dataloader()
+        trainloader = train_dataset.create_dataloader(":20%")
         valloader = val_dataset.create_dataloader()
 
         logger = UnifiedLogger(args, level="DEBUG")

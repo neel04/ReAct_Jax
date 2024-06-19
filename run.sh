@@ -38,7 +38,7 @@ cd ReAct_Jax/; git pull --all; cd ..
 
 # Run the Docker container
 echo "Running Docker container..."
-docker run --pull 'always' -v $(pwd)/ReAct_Jax/:/ReAct_Jax/ --tmpfs $RAMDISK_PATH -e HF_HOME=$RAMDISK_PATH -e HF_DATASETS_CACHE=$RAMDISK_PATH -e WANDB_API_KEY=78c7285b02548bf0c06dca38776c08bb6018593f -e HF_TOKEN=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 -e JAX_TRACEBACK_FILTERING=off --privileged --rm --net=host --name $CONTAINER_NAME -it -d $IMAGE_NAME
+docker run --pull 'always' -v $(pwd)/ReAct_Jax/:/ReAct_Jax/ --mount type=tmpfs,destination=$RAMDISK_PATH,tmpfs-mode=1770,tmpfs-size=214748364800 -e HF_HOME=$RAMDISK_PATH -e HF_DATASETS_CACHE=$RAMDISK_PATH -e WANDB_API_KEY=78c7285b02548bf0c06dca38776c08bb6018593f -e HF_TOKEN=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 -e JAX_TRACEBACK_FILTERING=off --privileged --rm --net=host --name $CONTAINER_NAME -it -d $IMAGE_NAME
 
 # Get docker container ID to copy files
 CONTAINER_ID=$(docker ps -aqf "name=$CONTAINER_NAME")
