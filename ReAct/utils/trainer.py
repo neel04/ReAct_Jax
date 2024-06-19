@@ -17,9 +17,13 @@ from tqdm.auto import tqdm
 import wandb
 from ReAct.model.baseline import GPT
 from ReAct.model.react import React
-from ReAct.utils.helpers import count_params, load_eqx_obj, save_eqx_obj
-
-from .helpers import broad_to_bsz, calc_performance_metrics
+from ReAct.utils.helpers import (
+    broad_to_bsz,
+    calc_performance_metrics,
+    count_params,
+    load_eqx_obj,
+    save_eqx_obj,
+)
 
 half, full = jnp.bfloat16, jnp.float32
 mesh = MeshShardingHelper(axis_dims=[-1], axis_names=['data']) # handle DDP + TP over multi-node
@@ -135,6 +139,7 @@ class Trainer:
                  logger: Tuple,
                  loaders: Tuple,
                  decode_fn: Callable,
+                 dataset_size: Optional[int] = None,
                  key: PRNGKeyArray = jax.random.PRNGKey(69)):
 
         self.decode_fn = decode_fn # decode the ids to text
@@ -144,7 +149,10 @@ class Trainer:
 
         self.my_logger, self.wandb_logger = logger
         self.trainloader, self.valloader = loaders
-        self.dataset_length = len(self.trainloader) * args.batch_size * args.seqlen
+
+        self.dataset_length = (
+            dataset_size if dataset_size is not None else len(self.trainloader)
+        )
 
         self.text_table = wandb.Table(
             columns=["Step", "Prompt", "Model Generation", "Type"]
@@ -187,7 +195,7 @@ class Trainer:
     def set_optim_and_scheduler(self, model: eqx.Module) -> Tuple[Callable, PyTree, eqx.Module]:
         assert model is not None, 'Model is not initialized'
 
-        total_steps = self.epochs * len(self.trainloader)
+        total_steps = self.epochs * self.dataset_length
 
         self.schedule_fn = optax.warmup_cosine_decay_schedule(
             init_value=self.lr / 2,
@@ -342,7 +350,7 @@ class Trainer:
 
             keys = jax.random.split(epoch_key, self.batch_size)
             
-            for step, batch in tqdm(enumerate(self.trainloader), total=len(self.trainloader), desc=f'Epoch {epoch}'):
+            for step, batch in tqdm(enumerate(self.trainloader), total=self.dataset_length, desc=f'Epoch {epoch}'):
                 step += step_done # for multiple epochs
 
                 seq, label, pad_mask = jnp.asarray(batch['text'])

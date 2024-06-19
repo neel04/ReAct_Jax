@@ -11,6 +11,7 @@ from jax import config
 from jaxtyping import PRNGKeyArray
 from optuna.integration.wandb import WeightsAndBiasesCallback
 
+from ReAct.data.gh_code import GithubCodeDataset
 from ReAct.data.minipile import MiniPileDataset
 from ReAct.data.owt import OpenWebTextDataset
 from ReAct.data.tinystories import TinyStoriesDataset
@@ -39,6 +40,8 @@ def main(key: PRNGKeyArray):
             dataset = OpenWebTextDataset
         case 'minipile':
             dataset = MiniPileDataset
+        case 'github':
+            dataset = GithubCodeDataset
 
     train_dataset = dataset(split='train', max_length=args.seqlen, bsz=args.batch_size)
     val_dataset = dataset(split='test', max_length=args.seqlen, bsz=args.batch_size)
