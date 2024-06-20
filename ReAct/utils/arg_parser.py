@@ -51,6 +51,15 @@ def parse_args():
 
     parser.add_argument('--epochs', type=int, default=1,
                         help='Number of epochs. Default: 1')
+    
+    parser.add_argument('--beta_1', type=float, default=0.9,
+                        help='Adam beta 1. Default: 0.9')
+    
+    parser.add_argument('--beta_2', type=float, default=0.999,
+                        help='Adam beta 2. Default: 0.999')
+    
+    parser.add_argument('--nesterov', action='store_true', default=False,
+                        help='Enable Nesterov momentum. Default: False')
 
     parser.add_argument('--save_interval', type=int, default=2500,
                         help='Save interval. Default: 2500')
@@ -65,7 +74,7 @@ def parse_args():
                         help='Debug mode - disables JIT. Default: False')
     
     parser.add_argument('--bf16', action='store_true', default=False,
-                        help='Enable mixed precision training. Default: False')
+                        help='Switch model weights to bf16. Grads are always in bf16. Default: False (fp32)')
     
     parser.add_argument('--exp_logging', action='store_const', const='online', default='disabled',
                     help='Enable experiment logging in the cloud. Default: disabled')

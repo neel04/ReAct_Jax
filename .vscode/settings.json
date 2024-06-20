@@ -6,4 +6,6 @@
         "editor.defaultFormatter": "charliermarsh.ruff"
     },
     "python.formatting.provider": "none",
+    "markdown.preview.typographer": true,
+    "editor.fontLigatures": true,
 }

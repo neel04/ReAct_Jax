@@ -1,15 +1,17 @@
 import platform
 import jax
 
+jax.config.update("jax_compilation_cache_dir", "./ReAct/compilation_cache")
+
 if platform.processor() != 'arm':
     jax.distributed.initialize() # don't run on apple sillicon
 
 import optuna
 from jax import config
-from jax.experimental.compilation_cache import compilation_cache
 from jaxtyping import PRNGKeyArray
 from optuna.integration.wandb import WeightsAndBiasesCallback
 
+from ReAct.data.gh_code import GithubCodeDataset
 from ReAct.data.minipile import MiniPileDataset
 from ReAct.data.owt import OpenWebTextDataset
 from ReAct.data.tinystories import TinyStoriesDataset
@@ -17,11 +19,12 @@ from ReAct.utils.arg_parser import parse_args
 from ReAct.utils.logger import UnifiedLogger
 from ReAct.utils.trainer import Trainer
 
+# ruff: noqa: E402, E731
 
 def main(key: PRNGKeyArray):
     args = parse_args()
-    jax.config.update('jax_threefry_partitionable', True) # for parallelization
-
+    config.update('jax_threefry_partitionable', True) # for parallelization
+    
     # Enter debugging mode, disabling JIT
     if args.debug:
         config.update("jax_debug_nans", True)
@@ -37,22 +40,24 @@ def main(key: PRNGKeyArray):
             dataset = OpenWebTextDataset
         case 'minipile':
             dataset = MiniPileDataset
+        case 'github':
+            dataset = GithubCodeDataset
 
     train_dataset = dataset(split='train', max_length=args.seqlen, bsz=args.batch_size)
     val_dataset = dataset(split='test', max_length=args.seqlen, bsz=args.batch_size)
 
     # ========= Training/Hypertuning =========
     init_hyperparams = [
-        {"lr": 1e-3, "drop_rate": 0.01, "weight_decay": 8e-4, "warmup_steps": 100},
-        {"lr": 7e-3, "drop_rate": 0.01, "weight_decay": 8e-4, "warmup_steps": 0},
-        {"lr": 2e-2, "drop_rate": 0.01, "weight_decay": 8e-4, "warmup_steps": 0},
+        {"lr": 8e-3, "drop_rate": 0.00, "weight_decay": 8e-4, "warmup_steps": 200, "beta_1": 0.95, "beta_2": 0.98, "nesterov": True},
+        {"lr": 4e-3, "drop_rate": 0.00, "weight_decay": 9e-4, "warmup_steps": 150, "beta_1": 0.95, "beta_2": 0.99, "nesterov": True},
+        {"lr": 8e-2, "drop_rate": 0.02, "weight_decay": 3e-4, "warmup_steps": 30, "beta_1": 0.95, "beta_2": 0.9, "nesterov": False},
     ]
 
     if args.tune_hyperparams:
-        args.group = 'Sweeps' if args.baseline else 'Sweeps_5i'
+        args.group = 'Sweeps_base' if args.baseline else f'Sweeps_{args.max_iters}i'
 
-        trainloader = train_dataset.create_dataloader("40%")
-        valloader = val_dataset.create_dataloader("40%")
+        trainloader = train_dataset.create_dataloader(':20%')
+        valloader = val_dataset.create_dataloader()
 
         # Create optuna hypertununing study
         study = optuna.create_study(
@@ -65,8 +70,9 @@ def main(key: PRNGKeyArray):
                 n_startup_trials=5,
             ),
             pruner=optuna.pruners.MedianPruner(
-                n_startup_trials=5, n_warmup_steps=200, n_min_trials=10
-            ),
+                n_startup_trials=5,
+                n_min_trials=5
+            )
         )
 
         wandb_kwargs = {
@@ -85,7 +91,7 @@ def main(key: PRNGKeyArray):
         }
 
         wandbc = WeightsAndBiasesCallback(
-            metric_name='Train/acc',
+            metric_name='Val/loss',
             wandb_kwargs=wandb_kwargs,
             as_multirun=True
         )
@@ -106,7 +112,7 @@ def main(key: PRNGKeyArray):
         print(f'\nValue: {study.best_trial.value}\nParams: {study.best_trial.params}\n')
 
     else:
-        trainloader = train_dataset.create_dataloader()
+        trainloader = train_dataset.create_dataloader(":99%")
         valloader = val_dataset.create_dataloader()
 
         logger = UnifiedLogger(args, level="DEBUG")
@@ -130,12 +136,18 @@ def main(key: PRNGKeyArray):
 def kickoff_optuna(trial, **trainer_kwargs):
     args = trainer_kwargs['args']
 
-    args.epochs = 1
+    args.epochs = 2
+    
+    # Regularization hyperparams
+    args.lr = trial.suggest_float('lr', 1e-4, 9e-1)
+    args.drop_rate = trial.suggest_float('drop_rate', 0.0, 0.05, step=0.01)
+    args.weight_decay = trial.suggest_float('weight_decay', 1e-7, 1e-3)
+    args.warmup_steps = trial.suggest_int('warmup_steps', 0, 300, step=10)
 
-    args.lr = trial.suggest_float('lr', 1e-4, 1e-2, step=1e-4)
-    args.drop_rate = trial.suggest_float('drop_rate', 0.0, 0.1, step=0.01)
-    args.weight_decay = trial.suggest_float('weight_decay', 1e-5, 1e-3, step=2e-4)
-    args.warmup_steps = trial.suggest_int('warmup_steps', 0, 500, step=100)
+    # Optimizer hyperparams
+    args.beta_1 = trial.suggest_categorical('beta_1', [0.8, 0.85, 0.9, 0.95, 0.98, 0.99])
+    args.beta_2 = trial.suggest_categorical('beta_2', [0.9, 0.95, 0.98, 0.99, 0.999])
+    args.nesterov = trial.suggest_categorical('nesterov', [True, False])
 
     args = trainer_kwargs['args']
 
@@ -151,11 +163,12 @@ def kickoff_optuna(trial, **trainer_kwargs):
     my_logger.info(f"Host id: {jax.process_index()}")
 
     with jax.spmd_mode('allow_all'):
-        loss = trainer.train(trial)
+        output = trainer.train(trial)
     
-    return loss
+    return jax.numpy.nan_to_num(output, nan=9e9)
 
 if __name__ == '__main__':
     compilation_cache.initialize_cache('./compilation_cache')
     key = jax.random.PRNGKey(69)
     main(key)
+    exit(0)

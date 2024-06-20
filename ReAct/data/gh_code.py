@@ -11,7 +11,7 @@ from jaxtyping import Array
 
 from .tokenizer import Tok
 
-class MiniPileDataset:
+class GithubCodeDataset:
     def __init__(self, split: str = 'train', max_length: int = 512, bsz: int = 256, vocab_dir: str ='./ReAct/data'):    
         datasets.config.IN_MEMORY_MAX_SIZE = 1e+11
         
@@ -66,18 +66,16 @@ class MiniPileDataset:
 
         dataset.save_to_disk(
             dataset_path=path,
-            num_shards=32 if self.split == 'train' else 8,
-            num_proc=os.cpu_count() // 4
+            num_shards=32 if self.split == "train" else 8,
+            num_proc=os.cpu_count() // 4,
         )
 
         print(f'Saved {self.split} dataset to {path}...')
 
     def load_data(self, path: Path):
-        return load_from_disk(
-            dataset_path=path,
-            keep_in_memory=True)
+        return load_from_disk(dataset_path=path, keep_in_memory=True)
 
-    def upload_dataset(self, dataset, hub_path: str = "Neel-Gupta/minipile-processed") -> None:
+    def upload_dataset(self, dataset, hub_path: str = "Neel-Gupta/ghcode-processed") -> None:
         '''
         Helper function to upload the dataset to the HuggingFace Hub
         If needed to save on preprocessing wall time.
@@ -85,7 +83,7 @@ class MiniPileDataset:
         dataset.push_to_hub(hub_path,
                             token=os.getenv('HF_TOKEN'),
                             split=self.split)
-
+    
     def take_subset(self, dataset, elements: int) -> None:
         '''
         Take a slice of dataset for debugging purposes
@@ -97,13 +95,17 @@ class MiniPileDataset:
         
         return dataset
 
-    def create_dataloader(self, slice: str = '100%'):
-        data_path = Path(f'./cached_data/minipile_{self.split}.data')
+    def create_dataloader(self, slice: str = ':30%'):
+        data_path = Path(f'./cached_data/ghcode_{self.split}.data')
+
+        if self.split == 'test':
+            self.split = 'train'
+            slice: str = "-1%:" 
 
         try:
             dataset = load_dataset(
-                f"Neel-Gupta/minipile-processed_{self.bsz}",
-                split=f"{self.split}[:{slice}]",
+                f"Neel-Gupta/ghcode-processed_{self.bsz}",
+                split=f"{self.split}[{slice}]",
                 verification_mode="no_checks",
                 keep_in_memory=True,
                 num_proc=None,
@@ -124,14 +126,15 @@ class MiniPileDataset:
                 print(f'Building dataset from scratch... [split: {self.split}] | [bsz: {self.bsz}]')
 
                 dataset = load_dataset(
-                    "JeanKaddour/minipile",
-                    split=f"{self.split}[:{slice}]",
+                    "codeparrot/codeparrot-clean",
+                    split=f"{self.split}[{slice}]",
                     verification_mode='no_checks',
                     keep_in_memory=True,
                     num_proc=None,
-                )
+                ).select_columns('content')
 
                 dataset = self.take_subset(dataset, 2_000)
+                dataset = dataset.rename_column('content', 'text')
 
                 def dataset_map_fn(func):
                     return dataset.map(
@@ -149,7 +152,8 @@ class MiniPileDataset:
 
                 dataset.set_format(type='numpy')
 
-                # Upload the processed dataset to the hub
-                self.upload_dataset(dataset, hub_path=f"Neel-Gupta/minipile-processed_{self.bsz}")
+                self.upload_dataset(
+                    dataset, hub_path=f"Neel-Gupta/ghcode-processed_{self.bsz}"
+                )
 
                 return dataset

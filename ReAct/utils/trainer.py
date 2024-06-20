@@ -8,6 +8,7 @@ import jax.numpy as jnp
 import optax
 import optuna
 from jaxtyping import Array, PRNGKeyArray, PyTree
+from jmp import Policy
 from scalax.sharding import MeshShardingHelper
 from scalax.sharding import PartitionSpec as P
 from torch.utils.data import DataLoader
@@ -16,11 +17,17 @@ from tqdm.auto import tqdm
 import wandb
 from ReAct.model.baseline import GPT
 from ReAct.model.react import React
-from ReAct.utils.helpers import count_params, load_eqx_obj, save_eqx_obj
+from ReAct.utils.helpers import (
+    broad_to_bsz,
+    calc_performance_metrics,
+    count_params,
+    load_eqx_obj,
+    save_eqx_obj,
+)
 
-from .helpers import broad_to_bsz, calc_performance_metrics, half_precision
-
+half, full = jnp.bfloat16, jnp.float32
 mesh = MeshShardingHelper(axis_dims=[-1], axis_names=['data']) # handle DDP + TP over multi-node
+policy = Policy(compute_dtype=half, param_dtype=half, output_dtype=half)
 
 @eqx.filter_jit
 def n_k_loop(model: eqx.Module, input_arr: Array, pad_mask: Array, n: Array, k: Array, key: PRNGKeyArray) -> Array:
@@ -33,7 +40,8 @@ def n_k_loop(model: eqx.Module, input_arr: Array, pad_mask: Array, n: Array, k: 
         pad_mask=pad_mask,
         prev_thought=False,
         is_training=True,
-        key=key1)
+        key=key1,
+    )
 
     intermediate_array = jax.lax.stop_gradient(intermediate_array)
 
@@ -44,15 +52,16 @@ def n_k_loop(model: eqx.Module, input_arr: Array, pad_mask: Array, n: Array, k: 
         pad_mask=pad_mask,
         prev_thought=True,
         is_training=True,
-        key=key2)
+        key=key2,
+    )
 
     return output
 
 @eqx.filter_jit
-def iters_fwd(model: eqx.Module, input_arr: Array, pad_mask: Array, n: int, k: int, key: PRNGKeyArray) -> Array:
+def iters_fwd(model: eqx.Module, input_arr: Array, pad_mask: Array, iters_to_do: int, key: PRNGKeyArray) -> Array:
     # Only n passes, but track the gradient
     output, _ = model(input_arr,
-                      iters_to_do=5,
+                      iters_to_do=iters_to_do,
                       pad_mask=pad_mask,
                       prev_thought=False,
                       is_training=True,
@@ -61,27 +70,28 @@ def iters_fwd(model: eqx.Module, input_arr: Array, pad_mask: Array, n: int, k: i
     return output
 
 @eqx.filter_jit
-def vanilla_fwd(model: eqx.Module, input_arr: Array, pad_mask: Array, n: int, k: int, key: PRNGKeyArray) -> Array:
+def vanilla_fwd(model: eqx.Module, input_arr: Array, pad_mask: Array, iters_to_do: int, key: PRNGKeyArray) -> Array:
     return model(input_arr, pad_mask, enable_dropout=True, key=key)
 
 @eqx.filter_jit
-def _compute_softmax_cross_entropy_loss(pred_y: Array, y_one_hot: Array,
-                                        pad_mask: Array, n: Array, k: Array) -> Array:
+def _compute_softmax_cross_entropy_loss(
+    pred_y: Array, y_one_hot: Array, pad_mask: Array, iters_to_do: int
+) -> Array:
+
+    y_one_hot = jnp.repeat(y_one_hot[:, None], iters_to_do, axis=1).squeeze()
 
     loss = -jnp.sum(jax.nn.log_softmax(pred_y, axis=-1) * y_one_hot, axis=-1)
 
-    k = jnp.repeat(k[:, None], loss.shape[1], axis=-1)
-
-    loss = (loss * k).sum(-1) # across the sequence
+    loss = loss.sum((-1, -2)) # across the sequence
 
     return loss.mean() # across all the batches
 
 @partial(
     mesh.sjit,
-    in_shardings=(None, None, P('data'), P('data'), P('data')) + (None,) * 3,
-    args_sharding_constraint=(None, None, P('data'), P('data'), P('data')) + (None,) * 3,
+    in_shardings=(None, None, P('data'), P('data'), P('data'), None),
+    args_sharding_constraint=(None, None, P('data'), P('data'), P('data'), None),
     out_shardings=None,
-    static_argnums=(2, 8, 9)
+    static_argnums=(2, 6, 7, 8)
 )
 def make_step(model: eqx.Module,
               opt_state: Tuple[PyTree],
@@ -89,15 +99,14 @@ def make_step(model: eqx.Module,
               x: Array,
               y: Array,
               pad_mask: Array,
-              n: Array,
-              k: Array,
+              iters_to_do: int, # static
               optim: Callable, # static
               num_classes: int, # static
               keys: List[PRNGKeyArray]):
 
     @eqx.filter_value_and_grad
     def compute_loss(model: eqx.Module, static_model: PyTree, x: Array, y: Array, pad_mask: Array,
-                    n: int, k: int, num_classes: int, keys: PRNGKeyArray) -> int:
+                    iters_to_do: int, num_classes: int, keys: PRNGKeyArray) -> int:
         '''
         Computes the loss of the model w.r.t the input. Is a closure for accessing static_model
         '''
@@ -108,16 +117,17 @@ def make_step(model: eqx.Module,
         else:
             forward = vanilla_fwd
 
-        pred_y = jax.vmap(forward, in_axes=(None, 0, 0, 0, 0, 0))(model, x, pad_mask, n, k, keys) # (batch_size, seqlen, num_classes)
+        pred_y = jax.vmap(forward, in_axes=(None, 0, 0, None, 0))(model, x, pad_mask, iters_to_do, keys) # (batch_size, seqlen, num_classes)
         y_one_hot = jax.nn.one_hot(y, num_classes=num_classes) # (batch_size, seqlen, num_classes)
-        loss = _compute_softmax_cross_entropy_loss(pred_y, y_one_hot, pad_mask, n, k)
+        loss = _compute_softmax_cross_entropy_loss(pred_y, y_one_hot, pad_mask, iters_to_do)
 
         return loss
 
     diff_model, static_model = eqx.partition(model, filter_spec,
                                              is_leaf=lambda x: isinstance(x, eqx.nn.Dropout))
 
-    loss, grads = compute_loss(diff_model, static_model, x, y, pad_mask, n, k, num_classes, keys)
+    loss, grads = compute_loss(diff_model, static_model, x, y, pad_mask, iters_to_do, num_classes, keys)
+    grads = policy.cast_to_compute(grads) # cast to bfloat16
     updates, opt_state = optim.update(grads, opt_state, model)
     model = eqx.apply_updates(model, updates)
 
@@ -129,15 +139,20 @@ class Trainer:
                  logger: Tuple,
                  loaders: Tuple,
                  decode_fn: Callable,
+                 dataset_size: Optional[int] = None,
                  key: PRNGKeyArray = jax.random.PRNGKey(69)):
 
         self.decode_fn = decode_fn # decode the ids to text
+        self.text_data: list = []
         self.args = args
         self.key = key
 
         self.my_logger, self.wandb_logger = logger
         self.trainloader, self.valloader = loaders
-        self.dataset_length = len(self.trainloader) * args.batch_size * args.seqlen
+
+        self.dataset_length = (
+            dataset_size if dataset_size is not None else len(self.trainloader)
+        )
 
         self.text_table = wandb.Table(
             columns=["Step", "Prompt", "Model Generation", "Type"]
@@ -180,19 +195,27 @@ class Trainer:
     def set_optim_and_scheduler(self, model: eqx.Module) -> Tuple[Callable, PyTree, eqx.Module]:
         assert model is not None, 'Model is not initialized'
 
-        total_steps = self.epochs * len(self.trainloader)
+        total_steps = self.epochs * self.dataset_length
 
-        self.schedule_fn = optax.warmup_cosine_decay_schedule(init_value=self.lr / 2,
-                                                              peak_value=self.lr,
-                                                              end_value=self.lr / 10,
-                                                              warmup_steps=self.warmup_steps,
-                                                              decay_steps=total_steps)
+        self.schedule_fn = optax.warmup_cosine_decay_schedule(
+            init_value=self.lr / 2,
+            peak_value=self.lr,
+            end_value=self.lr / 20,
+            warmup_steps=self.warmup_steps,
+            decay_steps=total_steps,
+        )
 
         # optimizer with weight decay
         optim = optax.chain(
-            optax.adamw(learning_rate=self.schedule_fn, weight_decay=self.weight_decay),
+            optax.adamw(
+                learning_rate=self.schedule_fn,
+                weight_decay=self.weight_decay,
+                b1=self.beta_1,
+                b2=self.beta_2,
+                nesterov=self.nesterov,
+            ),
             optax.clip_by_global_norm(self.grad_clip),
-            optax.apply_every(self.accum_steps)
+            optax.apply_every(self.accum_steps),
         )
 
         opt_state = optim.init(eqx.filter(model, eqx.is_array_like))
@@ -201,7 +224,7 @@ class Trainer:
 
     @staticmethod
     def get_filterspec(model: eqx.Module) -> PyTree[bool]:
-        '''
+        """
         Returns a filter spec for the model to filter out the trainable parameters.
         Can be used to freeze or unfreeze certain modules of the model depending on the step and epoch.
 
@@ -209,18 +232,16 @@ class Trainer:
             model: The model to filter
         Returns:
             filter_spec: The filter spec as a PyTree[bool] marking trainable parameters
-        '''
-        filter_spec = jax.tree_util.tree_map(lambda _: True, model) # all trainable
-        filter_spec = eqx.tree_at(
-            lambda tree: tree.pos_enc, # pos_enc should be frozen
-            filter_spec,
-            replace=False)
+        """
+        filter_spec = jax.tree_util.tree_map(lambda _: True, model)  # all trainable
 
         return filter_spec
 
     def init_model(self, key: PRNGKeyArray):
 
         if self.baseline:
+            self.max_iters = 1 # baseline model only does one pass
+
             model = GPT(self.n_heads, self.seqlen, self.num_blocks, self.width,
                         self.drop_rate, self.num_classes, key)
         else:
@@ -229,7 +250,7 @@ class Trainer:
 
         # switch to half precision
         if self.bf16:
-            model = half_precision(model)
+            model = policy.cast_to_param(model)
 
         _, opt_state, model = self.set_optim_and_scheduler(model)
         
@@ -274,16 +295,20 @@ class Trainer:
         '''
         Computes the accuracy, perplexity, loss of the model w.r.t batch
         '''
-        eval_iters = jnp.ones_like(input_arr[:, 0]) * eval_iters
         keys = keys[:input_arr.shape[0], ...] # take a batch_size sized slice of the keys
 
         if self.baseline:
             pred_y = jax.vmap(model, in_axes=(0, 0, None, 0))(input_arr, pad_mask, False, keys)
         else:
-            pred_y = jax.vmap(model, in_axes=(0, 0, 0, None, None, 0))(input_arr, eval_iters, pad_mask, False, False, keys)[0]
+            pred_y = jax.vmap(model, in_axes=(0, None, 0, None, None, 0))(input_arr, eval_iters, pad_mask, False, False, keys)[0]
 
+        y_hat = jax.nn.softmax(pred_y, axis=-1).argmax(-1)
+
+        # reshape stuff to the correct shape
+        y_hat *= jnp.repeat(pad_mask[:, None, :], eval_iters, axis=1).squeeze()
+        label = jnp.repeat(label[:, None, :], eval_iters, axis=1).squeeze()
+        
         # compute accuracy
-        y_hat = jax.nn.softmax(pred_y, axis=-1).argmax(-1) * pad_mask
         accuracy = jnp.mean(y_hat == label)
 
         # compute loss
@@ -294,11 +319,18 @@ class Trainer:
         perplexity = jnp.exp(loss)
 
         return accuracy, loss, perplexity
+    
+    def optuna_log(self, trial: Optional[Any], metrics: Tuple[float, int]):
+        '''
+        Logs the metrics to the optuna trial
+        '''
+        loss, progress = metrics
+
+        if trial is not None:
+            trial.report(loss, progress)
 
     def train(self, trial: Optional[Any] = None) -> Tuple[float, int]:
         step_done = 0
-        
-        rndm_n, rndm_k = self.get_n_k(key=self.key) # initial n and k
         
         opt_state, model = self.init_model(self.key)
         optim, _, _ = self.set_optim_and_scheduler(model)
@@ -318,17 +350,16 @@ class Trainer:
 
             keys = jax.random.split(epoch_key, self.batch_size)
             
-            for step, batch in tqdm(enumerate(self.trainloader), total=len(self.trainloader), desc=f'Epoch {epoch}'):
+            for step, batch in tqdm(enumerate(self.trainloader), total=self.dataset_length, desc=f'Epoch {epoch}'):
                 step += step_done # for multiple epochs
 
                 seq, label, pad_mask = jnp.asarray(batch['text'])
+                seq, label, pad_mask = policy.cast_to_compute((seq, label, pad_mask))
 
                 loss, model, opt_state = make_step(model, opt_state, filter_spec, seq, label, pad_mask,
-                                                   rndm_n, rndm_k, optim, self.num_classes, keys)
+                                                   self.max_iters, optim, self.num_classes, keys)
 
                 if step % 100 == 0:
-                    #rndm_n, rndm_k = self.get_n_k(key=keys[step % self.batch_size])
-                    
                     accuracy, loss, perplexity = self.compute_metrics(model, seq, label, pad_mask,
                                                                       self.max_iters, self.num_classes, keys)
 
@@ -341,15 +372,12 @@ class Trainer:
                     self.wandb_logger.log(
                         {
                             'Train/loss': loss,
-                            'Train/Lr': self.schedule_fn(epoch + 1 * step).item()
+                            'Train/Lr': self.schedule_fn(epoch + 1 * step).item(),
+                            'Train/tokens': step * self.batch_size * self.seqlen,
                         },
                         step=step
                     )
                     
-                    if trial is not None and (trial.should_prune() or jnp.isnan(loss)):
-                        raise optuna.exceptions.TrialPruned()
-
-                    # Terminate training if loss is NaN
                     if jnp.isnan(loss):
                         self.my_logger.warning(f'\nLoss is NaN at step {step}')
                         return loss
@@ -360,35 +388,40 @@ class Trainer:
                     cum_train_loss = sum(train_loss) / len(train_loss)
                     cum_train_ppl = sum(train_ppl) / len(train_ppl)
 
-                    ## clear the metrics
+                    # clear the metrics
                     train_acc, train_loss, train_ppl = [], [], []
 
                     ## Validation
-                    val_metrics, val_sample = self.evaluate_acc(model, self.valloader, self.max_iters, keys)
+                    (val_acc, val_loss, val_ppl), val_sample = self.evaluate_acc(model, self.valloader, self.max_iters, keys)
 
                     self.wandb_logger.log(
                         {
                             'Train/acc': cum_train_acc,
                             'Train/cum_loss': cum_train_loss,
                             'Train/ppl': cum_train_ppl,
-                            'Val/acc': val_metrics[0],
-                            'Val/loss': val_metrics[1],
-                            'Val/ppl': val_metrics[2],
+                            'Val/acc': val_acc,
+                            'Val/loss': val_loss,
+                            'Val/ppl': val_ppl,
                         },
                         step=step
                     )
+                    
+                    # Report metrics to optuna
+                    if trial is not None and trial.should_prune():
+                        self.optuna_log(trial, (val_loss, step))
+                        raise optuna.exceptions.TrialPruned()
 
                     ## Visualize one sample and model prediction
                     sample_x, val_sample_x = seq[0][:16], val_sample[:16]
 
                     self.my_logger.info(f"epoch={epoch}, step={step}, loss={loss}")
-                    self.my_logger.info(f'Validation accuracy: {val_metrics[0]} | using {self.max_iters} iterations')
+                    self.my_logger.info(f'Validation accuracy: {val_acc} | using {self.max_iters} iterations')
                     self.my_logger.info(f'Cumulative Training accuracy: {cum_train_acc}\n')
 
-                    self.generate(model, sample_x, metadata={'type': 'train', 'step': step}, max_new_tokens=96)
-                    self.generate(model, val_sample_x, metadata={'type': 'val', 'step': step}, max_new_tokens=96)
+                    self.generate(model, sample_x, metadata={'type': 'train', 'step': step}, max_new_tokens=64)
+                    self.generate(model, val_sample_x, metadata={'type': 'val', 'step': step}, max_new_tokens=64)
 
-                if not self.tune_hyperparams and step % self.save_interval == 0:
+                if not self.tune_hyperparams and (step + 1) % self.save_interval == 0:
                     filepath = f"{self.save_dir}model_{epoch}_{step}.eqx"
                     
                     #model = jax.experimental.multihost_utils.process_allgather(model) # all-gather the model
@@ -397,14 +430,14 @@ class Trainer:
                     self.my_logger.info(f'Model saved at {filepath}')
                     self.wandb_logger.save(filepath)
 
-            step_done = step # prepare for next epoch
-            trial.report(loss, epoch) # report the loss for optuna
+            step_done = step
+            self.optuna_log(trial, (val_loss, step))
             
             print(f'Epoch {epoch} done!')
 
         self.wandb_logger.finish() # Cleanup
         
-        return loss
+        return val_loss
 
     def generate(self, model: eqx.Module, input_arr: Array, metadata: dict, max_new_tokens: int, temperature: float = 0.5):
         '''
@@ -433,18 +466,23 @@ class Trainer:
             if self.baseline:
                 logits = inference_model(padded_array, pad_mask, False, key)
             else:
-                logits = inference_model(padded_array, self.max_iters, pad_mask, False, False, key)[0]
+                logits = inference_model(padded_array, self.max_iters, pad_mask, False, False, key)[0][-1]
             
             logits = logits[zero_idx - 1, :] # extract the logits for the last token
             gen = jax.nn.softmax(logits / temperature).argmax() # greedy decoding
             input_arr = jnp.concatenate([input_arr, gen.reshape(-1)]) # append the generated token for AR
 
+        # Format the generated text
         model_gen = f'model generation: {self.decode_fn(input_arr[-max_new_tokens:-1])}\n'
         self.my_logger.info(prompt)
         self.my_logger.info(model_gen)
 
-        # log to logger as a table
-        self.text_table.add_data(metadata["step"], prompt, model_gen, metadata["type"])
-        self.wandb_logger.log({"Generated Samples": self.text_table})
+        # Log prompts-gen pairs to wandb
+        self.text_data.append([metadata["step"], prompt, model_gen, metadata["type"]])
+
+        for row in self.text_data:
+            self.text_table.add_data(*row)
+
+        self.wandb_logger.log({"Generated Samples": self.text_table}, step=metadata["step"])
 
         return input_arr
