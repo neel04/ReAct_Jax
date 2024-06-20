@@ -48,9 +48,9 @@ def main(key: PRNGKeyArray):
 
     # ========= Training/Hypertuning =========
     init_hyperparams = [
-        {"lr": 4e-3, "drop_rate": 0.00, "weight_decay": 8e-4, "warmup_steps": 100, "beta_1": 0.98, "beta_2": 0.98, "nesterov": False},
-        {"lr": 7e-3, "drop_rate": 0.00, "weight_decay": 5e-4, "warmup_steps": 250, "beta_1": 0.9, "beta_2": 0.98, "nesterov": True},
-        {"lr": 8e-2, "drop_rate": 0.00, "weight_decay": 3e-4, "warmup_steps": 30, "beta_1": 0.95, "beta_2": 0.9, "nesterov": False},
+        {"lr": 8e-3, "drop_rate": 0.00, "weight_decay": 8e-4, "warmup_steps": 200, "beta_1": 0.95, "beta_2": 0.98, "nesterov": True},
+        {"lr": 4e-3, "drop_rate": 0.00, "weight_decay": 9e-4, "warmup_steps": 150, "beta_1": 0.95, "beta_2": 0.99, "nesterov": True},
+        {"lr": 8e-2, "drop_rate": 0.02, "weight_decay": 3e-4, "warmup_steps": 30, "beta_1": 0.95, "beta_2": 0.9, "nesterov": False},
     ]
 
     if args.tune_hyperparams:
@@ -101,7 +101,7 @@ def main(key: PRNGKeyArray):
 
         study.optimize(
             lambda trial: kickoff_optuna(trial=trial, **trainer_kwargs),
-            n_trials=75,
+            n_trials=50,
             callbacks=[wandbc],
         )
 
