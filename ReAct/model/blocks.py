@@ -4,7 +4,7 @@ from typing import Callable, Optional, Tuple
 import equinox as eqx
 import jax
 import jax.numpy as jnp
-from jaxtyping import Array, Float, PRNGKeyArray
+from jaxtyping import Array, Float, PRNGKeyArray, Int
 from jmp import Policy
 
 policy = Policy(compute_dtype=jnp.bfloat16, param_dtype=jnp.float32, output_dtype=jnp.bfloat16)
@@ -45,8 +45,8 @@ class AttentionBlock(eqx.Module):
                                                    use_value_bias=True, use_output_bias=True, 
                                                    dropout_p=drop_rate, key=key1)
 
-        self.ln1 = eqx.nn.LayerNorm(self.in_dim)
-        self.ln2 = eqx.nn.LayerNorm(self.in_dim)
+        self.ln1 = eqx.nn.LayerNorm(self.in_dim, eps=1e-2)
+        self.ln2 = eqx.nn.LayerNorm(self.in_dim, eps=1e-2)
 
         self.mlp = MLP(self.in_dim, self.in_dim, drop_rate, key2)
 
@@ -66,12 +66,11 @@ class AttentionBlock(eqx.Module):
 
         return query_heads, key_heads, value_heads
 
-    def _make_self_attention_mask(self, pad_mask: Array) -> Array:
-        """Create self-attention mask from sequence-level mask."""
-
+    def _make_self_attention_mask(self, pad_mask: Int[Array, "seqlen"]) -> Array:
         mask = jnp.ones((self.seqlen, self.seqlen))
-        mask = jnp.tril(mask)
+        mask = jnp.tril(mask) * pad_mask
         mask = jnp.expand_dims(mask, 0)
+
         return jnp.repeat(mask, self.n_heads, axis=0)
 
     def __call__(
@@ -92,7 +91,7 @@ class AttentionBlock(eqx.Module):
                               mask=self._make_self_attention_mask(mask),
                               inference=enable_dropout,
                               process_heads=self.process_heads, key=key_1)
-        
+
         x = jax.vmap(self.ln2)(inp)
 
         inp += self.mlp(x, enable_dropout=True, key=key_2)

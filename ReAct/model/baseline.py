@@ -1,4 +1,4 @@
-from typing import Callable, List
+from typing import Callable
 
 import equinox as eqx
 import jax
@@ -16,7 +16,7 @@ class main_block(eqx.Module):
     all the attention blocks sequentially
     '''
 
-    attention_blocks: List[AttentionBlock]
+    attention_blocks: PyTree[AttentionBlock]
     
     def __init__(self,
                  seqlen: int,
@@ -29,7 +29,6 @@ class main_block(eqx.Module):
         keys = jax.random.split(key, num_blocks)
         make_block: Callable = lambda k: AttentionBlock(seqlen, n_heads, drop_rate, bottleneck, k)  # noqa: E731
         
-        # weights have dim: (num_blocks, *)
         self.attention_blocks = eqx.filter(eqx.filter_vmap(make_block)(keys), eqx.is_array_like)
     
     def __call__(self,
@@ -52,7 +51,7 @@ class main_block(eqx.Module):
 
             return policy.cast_to_output(output), None
 
-        out, _ = jax.lax.scan(f=f, init=input_arr, xs=dynamic_part)
+        out, _ = jax.lax.scan(f=f, init=input_arr, xs=dynamic_part, unroll=2)
         
         return policy.cast_to_output(out)
         

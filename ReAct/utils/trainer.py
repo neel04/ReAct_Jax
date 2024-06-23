@@ -123,8 +123,9 @@ def make_step(model: eqx.Module,
 
         return loss
 
-    diff_model, static_model = eqx.partition(model, filter_spec,
-                                             is_leaf=lambda x: isinstance(x, eqx.nn.Dropout))
+    diff_model, static_model = eqx.partition(
+        model, filter_spec, is_leaf=lambda x: isinstance(x, eqx.nn.Dropout)
+    )
 
     loss, grads = compute_loss(diff_model, static_model, x, y, pad_mask, iters_to_do, num_classes, keys)
     grads = policy.cast_to_compute(grads) # cast to bfloat16
@@ -207,17 +208,16 @@ class Trainer:
 
         # optimizer with weight decay
         optim = optax.chain(
+            optax.clip_by_block_rms(self.grad_clip),
             optax.adamw(
                 learning_rate=self.schedule_fn,
                 weight_decay=self.weight_decay,
                 b1=self.beta_1,
                 b2=self.beta_2,
                 nesterov=self.nesterov,
-            ),
-            optax.clip_by_global_norm(self.grad_clip),
-            optax.apply_every(self.accum_steps),
+            )
         )
-
+        
         opt_state = optim.init(eqx.filter(model, eqx.is_array_like))
 
         return optim, opt_state, model

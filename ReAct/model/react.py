@@ -149,7 +149,6 @@ class React(eqx.Module):
         
         input_arr, interim_thought, mask = policy.cast_to_compute((input_arr, interim_thought, mask))
 
-        @eqx.filter_jit
         def body_fun(carry: Tuple[Array, Array], idx: int) -> Tuple[Tuple, Array]:
             latent, ctx_state = carry
 

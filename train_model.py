@@ -48,9 +48,8 @@ def main(key: PRNGKeyArray):
 
     # ========= Training/Hypertuning =========
     init_hyperparams = [
-        {"lr": 8e-3, "drop_rate": 0.00, "weight_decay": 8e-4, "warmup_steps": 200, "beta_1": 0.95, "beta_2": 0.98, "nesterov": True},
-        {"lr": 4e-3, "drop_rate": 0.00, "weight_decay": 9e-4, "warmup_steps": 150, "beta_1": 0.95, "beta_2": 0.99, "nesterov": True},
-        {"lr": 8e-2, "drop_rate": 0.02, "weight_decay": 3e-4, "warmup_steps": 30, "beta_1": 0.95, "beta_2": 0.9, "nesterov": False},
+        {"lr": 7e-4, "drop_rate": 0.02, "weight_decay": 1e-3, "warmup_steps": 100, "beta_1": 0.85, "beta_2": 0.99, "nesterov": False},
+        {"lr": 4e-5, "drop_rate": 0.00, "weight_decay": 9e-4, "warmup_steps": 50, "beta_1": 0.95, "beta_2": 0.99, "nesterov": True}
     ]
 
     if args.tune_hyperparams:
@@ -139,7 +138,7 @@ def kickoff_optuna(trial, **trainer_kwargs):
     args.epochs = 2
     
     # Regularization hyperparams
-    args.lr = trial.suggest_float('lr', 1e-4, 9e-1)
+    args.lr = trial.suggest_float('lr', 1e-6, 1e-3)
     args.drop_rate = trial.suggest_float('drop_rate', 0.0, 0.05, step=0.01)
     args.weight_decay = trial.suggest_float('weight_decay', 1e-7, 1e-3)
     args.warmup_steps = trial.suggest_int('warmup_steps', 0, 300, step=10)
