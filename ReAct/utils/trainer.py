@@ -215,9 +215,10 @@ class Trainer:
                 b1=self.beta_1,
                 b2=self.beta_2,
                 nesterov=self.nesterov,
-            )
+                eps=1e-2,
+            ),
         )
-        
+
         opt_state = optim.init(eqx.filter(model, eqx.is_array_like))
 
         return optim, opt_state, model
