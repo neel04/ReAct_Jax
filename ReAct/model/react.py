@@ -95,6 +95,7 @@ class React(eqx.Module):
     width: int = eqx.field(static=True)
     
     embed_layer: eqx.nn.Embedding
+    embed_ln: eqx.nn.LayerNorm
     main_block: LiteAttention
     post_ln: eqx.nn.LayerNorm
     out_head: eqx.Module
@@ -115,7 +116,13 @@ class React(eqx.Module):
         self.max_iters = max_iters
         self.width = width
 
-        self.embed_layer = eqx.nn.Embedding(vocab_size, width, key=key1)
+        # Custom initialization for the Embedding Layer
+        embed_weights: Array = jax.random.normal(
+            key, (vocab_size, width), dtype=jnp.float32
+        ) * ((2 / (5 * width)) ** 0.5)
+
+        self.embed_ln = eqx.nn.LayerNorm(width)
+        self.embed_layer = eqx.nn.Embedding(weight=embed_weights)
         self.main_block = RecurrentModule(seqlen, drop_rate, n_heads, num_blocks, width, key=key3)
 
         self.post_ln = eqx.nn.LayerNorm(width)
@@ -181,16 +188,20 @@ class React(eqx.Module):
         key: Optional[PRNGKeyArray] = None,
     ) -> Tuple[Array, Array]:
 
+        embed_fn: callable = lambda x: self.embed_ln(self.embed_layer(x))
+
         if prev_thought:
             assert isinstance(input_arr, tuple), 'prev_thought is True, but input_arr is not a tuple'
             input_arr, interim_thought = input_arr
-            input_arr = jax.vmap(self.embed_layer)(input_arr) # (batch, seqlen, bottleneck)
+            input_arr = jax.vmap(embed_fn)(input_arr) # (batch, seqlen, bottleneck)
         else:
-            input_arr = jax.vmap(self.embed_layer)(input_arr) # (batch, seqlen, bottleneck)
-            interim_thought = input_arr.copy() # has to be a copy of the embedded + projected input array
+            input_arr = jax.vmap(embed_fn)(input_arr) # (batch, seqlen, bottleneck)
+            interim_thought = input_arr.copy() # has to be a copy of the embedded + normed array
 
         input_arr, interim_thought = policy.cast_to_compute((input_arr, interim_thought))
 
-        output = self.iterate_for_steps(interim_thought, input_arr, pad_mask, iters_to_do, is_training, key) # (batch, seqlen, bottleneck)
+        output = self.iterate_for_steps(
+            interim_thought, input_arr, pad_mask, iters_to_do, is_training, key
+        )  # (batch, seqlen, bottleneck)
 
         return jax.vmap(self.out_head)(output), output

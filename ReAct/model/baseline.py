@@ -10,6 +10,8 @@ from .blocks import AttentionBlock, LinearProj
 
 policy = Policy(compute_dtype=jnp.bfloat16, param_dtype=jnp.bfloat16, output_dtype=jnp.bfloat16)
 
+# ruff: noqa: E402, E731
+
 class main_block(eqx.Module):
     '''
     Main block of the GPT model where you just compute
@@ -62,6 +64,7 @@ class GPT(eqx.Module):
     __name__ = 'GPT'
     
     embed_layer: eqx.Module
+    embed_ln: eqx.Module
     main_block: eqx.Module
     out_head: eqx.Module
     
@@ -76,7 +79,13 @@ class GPT(eqx.Module):
         
         keys = jax.random.split(key, 3)
         
-        self.embed_layer = eqx.nn.Embedding(vocab_size, width, key=keys[0])
+        # Custom initialization for the Embedding Layer
+        embed_weights: Array = jax.random.normal(
+            key, (vocab_size, width), dtype=jnp.float32
+        ) * ((2 / (5 * width)) ** 0.5)
+
+        self.embed_ln = eqx.nn.LayerNorm(width)
+        self.embed_layer = eqx.nn.Embedding(weight=embed_weights)
 
         self.main_block = main_block(seqlen, width, n_heads, drop_rate, num_blocks, key=keys[1])
         self.out_head = LinearProj(width, vocab_size, key=keys[2])
@@ -103,10 +112,12 @@ class GPT(eqx.Module):
                  enable_dropout: bool,
                  key: PRNGKeyArray) -> Array:
         
-        input_arr = jax.vmap(self.embed_layer)(input_arr)
+        embed_fn: callable = lambda x: self.embed_ln(self.embed_layer(x))
+
+        input_arr = jax.vmap(embed_fn)(input_arr) # (batch, seqlen, bottleneck)
 
         input_arr, pad_mask = policy.cast_to_compute((input_arr, pad_mask))
 
-        output = self.out_head(self.main_block(input_arr, pad_mask, enable_dropout, key))
+        output = self.main_block(input_arr, pad_mask, enable_dropout, key)
 
-        return policy.cast_to_output(output)
+        return policy.cast_to_output(self.out_head(output))
