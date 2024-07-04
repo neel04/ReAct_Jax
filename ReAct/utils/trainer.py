@@ -201,7 +201,7 @@ class Trainer:
         self.schedule_fn = optax.warmup_cosine_decay_schedule(
             init_value=self.lr / 2,
             peak_value=self.lr,
-            end_value=self.lr / 20,
+            end_value=self.lr / 10,
             warmup_steps=self.warmup_steps,
             decay_steps=total_steps,
         )
