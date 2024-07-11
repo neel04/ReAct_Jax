@@ -45,8 +45,8 @@ class AttentionBlock(eqx.Module):
                                                    use_value_bias=True, use_output_bias=True, 
                                                    dropout_p=drop_rate, key=key1)
 
-        self.ln1 = eqx.nn.LayerNorm(self.in_dim, eps=1e-2)
-        self.ln2 = eqx.nn.LayerNorm(self.in_dim, eps=1e-2)
+        self.ln1 = eqx.nn.LayerNorm(self.in_dim)
+        self.ln2 = eqx.nn.LayerNorm(self.in_dim)
 
         self.mlp = MLP(self.in_dim, self.in_dim, drop_rate, key2)
 
