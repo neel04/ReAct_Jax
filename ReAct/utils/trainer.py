@@ -89,13 +89,9 @@ def _compute_softmax_cross_entropy_loss(
     pred_y: Array, y_one_hot: Array, pad_mask: Array, iters_to_do: int
 ) -> Array:
 
-    y_one_hot = jnp.repeat(y_one_hot[:, None], iters_to_do, axis=1).squeeze()
+    loss, _ = ce_loss(pred_y, y_one_hot, 1e-4) # (batch_size, iters_to_do, seqlen)
 
-    loss, _ = ce_loss(pred_y, y_one_hot, 1e-4)
-
-    loss = loss.sum((-1, -2)) # across the sequence
-
-    return loss.mean() # across all the batches
+    return loss.sum((-1, -2)).mean() # mean across batch
 
 @partial(
     mesh.sjit,
@@ -315,10 +311,6 @@ class Trainer:
 
         y_hat = jax.nn.softmax(pred_y, axis=-1).argmax(-1)
 
-        # reshape stuff to the correct shape
-        y_hat *= jnp.repeat(pad_mask[:, None, :], eval_iters, axis=1).squeeze()
-        label = jnp.repeat(label[:, None, :], eval_iters, axis=1).squeeze()
-        
         # compute accuracy
         accuracy = jnp.mean(y_hat == label)
 
@@ -476,7 +468,7 @@ class Trainer:
             if self.baseline:
                 logits = inference_model(padded_array, pad_mask, False, key)
             else:
-                logits = inference_model(padded_array, self.max_iters, pad_mask, False, False, key)[0][-1]
+                logits = inference_model(padded_array, self.max_iters, pad_mask, False, False, key)[0]
             
             logits = logits[zero_idx - 1, :] # extract the logits for the last token
             gen = jax.nn.softmax(logits / temperature).argmax() # greedy decoding

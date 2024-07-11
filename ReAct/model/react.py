@@ -167,7 +167,7 @@ class React(eqx.Module):
             
             return (latent, ctx_state), latent
 
-        _, ctx_hist = eqx.internal.scan(
+        _, hist = eqx.internal.scan(
             f=body_fun,
             init=(interim_thought, input_arr),
             xs=jnp.arange(iters_to_do),
@@ -175,7 +175,7 @@ class React(eqx.Module):
             checkpoints=iters_to_do,
         )
 
-        return ctx_hist
+        return hist[-1]
 
     @eqx.filter_jit
     def __call__(
@@ -204,4 +204,4 @@ class React(eqx.Module):
             interim_thought, input_arr, pad_mask, iters_to_do, is_training, key
         )  # (batch, seqlen, bottleneck)
 
-        return jax.vmap(self.out_head)(output), output
+        return self.out_head(output), output
