@@ -89,9 +89,9 @@ def _compute_softmax_cross_entropy_loss(
     pred_y: Array, y_one_hot: Array, pad_mask: Array, iters_to_do: int
 ) -> Array:
 
-    loss, _ = ce_loss(pred_y, y_one_hot, 1e-4) # (batch_size, iters_to_do, seqlen)
+    loss, _ = ce_loss(pred_y, y_one_hot, 1e-4) # (batch_size, seqlen)
 
-    return loss.sum((-1, -2)).mean() # mean across batch
+    return loss.sum(-1).mean() # mean across batch
 
 @partial(
     mesh.sjit,
