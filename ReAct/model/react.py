@@ -51,7 +51,7 @@ class RecurrentModule(eqx.Module):
     def __call__(
         self,
         x: Array,
-        ctx_state: Array,
+        conditioning: Array,
         pad_mask: Array,
         enable_dropout: bool,
         key: PRNGKeyArray,
@@ -61,27 +61,26 @@ class RecurrentModule(eqx.Module):
         dynamic_part, static_part = eqx.partition(self.attention_layers, eqx.is_array_like,
                                                   is_leaf=lambda x: isinstance(x, eqx.nn.Dropout))
 
-        x, ctx_state, pad_mask = policy.cast_to_compute((x, ctx_state, pad_mask))  # (seqlen, bottleneck)
+        x, conditioning, pad_mask = policy.cast_to_compute((x, conditioning, pad_mask))  # (seqlen, bottleneck)
 
-        x = lerp()(self.reshape_layer(x), ctx_state)
+        x = lerp()(self.reshape_layer(x), conditioning)
 
         def f(input_tup: Tuple[Array, int], _dynamic_bl: PyTree) -> Tuple[Tuple[Array, int], Array]:
             x, idx = input_tup
             layer = eqx.combine(_dynamic_bl, static_part) # reconstruct the layer
 
             x = jax.lax.cond(idx == 0,
-                             lambda : layer(x, ctx_state, pad_mask, enable_dropout, keys[idx]),
+                             lambda : layer(x, conditioning, pad_mask, enable_dropout, keys[idx]),
                              lambda : layer(x, x, pad_mask, enable_dropout, keys[idx]))
             
             return (x, idx + 1), x
 
         out, history = jax.lax.scan(f=f, init=(x, 0), xs=dynamic_part, unroll=True)
-        out = out[0]
 
         ctx_state = self.ctx_gate(
-            x=ctx_state, ctx=out,
-            call_args=(ctx_state, out, pad_mask, enable_dropout, keys[-1]),
-        )
+            x=out[0], ctx=conditioning,
+            call_args=(pad_mask, enable_dropout, keys[-1]),
+        ) # TODO: Try different gating mechanisms
 
         return policy.cast_to_output((out, ctx_state))
 
@@ -159,8 +158,8 @@ class React(eqx.Module):
         def body_fun(carry: Tuple[Array, Array], idx: int) -> Tuple[Tuple, Array]:
             latent, ctx_state = carry
 
-            latent = jnp.concatenate([input_arr, latent], axis=-1)  # (seqlen, width * 2)
-            latent, ctx_state = self.main_block(latent, ctx_state, mask, enable_dropout, key)  # (seqlen, width)
+            latent = jnp.concatenate([ctx_state, latent], axis=-1)  # (seqlen, width * 2)
+            latent, ctx_state = self.main_block(latent, input_arr, mask, enable_dropout, key)  # (seqlen, width)
             latent = jax.vmap(self.post_ln)(latent)  # Post-LN for stability
 
             latent, ctx_state = policy.cast_to_output((latent, ctx_state))

@@ -178,8 +178,8 @@ class GatedBlock(eqx.Module):
     
     def __call__(self, x: Array, ctx: Array, call_args: Tuple) -> Array:
         x, ctx = policy.cast_to_compute((x, ctx))
-        
-        x = self.block(*call_args)
+
+        x = self.block(x, ctx, *call_args)
         x = jax.vmap(self.ln)(x)
 
         x *= jax.nn.silu(self.gate(ctx))
