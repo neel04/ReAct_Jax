@@ -76,9 +76,10 @@ class RecurrentModule(eqx.Module):
             return (x, idx + 1), x
 
         out, history = jax.lax.scan(f=f, init=(x, 0), xs=dynamic_part, unroll=True)
+        out = out[0]
 
         ctx_state = self.ctx_gate(
-            x=out[0], ctx=conditioning,
+            x=out, ctx=conditioning,
             call_args=(pad_mask, enable_dropout, keys[-1]),
         ) # TODO: Try different gating mechanisms
 
