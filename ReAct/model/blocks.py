@@ -299,7 +299,7 @@ class LiteAttention(eqx.Module):
 
     @jax.jit
     def __call__(self, x: Float[Array, 'seqlen in_dim'], mask: Array):
-        mask, x = policy.cast_to_compute((mask, x))
+        x = policy.cast_to_compute(x)
         attn_weights = jax.nn.softmax(self.weight(x.T, mask), axis=1) # type: ignore
         output = x * attn_weights.T
         return policy.cast_to_output(output)

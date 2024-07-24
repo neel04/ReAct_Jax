@@ -33,6 +33,8 @@ from ReAct.utils.losses import (
 
 
 half, full = jnp.bfloat16, jnp.float32
+
+# Setting up distributed stuff
 mesh = MeshShardingHelper(axis_dims=[-1], axis_names=['data']) # handle DDP + TP over multi-node
 policy = Policy(compute_dtype=half, param_dtype=half, output_dtype=half)
 
@@ -91,7 +93,7 @@ def _compute_softmax_cross_entropy_loss(
 
     loss, _ = ce_loss(pred_y, y_one_hot, 1e-4) # (batch_size, seqlen)
 
-    return loss.sum(-1).mean() # mean across batch
+    return loss.sum((-1, -2)).mean() # mean across batch
 
 @partial(
     mesh.sjit,
@@ -170,19 +172,6 @@ class Trainer:
 
         # Assign each arg as a class attribute
         self.__dict__.update(vars(self.args))
-
-    def get_n_k(self, key: PRNGKeyArray) -> Tuple[Array, Array]:
-        n_key, k_key = jax.random.split(key, 2)
-
-        # Getting the random n and k
-        rndm_n = jax.random.randint(n_key, shape=(1,), minval=1, maxval=self.max_iters)
-        rndm_k = jax.random.randint(k_key, shape=(1,), minval=rndm_n.item(), maxval=self.max_iters - rndm_n.item() + 1)
-
-        # Broadcast the (1,) array to batch_size and clip if needed
-        rndm_n, rndm_k = broad_to_bsz(rndm_n, (self.batch_size,)), broad_to_bsz(rndm_k, (self.batch_size,))
-        rndm_n, rndm_k = jnp.clip(rndm_n, 1, self.max_iters), jnp.clip(rndm_k, 1, self.max_iters)
-
-        return rndm_n.astype(int), rndm_k.astype(int)
 
     def evaluate_acc(self, model: eqx.Module, loader: DataLoader, eval_iters: int, keys: List[PRNGKeyArray]):
 

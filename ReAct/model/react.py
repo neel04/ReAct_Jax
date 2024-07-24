@@ -7,7 +7,7 @@ import jax.numpy as jnp
 from jaxtyping import Array, PRNGKeyArray, PyTree
 from jmp import Policy
 
-from .blocks import LinearProj, LiteAttention, AttentionBlock, lerp, GatedBlock
+from .blocks import LinearProj, LiteAttention, AttentionBlock
 
 policy = Policy(compute_dtype=jnp.bfloat16, param_dtype=jnp.float32, output_dtype=jnp.bfloat16)
 
@@ -20,8 +20,8 @@ class RecurrentModule(eqx.Module):
     num_layers: int = eqx.field(static=True)
 
     attention_layers: Array
-    reshape_layer: eqx.Module
-    ctx_gate: eqx.Module
+    post_ln: eqx.nn.LayerNorm
+    reshape_gate: eqx.Module
 
     def __init__(
         self,
@@ -39,9 +39,9 @@ class RecurrentModule(eqx.Module):
         )
 
         self.num_layers = num_layers
+        self.post_ln = eqx.nn.LayerNorm(bottleneck)
+        self.reshape_gate = LinearProj(bottleneck * 2, bottleneck, key=keys[0])
 
-        self.reshape_layer = LinearProj(bottleneck * 2, bottleneck, key=keys[0])
-        self.ctx_gate = GatedBlock(make_attn, args=(key,), in_dim=bottleneck, key=key)
         self.attention_layers = eqx.filter(eqx.filter_vmap(make_attn)(keys), eqx.is_array_like)
 
     @staticmethod
@@ -51,7 +51,6 @@ class RecurrentModule(eqx.Module):
     def __call__(
         self,
         x: Array,
-        conditioning: Array,
         pad_mask: Array,
         enable_dropout: bool,
         key: PRNGKeyArray,
@@ -61,29 +60,25 @@ class RecurrentModule(eqx.Module):
         dynamic_part, static_part = eqx.partition(self.attention_layers, eqx.is_array_like,
                                                   is_leaf=lambda x: isinstance(x, eqx.nn.Dropout))
 
-        x, conditioning, pad_mask = policy.cast_to_compute((x, conditioning, pad_mask))  # (seqlen, bottleneck)
+        x, pad_mask = policy.cast_to_compute((x, pad_mask))  # (seqlen, bottleneck)
 
-        x = lerp()(self.reshape_layer(x), conditioning)
-
+        x = self.reshape_gate(x) # downsample the concatenated array
+        
         def f(input_tup: Tuple[Array, int], _dynamic_bl: PyTree) -> Tuple[Tuple[Array, int], Array]:
             x, idx = input_tup
             layer = eqx.combine(_dynamic_bl, static_part) # reconstruct the layer
 
-            x = jax.lax.cond(idx == 0,
-                             lambda : layer(x, conditioning, pad_mask, enable_dropout, keys[idx]),
-                             lambda : layer(x, x, pad_mask, enable_dropout, keys[idx]))
+            x = layer(x, x, pad_mask, enable_dropout, keys[idx])
+
+            x = jax.vmap(self.post_ln)(x)
+
+            x = policy.cast_to_compute(x) # casting to bf16
             
             return (x, idx + 1), x
 
         out, history = jax.lax.scan(f=f, init=(x, 0), xs=dynamic_part, unroll=True)
-        out = out[0]
 
-        ctx_state = self.ctx_gate(
-            x=out, ctx=conditioning,
-            call_args=(pad_mask, enable_dropout, keys[-1]),
-        ) # TODO: Try different gating mechanisms
-
-        return policy.cast_to_output((out, ctx_state))
+        return policy.cast_to_output(out[0])
 
 class React(eqx.Module):
     '''
@@ -118,30 +113,15 @@ class React(eqx.Module):
 
         # Custom initialization for the Embedding Layer
         embed_weights: Array = jax.random.normal(
-            key, (vocab_size, width), dtype=jnp.float32
+            key1, (vocab_size, width), dtype=jnp.float32
         ) * ((2 / (5 * width)) ** 0.5)
 
         self.embed_ln = eqx.nn.LayerNorm(width)
         self.embed_layer = eqx.nn.Embedding(weight=embed_weights)
-        self.main_block = RecurrentModule(seqlen, drop_rate, n_heads, num_blocks, width, key=key3)
+        self.main_block = RecurrentModule(seqlen, drop_rate, n_heads, num_blocks, width, key=key2)
 
         self.post_ln = eqx.nn.LayerNorm(width)
-        self.out_head = LinearProj(width, vocab_size, key=key4)
-
-    def positional_encoding(self, seq_len: int, d_model: int):
-        '''
-        Generates the positional encoding for the input sequence
-        of shape (batch_size, max_seq_len, d_model) which would be added
-        to the sequence embeddings.
-        '''
-        position = jnp.arange(seq_len).reshape(-1, 1)
-        div_term = jnp.exp(jnp.arange(0, d_model, 2) * -(jnp.log(10000.0) / d_model))
-        pe = jnp.zeros((seq_len, d_model))
-
-        pe = pe.at[:, 0::2].set(jnp.sin(position * div_term))
-        pe = pe.at[:, 1::2].set(jnp.cos(position * div_term))
-
-        return pe
+        self.out_head = LinearProj(width, vocab_size, key=key3)
 
     @partial(jax.jit, static_argnums=(4, 5, 6))
     def iterate_for_steps(
@@ -156,26 +136,26 @@ class React(eqx.Module):
         
         input_arr, interim_thought, mask = policy.cast_to_compute((input_arr, interim_thought, mask))
 
-        def body_fun(carry: Tuple[Array, Array], idx: int) -> Tuple[Tuple, Array]:
-            latent, ctx_state = carry
+        def body_fun(latent: Array, idx: int) -> Tuple[Tuple, Array]:
+            latent = jnp.concatenate([input_arr, latent], axis=-1) 
 
-            latent = jnp.concatenate([ctx_state, latent], axis=-1)  # (seqlen, width * 2)
-            latent, ctx_state = self.main_block(latent, input_arr, mask, enable_dropout, key)  # (seqlen, width)
+            latent = self.main_block(latent, mask, enable_dropout, key)  # (seqlen, width)
+
             latent = jax.vmap(self.post_ln)(latent)  # Post-LN for stability
 
-            latent, ctx_state = policy.cast_to_output((latent, ctx_state))
+            latent = policy.cast_to_output(latent)
             
-            return (latent, ctx_state), latent
+            return latent, latent
 
         output, hist = eqx.internal.scan(
             f=body_fun,
-            init=(interim_thought, input_arr),
+            init=interim_thought,
             xs=jnp.arange(iters_to_do),
             kind="checkpointed",
             checkpoints=iters_to_do,
         )
 
-        return output[0]
+        return output
 
     @eqx.filter_jit
     def __call__(
@@ -200,8 +180,6 @@ class React(eqx.Module):
 
         input_arr, interim_thought = policy.cast_to_compute((input_arr, interim_thought))
 
-        output = self.iterate_for_steps(
-            interim_thought, input_arr, pad_mask, iters_to_do, is_training, key
-        )  # (batch, seqlen, bottleneck)
+        output = self.iterate_for_steps(interim_thought, input_arr, pad_mask, iters_to_do, is_training, key)  # (batch, seqlen, bottleneck)
 
         return self.out_head(output), output

@@ -16,7 +16,7 @@
                 "--max_iters", "5",
                 "--dataset", "github"
             ],
-            "justMyCode": false
+            "justMyCode": true
         }
     ]
 }
