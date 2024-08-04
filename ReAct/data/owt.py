@@ -40,13 +40,6 @@ class OpenWebTextDataset:
         return {'text': [[seq, targets, pad_mask]]}
 
     @staticmethod
-    def group_batch(batch: dict) -> dict:
-        '''
-        Simply batch the data stream
-        '''
-        return {k: [v] for k, v in batch.items()}
-
-    @staticmethod
     def chunk_examples(examples: dict, max_length: int) -> dict:
         '''
         Break long sequences into chunks of approx. ctxlen tokens
@@ -107,7 +100,7 @@ class OpenWebTextDataset:
                 f"Neel-Gupta/owt-processed_{self.bsz}",
                 split=f"{self.split}[{slice}]",
                 verification_mode="no_checks",
-                keep_in_memory=True,
+                keep_in_memory=False,
                 num_proc=None,
             )
 
@@ -146,13 +139,15 @@ class OpenWebTextDataset:
                         num_proc=None,
                     )
 
-                chunk_fn = partial(self.chunk_examples, max_length=self.max_length)
-                tok_pad_fn = partial(self.tokenize_and_pad, encode_fn=self.tok.encode)
-                shift_fn = partial(self.shift_tokens, pad_tok=self.pad_tok)
+                dataset = dataset_map_fn(partial(self.chunk_examples, max_length=self.max_length))
+                
+                def tokenize_and_shift(x):
+                    tok_pad_fn = partial(self.tokenize_and_pad, encode_fn=self.tok.encode)
+                    shift_fn = partial(self.shift_tokens, pad_tok=self.pad_tok)
 
-                big_fn = lambda x: shift_fn(tok_pad_fn(chunk_fn(x)))  # noqa: E731
+                    return shift_fn(tok_pad_fn(x))
 
-                dataset = dataset_map_fn(big_fn)
+                dataset = dataset_map_fn(tokenize_and_shift)
 
                 dataset.set_format(type='numpy')
 
