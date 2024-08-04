@@ -55,9 +55,11 @@ def main(key: PRNGKeyArray):
     if args.tune_hyperparams:
         args.group = 'Sweeps_base' if args.baseline else f'Sweeps_{args.max_iters}i'
 
+        jax.experimental.multihost_utils.sync_global_devices('Sync up all nodes.')
         trainloader = train_dataset.create_dataloader(':10%')
+
+        jax.experimental.multihost_utils.sync_global_devices('Sync up all nodes.')
         valloader = val_dataset.create_dataloader()
-        jax.experimental.multihost_utils.sync_global_devices('Sync up dataset preprocessing.')
 
         # Create optuna hypertununing study
         study = optuna.create_study(
@@ -112,9 +114,11 @@ def main(key: PRNGKeyArray):
         print(f'\nValue: {study.best_trial.value}\nParams: {study.best_trial.params}\n')
 
     else:
+        jax.experimental.multihost_utils.sync_global_devices('Sync up all nodes.')
         trainloader = train_dataset.create_dataloader(":99%")
+        
+        jax.experimental.multihost_utils.sync_global_devices('Sync up all nodes.')
         valloader = val_dataset.create_dataloader()
-        jax.experimental.multihost_utils.sync_global_devices('Sync up dataset preprocessing.')
 
         logger = UnifiedLogger(args, level="DEBUG")
         my_logger, wandb_logger = logger.my_logger(), logger.wandb_logger(args)

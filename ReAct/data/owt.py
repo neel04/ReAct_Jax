@@ -130,7 +130,7 @@ class OpenWebTextDataset:
                     split=f"{self.split}[{slice}]",
                     verification_mode='no_checks',
                     trust_remote_code=True,
-                    keep_in_memory=True,
+                    keep_in_memory=False,
                     num_proc=None,
                 ).select_columns('text')
 
@@ -141,14 +141,18 @@ class OpenWebTextDataset:
                         func,
                         batched=True,
                         batch_size=self.bsz,
-                        keep_in_memory=True,
+                        keep_in_memory=False,
                         drop_last_batch=True,
                         num_proc=None,
                     )
 
-                dataset = dataset_map_fn(partial(self.chunk_examples, max_length=self.max_length))
-                dataset = dataset_map_fn(partial(self.tokenize_and_pad, encode_fn=self.tok.encode))
-                dataset = dataset_map_fn(partial(self.shift_tokens, pad_tok=self.pad_tok))
+                chunk_fn = partial(self.chunk_examples, max_length=self.max_length)
+                tok_pad_fn = partial(self.tokenize_and_pad, encode_fn=self.tok.encode)
+                shift_fn = partial(self.shift_tokens, pad_tok=self.pad_tok)
+
+                big_fn = lambda x: shift_fn(tok_pad_fn(chunk_fn(x)))  # noqa: E731
+
+                dataset = dataset_map_fn(big_fn)
 
                 dataset.set_format(type='numpy')
 

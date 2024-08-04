@@ -18,7 +18,6 @@ import wandb
 from ReAct.model.baseline import GPT
 from ReAct.model.react import React
 from ReAct.utils.helpers import (
-    broad_to_bsz,
     calc_performance_metrics,
     count_params,
     load_eqx_obj,
