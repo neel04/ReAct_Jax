@@ -40,7 +40,7 @@ class OpenWebTextDataset:
         return {'text': [[seq, targets, pad_mask]]}
 
     @staticmethod
-    def chunk_examples(examples: dict, max_length: int) -> dict:
+    def chunk_examples(examples: Dict[str, str], max_length: int) -> dict[str, List[str]]:
         '''
         Break long sequences into chunks of approx. ctxlen tokens
         '''
@@ -52,7 +52,35 @@ class OpenWebTextDataset:
 
         return {"text": chunks}
 
-    def save_data(self, dataset, path: Path) -> None:
+    @staticmethod
+    def collate_fn(
+        examples: Dict[str, List[str]], batch_size: int
+    ) -> List[Dict[str, List[str]]]:
+        """
+        We get examples, a dict with just 1 key - "text", and the value is a list of strings
+        Split it into a nested list, where each list has less than self.bsz strings
+        """
+        examples = examples["text"]
+        collated = []
+
+        for i in range(0, len(examples), batch_size):
+            collated.append(examples[i : i + batch_size])
+
+        return {"text": collated}
+
+    @staticmethod
+    def process_pipeline(
+        examples: dict, max_length: int, encode_fn: callable, pad_tok: int, bsz: int
+    ) -> Dict[str, List[Array]]:
+        """
+        Pipeline for processing examples
+        """
+        examples = OpenWebTextDataset.tokenize_and_pad(examples, encode_fn)
+        examples = OpenWebTextDataset.shift_tokens(examples, pad_tok)
+
+        return examples
+
+    def save_data(self, dataset: datasets.Dataset, path: Path) -> None:
         base_folder = path.parent
         if not os.path.exists(base_folder):
             os.makedirs(base_folder)
@@ -68,7 +96,7 @@ class OpenWebTextDataset:
     def load_data(self, path: Path):
         return load_from_disk(dataset_path=path, keep_in_memory=True)
 
-    def upload_dataset(self, dataset, hub_path: str = "Neel-Gupta/owt-processed") -> None:
+    def upload_dataset(self, dataset: datasets.Dataset, hub_path: str = "Neel-Gupta/owt-processed") -> None:
         '''
         Helper function to upload the dataset to the HuggingFace Hub
         If needed to save on preprocessing wall time.
@@ -77,7 +105,7 @@ class OpenWebTextDataset:
                             token=os.getenv('HF_TOKEN'),
                             split=self.split)
     
-    def take_subset(self, dataset, elements: int) -> None:
+    def take_subset(self, dataset: datasets.Dataset, elements: int) -> None:
         '''
         Take a slice of dataset for debugging purposes
         '''
@@ -88,7 +116,7 @@ class OpenWebTextDataset:
         
         return dataset
 
-    def create_dataloader(self, slice: str = ':30%'):
+    def create_dataloader(self, slice: str = ':99%'):
         data_path = Path(f'./cached_data/owt_{self.split}.data')
 
         if self.split == 'test':
@@ -129,7 +157,7 @@ class OpenWebTextDataset:
 
                 dataset = self.take_subset(dataset, 2_000)
 
-                def dataset_map_fn(func):
+                def dataset_map_fn(func: callable) -> datasets.dataset_dict:
                     return dataset.map(
                         func,
                         batched=True,
@@ -138,21 +166,26 @@ class OpenWebTextDataset:
                         drop_last_batch=True,
                         num_proc=None,
                     )
-
-                dataset = dataset_map_fn(partial(self.chunk_examples, max_length=self.max_length))
                 
-                def tokenize_and_shift(x):
-                    tok_pad_fn = partial(self.tokenize_and_pad, encode_fn=self.tok.encode)
-                    shift_fn = partial(self.shift_tokens, pad_tok=self.pad_tok)
-
-                    return shift_fn(tok_pad_fn(x))
-
-                dataset = dataset_map_fn(tokenize_and_shift)
+                dataset = dataset_map_fn(
+                    partial(
+                        self.chunk_examples,
+                        max_length=self.max_length
+                    )
+                )
+                
+                dataset = dataset_map_fn(
+                    partial(
+                        self.process_pipeline,
+                        max_length=self.max_length,
+                        encode_fn=self.tok.encode,
+                        pad_tok=self.pad_tok,
+                        bsz=self.bsz,
+                    )
+                )
 
                 dataset.set_format(type='numpy')
 
-                self.upload_dataset(
-                    dataset, hub_path=f"Neel-Gupta/owt-processed_{self.bsz}"
-                )
+                self.upload_dataset(dataset, hub_path=f"Neel-Gupta/owt-processed_{self.bsz}")
 
                 return dataset
