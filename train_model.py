@@ -59,7 +59,7 @@ def main(key: PRNGKeyArray):
         trainloader = train_dataset.create_dataloader(':10%')
 
         jax.experimental.multihost_utils.sync_global_devices('Sync up all nodes.')
-        valloader = val_dataset.create_dataloader()
+        valloader = val_dataset.create_dataloader('-1%:')
 
         # Create optuna hypertununing study
         study = optuna.create_study(
@@ -118,7 +118,7 @@ def main(key: PRNGKeyArray):
         trainloader = train_dataset.create_dataloader(":99%")
         
         jax.experimental.multihost_utils.sync_global_devices('Sync up all nodes.')
-        valloader = val_dataset.create_dataloader()
+        valloader = val_dataset.create_dataloader("-1%:")
 
         logger = UnifiedLogger(args, level="DEBUG")
         my_logger, wandb_logger = logger.my_logger(), logger.wandb_logger(args)

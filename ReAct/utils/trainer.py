@@ -473,6 +473,6 @@ class Trainer:
         for row in self.text_data:
             self.text_table.add_data(*row)
 
-        self.wandb_logger.log({"Generated Samples": self.text_table}, step=metadata["step"])
+        self.wandb_logger.log({"Generated Samples": self.text_table})
 
         return input_arr
