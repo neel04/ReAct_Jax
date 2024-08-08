@@ -163,10 +163,6 @@ class Trainer:
             dataset_size if dataset_size is not None else len(self.trainloader)
         )
 
-        self.text_table = wandb.Table(
-            columns=["Step", "Prompt", "Model Generation", "Type"]
-        )
-        
         self.my_logger.info(f"Using Args: {self.args}\n")
 
         # Assign each arg as a class attribute
@@ -468,11 +464,10 @@ class Trainer:
         self.my_logger.info(model_gen)
 
         # Log prompts-gen pairs to wandb
-        self.text_data.append([metadata["step"], prompt, model_gen, metadata["type"]])
+        new_table = wandb.Table(columns=["Step", "Prompt", "Model Generation", "Type"])
 
-        for row in self.text_data:
-            self.text_table.add_data(*row)
+        new_table.add_data(metadata["step"], prompt, model_gen, metadata["type"])
 
-        self.wandb_logger.log({"Generated Samples": self.text_table})
+        self.wandb_logger.log({"Generated Samples": new_table})
 
         return input_arr
