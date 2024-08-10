@@ -335,7 +335,7 @@ class Trainer:
             trial.report(loss, progress)
 
     def train(self, trial: Optional[Any] = None) -> float:
-        step_done = 0
+        step_done, val_loss = 0, 999.9
         
         opt_state, model = self.init_model(self.key)
         optim, _, _ = self.set_optim_and_scheduler(model)

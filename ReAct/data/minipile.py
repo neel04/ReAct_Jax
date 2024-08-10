@@ -103,7 +103,7 @@ class MiniPileDataset:
         try:
             dataset = load_dataset(
                 f"Neel-Gupta/minipile-processed_{self.bsz}",
-                split=f"{self.split}[:{slice}]",
+                split=f"{self.split}[{slice}]",
                 verification_mode="no_checks",
                 keep_in_memory=True,
                 num_proc=None,

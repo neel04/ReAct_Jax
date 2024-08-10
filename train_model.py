@@ -67,10 +67,13 @@ def main(key: PRNGKeyArray):
 
         # Create optuna hypertununing study
         storage = optuna.storages.JournalStorage(
-            optuna.storages.JournalFileStorage("./journal.log"),
+            optuna.storages.JournalFileStorage(
+                f"./journal_{args.max_iters}i_{args.num_blocks}L_{args.width}.log"
+            ),
         )
 
         study = optuna.create_study(
+            study_name=f'Sweeps_{args.max_iters}i_{args.num_blocks}L_{args.width}',
             direction="minimize",
             load_if_exists=True,
             storage=storage,
@@ -170,9 +173,16 @@ def kickoff_optuna(trial, **trainer_kwargs):
     my_logger, wandb_logger = logger.my_logger(), logger.wandb_logger(args)
 
     # Store the optuna checkpoint progress
-    if os.path.isfile('./journal.log'):
+    if os.path.isfile(
+        f"./journal_{args.max_iters}i_{args.num_blocks}L_{args.width}.log"
+    ):
         artifact = Artifact(name="Optuna_Checkpoint", type="checkpoint")
-        artifact.add_file(local_path = "./journal.log", name = "optuna_chkp")
+
+        artifact.add_file(
+            local_path=f"./journal_{args.max_iters}i_{args.num_blocks}L_{args.width}.log",
+            name="optuna_chkp",
+        )
+
         artifact.save()
 
     trainer_kwargs['logger'] = (my_logger, wandb_logger)
