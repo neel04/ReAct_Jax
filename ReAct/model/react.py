@@ -123,7 +123,7 @@ class React(eqx.Module):
         self.post_ln = eqx.nn.LayerNorm(width)
         self.out_head = LinearProj(width, vocab_size, key=key3)
 
-    @partial(jax.jit, static_argnums=(4, 5, 6))
+    @eqx.filter_jit
     def iterate_for_steps(
         self,
         interim_thought: Array,

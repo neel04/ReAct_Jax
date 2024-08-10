@@ -3,10 +3,14 @@ import jax
 
 jax.config.update("jax_compilation_cache_dir", "./ReAct/compilation_cache")
 
-if platform.processor() != 'arm':
-    jax.distributed.initialize() # don't run on apple sillicon
+if platform.processor() != "arm":
+    jax.distributed.initialize()  # don't run on apple sillicon
 
 import optuna
+import os
+
+from wandb import Artifact
+
 from jax import config
 from jaxtyping import PRNGKeyArray
 from optuna.integration.wandb import WeightsAndBiasesCallback
@@ -62,9 +66,14 @@ def main(key: PRNGKeyArray):
         valloader = val_dataset.create_dataloader('-1%:')
 
         # Create optuna hypertununing study
+        storage = optuna.storages.JournalStorage(
+            optuna.storages.JournalFileStorage("./journal.log"),
+        )
+
         study = optuna.create_study(
             direction="minimize",
             load_if_exists=True,
+            storage=storage,
             sampler=optuna.samplers.TPESampler(
                 seed=69,
                 consider_magic_clip=True,
@@ -159,6 +168,13 @@ def kickoff_optuna(trial, **trainer_kwargs):
     # ========= Logging ========
     logger = UnifiedLogger(args, level='DEBUG')
     my_logger, wandb_logger = logger.my_logger(), logger.wandb_logger(args)
+
+    # Store the optuna checkpoint progress
+    if os.path.isfile('./journal.log'):
+        artifact = Artifact(name="Optuna_Checkpoint", type="checkpoint")
+        artifact.add_file(local_path = "./journal.log", name = "optuna_chkp")
+        artifact.save()
+
     trainer_kwargs['logger'] = (my_logger, wandb_logger)
 
     trainer = Trainer(**trainer_kwargs)

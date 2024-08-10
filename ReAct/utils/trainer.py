@@ -7,10 +7,12 @@ import jax
 import jax.numpy as jnp
 import optax
 import optuna
+
 from jaxtyping import Array, PRNGKeyArray, PyTree
+import jax.experimental.mesh_utils as mesh_utils
+import jax.sharding as jshard
 from jmp import Policy
-from scalax.sharding import MeshShardingHelper
-from scalax.sharding import PartitionSpec as P
+
 from torch.utils.data import DataLoader
 from tqdm.auto import tqdm
 
@@ -32,10 +34,13 @@ from ReAct.utils.losses import (
 
 
 half, full = jnp.bfloat16, jnp.float32
+policy = Policy(compute_dtype=half, param_dtype=half, output_dtype=half)
 
 # Setting up distributed stuff
-mesh = MeshShardingHelper(axis_dims=[-1], axis_names=['data']) # handle DDP + TP over multi-node
-policy = Policy(compute_dtype=half, param_dtype=half, output_dtype=half)
+num_devices = len(jax.devices())
+devices = mesh_utils.create_device_mesh((num_devices, 1))
+sharding = jshard.PositionalSharding(devices)
+replicated = sharding.replicate()
 
 # Stable CE (w/ z-loss) from PaLM
 ce_loss = cross_entropy_with_logits
@@ -94,27 +99,26 @@ def _compute_softmax_cross_entropy_loss(
 
     return loss.sum((-1, -2)).mean() # mean across batch
 
-@partial(
-    mesh.sjit,
-    in_shardings=(None, None, P('data'), P('data'), P('data'), None),
-    args_sharding_constraint=(None, None, P('data'), P('data'), P('data'), None),
-    out_shardings=None,
-    static_argnums=(2, 6, 7, 8)
-)
-def make_step(model: eqx.Module,
-              opt_state: Tuple[PyTree],
-              filter_spec: PyTree, # static
-              x: Array,
-              y: Array,
-              pad_mask: Array,
-              iters_to_do: int, # static
-              optim: Callable, # static
-              num_classes: int, # static
-              keys: List[PRNGKeyArray]):
+@eqx.filter_jit(donate="all-except-first")
+def make_step(
+    model: eqx.Module,
+    opt_state: PyTree,
+    filter_spec: PyTree,
+    x: Array,
+    y: Array,
+    pad_mask: Array,
+    iters_to_do: int,
+    optim: Callable,
+    num_classes: int,
+    keys: PRNGKeyArray,
+):
+    replicated =sharding.replicate()
+    model, opt_state = eqx.filter_shard((model, opt_state), replicated)
+    x, y, pad_mask = eqx.filter_shard((x, y, pad_mask), sharding)
 
     @eqx.filter_value_and_grad
     def compute_loss(model: eqx.Module, static_model: PyTree, x: Array, y: Array, pad_mask: Array,
-                    iters_to_do: int, num_classes: int, keys: PRNGKeyArray) -> int:
+                    iters_to_do: int, num_classes: int, keys: PRNGKeyArray) -> Array:
         '''
         Computes the loss of the model w.r.t the input. Is a closure for accessing static_model
         '''
@@ -139,6 +143,9 @@ def make_step(model: eqx.Module,
     grads = policy.cast_to_compute(grads) # cast to bfloat16
     updates, opt_state = optim.update(grads, opt_state, model)
     model = eqx.apply_updates(model, updates)
+
+    # shard the outputs as well
+    model, opt_state = eqx.filter_shard((model, opt_state), replicated)
 
     return loss, model, opt_state
 
@@ -168,13 +175,20 @@ class Trainer:
         # Assign each arg as a class attribute
         self.__dict__.update(vars(self.args))
 
-    def evaluate_acc(self, model: eqx.Module, loader: DataLoader, eval_iters: int, keys: List[PRNGKeyArray]):
+    @eqx.filter_jit(donate='all')
+    def evaluate_acc(self, model: eqx.Module, is_baseline: bool, loader: DataLoader, eval_iters: int, keys: PRNGKeyArray):
 
         metric = []
 
+        model = eqx.filter_shard(model, replicated)
+
         for step, batch in tqdm(enumerate(loader), total=len(loader), desc='Validating'):
             seq, label, pad_mask = jnp.asarray(batch['text'])
-            acc, loss, ppl = self.compute_metrics(model, seq, label, pad_mask, eval_iters, self.num_classes, keys)
+            seq, label, pad_mask = eqx.filter_shard((seq, label,pad_mask), sharding)
+            seq, label, pad_mask = policy.cast_to_compute((seq, label, pad_mask))
+
+            acc, loss, ppl = self.compute_metrics(is_baseline, model, seq, label, pad_mask, eval_iters, self.num_classes, keys)
+
             metric.extend([acc, loss, ppl])
 
         # Compute cumulatives
@@ -244,12 +258,13 @@ class Trainer:
             model = policy.cast_to_param(model)
 
         _, opt_state, model = self.set_optim_and_scheduler(model)
+        model = eqx.filter_shard(model, replicated)
         
         count_params(model) # prints to stdout
         calc_performance_metrics(self.args, self.my_logger) # logs via logger
 
         return opt_state, model
-
+    
     def resume_training(self, model: eqx.Module, opt_state: eqx.Module):
         # extracting out the paths
         run_path, step = self.resume.split('+')
@@ -268,27 +283,30 @@ class Trainer:
 
         return model, opt_state, step
 
-    @partial(
-        mesh.sjit,
-        in_shardings=(None, P('data'), P('data'), P('data'), None),
-        out_shardings=None,
-        args_sharding_constraint=(None, P('data'), P('data'), P('data'), None),
-        static_argnums=(0, 5, 6)
-    )
-    def compute_metrics(self,
-                        model: eqx.Module,
-                        input_arr: Array,
-                        label: Array,
-                        pad_mask: Array,
-                        eval_iters: int, # static
-                        num_classes: int, # static
-                        keys: List[PRNGKeyArray]):
+    @eqx.filter_jit
+    def compute_metrics(
+        self,
+        is_baseline: bool,
+        model: eqx.Module,
+        input_arr: Array,
+        label: Array,
+        pad_mask: Array,
+        eval_iters: int,  # static
+        num_classes: int,  # static
+        keys: List[PRNGKeyArray],
+    ):
         '''
         Computes the accuracy, perplexity, loss of the model w.r.t batch
         '''
+        # sharding everything
+        model = eqx.filter_shard(model, replicated)
+        input_arr, label, pad_mask = eqx.filter_shard(
+            (input_arr, label, pad_mask), sharding
+        )
+
         keys = keys[:input_arr.shape[0], ...] # take a batch_size sized slice of the keys
 
-        if self.baseline:
+        if is_baseline:
             pred_y = jax.vmap(model, in_axes=(0, 0, None, 0))(input_arr, pad_mask, False, keys)
         else:
             pred_y = jax.vmap(model, in_axes=(0, None, 0, None, None, 0))(input_arr, eval_iters, pad_mask, False, False, keys)[0]
@@ -316,7 +334,7 @@ class Trainer:
         if trial is not None:
             trial.report(loss, progress)
 
-    def train(self, trial: Optional[Any] = None) -> Tuple[float, int]:
+    def train(self, trial: Optional[Any] = None) -> float:
         step_done = 0
         
         opt_state, model = self.init_model(self.key)
@@ -341,14 +359,14 @@ class Trainer:
                 step += step_done # for multiple epochs
 
                 seq, label, pad_mask = jnp.asarray(batch['text'])
+                seq, label, pad_mask = eqx.filter_shard((seq, label,pad_mask), sharding)
                 seq, label, pad_mask = policy.cast_to_compute((seq, label, pad_mask))
 
                 loss, model, opt_state = make_step(model, opt_state, filter_spec, seq, label, pad_mask,
                                                    self.max_iters, optim, self.num_classes, keys)
 
                 if step % 100 == 0:
-                    accuracy, loss, perplexity = self.compute_metrics(model, seq, label, pad_mask,
-                                                                      self.max_iters, self.num_classes, keys)
+                    accuracy, loss, perplexity = self.compute_metrics(self.baseline, model, seq, label, pad_mask, self.max_iters, self.num_classes, keys)
 
                     train_acc.append(accuracy)
                     train_loss.append(loss)
@@ -379,7 +397,7 @@ class Trainer:
                     train_acc, train_loss, train_ppl = [], [], []
 
                     ## Validation
-                    (val_acc, val_loss, val_ppl), val_sample = self.evaluate_acc(model, self.valloader, self.max_iters, keys)
+                    (val_acc, val_loss, val_ppl), val_sample = self.evaluate_acc(model, self.baseline, self.valloader, self.max_iters, keys)
 
                     self.wandb_logger.log(
                         {

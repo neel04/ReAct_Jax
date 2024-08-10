@@ -297,7 +297,7 @@ class LiteAttention(eqx.Module):
         self.input_dim = input_dim
         self.weight = LinearProj(input_dim, input_dim, use_bias=True, key=key)
 
-    @jax.jit
+    @eqx.filter_jit
     def __call__(self, x: Float[Array, 'seqlen in_dim'], mask: Array):
         x = policy.cast_to_compute(x)
         attn_weights = jax.nn.softmax(self.weight(x.T, mask), axis=1) # type: ignore
