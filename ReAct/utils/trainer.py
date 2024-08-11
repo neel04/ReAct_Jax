@@ -82,7 +82,7 @@ def make_step(
     num_classes: int,
     keys: PRNGKeyArray,
 ):
-    replicated =sharding.replicate()
+    replicated = sharding.replicate()
     model, opt_state = eqx.filter_shard((model, opt_state), replicated)
     x, y, pad_mask = eqx.filter_shard((x, y, pad_mask), sharding)
 
@@ -145,28 +145,27 @@ class Trainer:
         # Assign each arg as a class attribute
         self.__dict__.update(vars(self.args))
 
-    @eqx.filter_jit(donate='all')
+    @eqx.filter_jit
     def evaluate_acc(self, model: Union[React, GPT], is_baseline: bool, loader: DataLoader, eval_iters: int, keys: PRNGKeyArray):
-
-        metric = []
 
         model = eqx.filter_shard(model, replicated)
 
+        metrics_sum = jnp.zeros(3)  # [acc, loss, ppl]
+        num_batches = len(loader)
+
         for step, batch in tqdm(enumerate(loader), total=len(loader), desc='Validating'):
             seq, label, pad_mask = jnp.asarray(batch['text'])
-            seq, label, pad_mask = eqx.filter_shard((seq, label,pad_mask), sharding)
+            seq, label, pad_mask = eqx.filter_shard((seq, label, pad_mask), sharding)
             seq, label, pad_mask = policy.cast_to_compute((seq, label, pad_mask))
 
             acc, loss, ppl = self.compute_metrics(is_baseline, model, seq, label, pad_mask, eval_iters, self.num_classes, keys)
 
-            metric.extend([acc, loss, ppl])
+            metrics_sum += jnp.array([acc, loss, ppl])
 
         # Compute cumulatives
-        cum_acc = sum(metric[::3]) / len(metric[::3])
-        cum_loss = sum(metric[1::3]) / len(metric[1::3])
-        cum_ppl = sum(metric[2::3]) / len(metric[2::3])
+        cum_acc, cum_loss, cum_ppl = metrics_sum / num_batches
 
-        return (cum_acc, cum_loss, cum_ppl), seq[0] # return one sample for viz
+        return (cum_acc, cum_loss, cum_ppl), seq[0]  # return one sample for viz
 
     def set_optim_and_scheduler(self, model: eqx.Module) -> Tuple[Callable, PyTree, eqx.Module]:
         assert model is not None, 'Model is not initialized'
