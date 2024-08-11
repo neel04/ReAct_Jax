@@ -145,7 +145,6 @@ class Trainer:
         # Assign each arg as a class attribute
         self.__dict__.update(vars(self.args))
 
-    @eqx.filter_jit
     def evaluate_acc(self, model: Union[React, GPT], is_baseline: bool, loader: DataLoader, eval_iters: int, keys: PRNGKeyArray):
 
         model = eqx.filter_shard(model, replicated)
