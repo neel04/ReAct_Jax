@@ -100,6 +100,8 @@ class AttentionBlock(eqx.Module):
     
     
 class NewGELU(eqx.Module):
+
+    @eqx.filter_jit
     def __call__(self, x: jax.Array, *args) -> jax.Array:
         c: float = math.sqrt(2.0 / math.pi)
         a: float = 0.044715

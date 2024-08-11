@@ -99,7 +99,7 @@ def _compute_softmax_cross_entropy_loss(
 
     return loss.sum((-1, -2)).mean() # mean across batch
 
-@eqx.filter_jit(donate="all-except-first")
+@eqx.filter_jit
 def make_step(
     model: eqx.Module,
     opt_state: PyTree,
@@ -175,7 +175,7 @@ class Trainer:
         # Assign each arg as a class attribute
         self.__dict__.update(vars(self.args))
 
-    @eqx.filter_jit(donate='all')
+    @eqx.filter_jit
     def evaluate_acc(self, model: eqx.Module, is_baseline: bool, loader: DataLoader, eval_iters: int, keys: PRNGKeyArray):
 
         metric = []
