@@ -1,6 +1,6 @@
 import os
 from functools import partial
-from typing import Any, Callable, List, Optional, Tuple
+from typing import Any, Callable, List, Optional, Tuple, Union
 
 import equinox as eqx
 import jax
@@ -47,35 +47,7 @@ ce_loss = cross_entropy_with_logits
 ce_loss.defvjp(_cross_entropy_with_logits_fwd, _cross_entropy_with_logits_bwd)
 
 @eqx.filter_jit
-def n_k_loop(model: eqx.Module, input_arr: Array, pad_mask: Array, n: Array, k: Array, key: PRNGKeyArray) -> Array:
-    key1, key2 = jax.random.split(key, 2)
-
-    # forward pass the model without tracking grads
-    _, intermediate_array = model(
-        input_arr,
-        iters_to_do=n,
-        pad_mask=pad_mask,
-        prev_thought=False,
-        is_training=True,
-        key=key1,
-    )
-
-    intermediate_array = jax.lax.stop_gradient(intermediate_array)
-
-    # k passes but track the gradient
-    output, _ = model(
-        (input_arr, intermediate_array),
-        iters_to_do=k,
-        pad_mask=pad_mask,
-        prev_thought=True,
-        is_training=True,
-        key=key2,
-    )
-
-    return output
-
-@eqx.filter_jit
-def iters_fwd(model: eqx.Module, input_arr: Array, pad_mask: Array, iters_to_do: int, key: PRNGKeyArray) -> Array:
+def iters_fwd(model: React, input_arr: Array, pad_mask: Array, iters_to_do: int, key: PRNGKeyArray) -> Array:
     # Only n passes, but track the gradient
     output, _ = model(input_arr,
                       iters_to_do=iters_to_do,
@@ -87,13 +59,11 @@ def iters_fwd(model: eqx.Module, input_arr: Array, pad_mask: Array, iters_to_do:
     return output
 
 @eqx.filter_jit
-def vanilla_fwd(model: eqx.Module, input_arr: Array, pad_mask: Array, iters_to_do: int, key: PRNGKeyArray) -> Array:
+def vanilla_fwd(model: GPT, input_arr: Array, pad_mask: Array, iters_to_do: int, key: PRNGKeyArray) -> Array:
     return model(input_arr, pad_mask, enable_dropout=True, key=key)
 
 @eqx.filter_jit
-def _compute_softmax_cross_entropy_loss(
-    pred_y: Array, y_one_hot: Array, pad_mask: Array, iters_to_do: int
-) -> Array:
+def _compute_softmax_cross_entropy_loss(pred_y: Array, y_one_hot: Array) -> Array:
 
     loss, _ = ce_loss(pred_y, y_one_hot, 1e-4) # (batch_size, seqlen)
 
@@ -101,7 +71,7 @@ def _compute_softmax_cross_entropy_loss(
 
 @eqx.filter_jit
 def make_step(
-    model: eqx.Module,
+    model: Union[React, GPT],
     opt_state: PyTree,
     filter_spec: PyTree,
     x: Array,
@@ -117,7 +87,7 @@ def make_step(
     x, y, pad_mask = eqx.filter_shard((x, y, pad_mask), sharding)
 
     @eqx.filter_value_and_grad
-    def compute_loss(model: eqx.Module, static_model: PyTree, x: Array, y: Array, pad_mask: Array,
+    def compute_loss(model: Union[React, GPT], static_model: PyTree, x: Array, y: Array, pad_mask: Array,
                     iters_to_do: int, num_classes: int, keys: PRNGKeyArray) -> Array:
         '''
         Computes the loss of the model w.r.t the input. Is a closure for accessing static_model
@@ -131,7 +101,7 @@ def make_step(
 
         pred_y = jax.vmap(forward, in_axes=(None, 0, 0, None, 0))(model, x, pad_mask, iters_to_do, keys) # (batch_size, seqlen, num_classes)
         y_one_hot = jax.nn.one_hot(y, num_classes=num_classes) # (batch_size, seqlen, num_classes)
-        loss = _compute_softmax_cross_entropy_loss(pred_y, y_one_hot, pad_mask, iters_to_do)
+        loss = _compute_softmax_cross_entropy_loss(pred_y, y_one_hot)
 
         return loss
 
@@ -175,8 +145,8 @@ class Trainer:
         # Assign each arg as a class attribute
         self.__dict__.update(vars(self.args))
 
-    @eqx.filter_jit
-    def evaluate_acc(self, model: eqx.Module, is_baseline: bool, loader: DataLoader, eval_iters: int, keys: PRNGKeyArray):
+    @eqx.filter_jit(donate='all')
+    def evaluate_acc(self, model: Union[React, GPT], is_baseline: bool, loader: DataLoader, eval_iters: int, keys: PRNGKeyArray):
 
         metric = []
 
@@ -293,7 +263,7 @@ class Trainer:
         pad_mask: Array,
         eval_iters: int,  # static
         num_classes: int,  # static
-        keys: List[PRNGKeyArray],
+        keys: PRNGKeyArray,
     ):
         '''
         Computes the accuracy, perplexity, loss of the model w.r.t batch

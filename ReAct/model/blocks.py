@@ -18,10 +18,10 @@ class AttentionBlock(eqx.Module):
     n_heads: int = eqx.field(static=True)
     in_dim: int = eqx.field(static=True)
 
-    attn_gate: eqx.Module
-    rope_embed: eqx.Module
-    ln1: eqx.Module
-    ln2: eqx.Module
+    attn_gate: eqx.nn.MultiheadAttention
+    rope_embed: eqx.nn.RotaryPositionalEmbedding
+    ln1: eqx.nn.LayerNorm
+    ln2: eqx.nn.LayerNorm
     mlp: eqx.Module
 
     def __init__(
@@ -102,7 +102,7 @@ class AttentionBlock(eqx.Module):
 class NewGELU(eqx.Module):
 
     @eqx.filter_jit
-    def __call__(self, x: jax.Array, *args) -> jax.Array:
+    def __call__(self, x: jax.Array) -> jax.Array:
         c: float = math.sqrt(2.0 / math.pi)
         a: float = 0.044715
 
@@ -117,7 +117,7 @@ class MLP(eqx.Module):
     layer_1: eqx.Module
     layer_2: eqx.Module
     dropout: eqx.nn.Dropout
-    act: callable
+    act: NewGELU
 
     def __init__(self,
                  input_dim: int,
@@ -279,10 +279,11 @@ class LinearProj(eqx.Module):
         else:
             self.bias = jnp.zeros((output_dim,))
     
-    def __call__(self,
-                 arr: Float[Array, 'batch in_dim'],
-                 mask: Optional[Array] = None,
-                 **kwargs) -> Array:
+    def __call__(
+        self,
+        arr: Float[Array, "batch in_dim"],
+        mask: Optional[Array] = None,
+    ) -> Array:
         
         arr, mask = policy.cast_to_compute((arr, mask))
         
