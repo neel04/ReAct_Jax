@@ -1,6 +1,5 @@
 import os
-from functools import partial
-from typing import Any, Callable, List, Optional, Tuple, Union
+from typing import Any, Callable, Optional, Tuple, Union
 
 import equinox as eqx
 import jax
@@ -329,7 +328,6 @@ class Trainer:
                 seq, label, pad_mask = jnp.asarray(batch['text'])
                 seq, label, pad_mask = eqx.filter_shard((seq, label,pad_mask), sharding)
                 seq, label, pad_mask = policy.cast_to_compute((seq, label, pad_mask))
-
                 loss, model, opt_state = make_step(model, opt_state, filter_spec, seq, label, pad_mask,
                                                    self.max_iters, optim, self.num_classes, keys)
 

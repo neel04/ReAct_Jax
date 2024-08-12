@@ -153,7 +153,7 @@ def main(key: PRNGKeyArray):
 def kickoff_optuna(trial, **trainer_kwargs):
     args = trainer_kwargs['args']
 
-    args.epochs = 2
+    args.epochs = 1
     
     # Regularization hyperparams
     args.lr = trial.suggest_float('lr', 1e-6, 1e-2)
