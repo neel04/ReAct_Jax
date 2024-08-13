@@ -1,16 +1,14 @@
-import platform
+import os
 import jax
+import optuna
+import platform
 
 jax.config.update("jax_compilation_cache_dir", "./ReAct/compilation_cache")
 
 if platform.processor() != "arm":
     jax.distributed.initialize()  # don't run on apple sillicon
 
-import optuna
-import os
-
 from wandb import Artifact
-
 from jax import config
 from jaxtyping import PRNGKeyArray
 from optuna.integration.wandb import WeightsAndBiasesCallback
@@ -22,8 +20,6 @@ from ReAct.data.tinystories import TinyStoriesDataset
 from ReAct.utils.arg_parser import parse_args
 from ReAct.utils.logger import UnifiedLogger
 from ReAct.utils.trainer import Trainer
-
-# ruff: noqa: E402, E731
 
 def main(key: PRNGKeyArray):
     args = parse_args()
@@ -52,15 +48,15 @@ def main(key: PRNGKeyArray):
 
     # ========= Training/Hypertuning =========
     init_hyperparams = [
-        {"lr": 7e-4, "drop_rate": 0.01, "weight_decay": 1e-4, "warmup_steps": 17, "beta_1": 0.95, "beta_2": 0.98, "nesterov": False},
-        {"lr": 1e-4, "drop_rate": 0.01, "weight_decay": 1e-4, "warmup_steps": 20, "beta_1": 0.95, "beta_2": 0.99, "nesterov": True}
+        {"lr": 7e-4, "drop_rate": 0.01, "weight_decay": 1e-4, "warmup_steps": 170, "beta_1": 0.95, "beta_2": 0.98, "nesterov": False},
+        {"lr": 1e-4, "drop_rate": 0.01, "weight_decay": 1e-4, "warmup_steps": 200, "beta_1": 0.95, "beta_2": 0.99, "nesterov": True}
     ]
 
     if args.tune_hyperparams:
         args.group = 'Sweeps_base' if args.baseline else f'Sweeps_{args.max_iters}i'
 
         jax.experimental.multihost_utils.sync_global_devices('Sync up all nodes.')
-        trainloader = train_dataset.create_dataloader(':5%')
+        trainloader = train_dataset.create_dataloader(':10%')
 
         jax.experimental.multihost_utils.sync_global_devices('Sync up all nodes.')
         valloader = val_dataset.create_dataloader('-1%:')
@@ -113,6 +109,7 @@ def main(key: PRNGKeyArray):
             lambda trial: kickoff_optuna(trial=trial, **trainer_kwargs),
             n_trials=50,
             callbacks=[wandbc],
+            gc_after_trial=True
         )
 
         fig = optuna.visualization.plot_optimization_history(study)
@@ -169,8 +166,7 @@ def kickoff_optuna(trial, **trainer_kwargs):
     my_logger, wandb_logger = logger.my_logger(), logger.wandb_logger(args)
 
     # Store the optuna checkpoint progress
-    optuna_chkp_path = f"sqlite:///chkp_{args.max_iters}i_{args.num_blocks}L_{args.width}.log"
-
+    optuna_chkp_path = f"chkp_{args.max_iters}i_{args.num_blocks}L_{args.width}.db"
     artifact_name = f"Sweeps_{args.max_iters}i" if not args.baseline else "Sweeps_baseline"
 
     if os.path.isfile(optuna_chkp_path):

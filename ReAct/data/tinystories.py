@@ -42,7 +42,7 @@ class TinyStoriesDataset:
         # Simply batch the data stream
         return {k: [v] for k, v in batch.items()}
     
-    def create_dataloader(self, debug: bool = False):
+    def create_dataloader(self, debug: str = False):
         dataset = self.dataset
         
         if debug or jax.default_backend() == 'cpu':

@@ -3,9 +3,6 @@ import os
 
 import equinox as eqx
 import jax
-
-jax.config.update("jax_compilation_cache_dir", "/tmp/jax_cache")
-
 import jax.numpy as jnp
 from jaxtyping import Array, PRNGKeyArray
 

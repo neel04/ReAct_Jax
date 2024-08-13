@@ -372,7 +372,7 @@ class Trainer:
                     train_acc, train_loss, train_ppl = [], [], []
 
                     ## Validation
-                    (val_acc, val_loss, val_ppl), val_sample = self.evaluate_acc(model, self.args.baseline, self.valloader, self.max_iters, keys)
+                    (val_acc, val_loss, val_ppl), val_sample = self.evaluate_acc(model, self.args.baseline, self.valloader, self.args.max_iters, keys)
 
                     self.wandb_logger.log(
                         {
@@ -395,7 +395,7 @@ class Trainer:
                     sample_x, val_sample_x = seq[0][:16], val_sample[:16]
 
                     self.my_logger.info(f"epoch={epoch}, step={step}, loss={loss}")
-                    self.my_logger.info(f'Validation accuracy: {val_acc} | using {self.max_iters} iterations')
+                    self.my_logger.info(f'Validation accuracy: {val_acc} | using {self.args.max_iters} iterations')
                     self.my_logger.info(f'Cumulative Training accuracy: {cum_train_acc}\n')
 
                     self.generate_from_model(model, sample_x, metadata={'type': 'train', 'step': step}, max_new_tokens=64)

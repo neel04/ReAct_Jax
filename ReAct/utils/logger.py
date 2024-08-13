@@ -1,10 +1,10 @@
-import logging
 import os
 import jax
-
-from typing import Callable
-
 import wandb
+import logging
+
+from argparse import Namespace
+from typing import Callable, Optional
 
 class UnifiedLogger:
     '''
@@ -33,7 +33,7 @@ class UnifiedLogger:
 
         return logger
 
-    def wandb_logger(self, args: dict):
+    def wandb_logger(self, args: Namespace):
         key = os.environ.get('WANDB_API_KEY')
         wandb.login(key=key)
 
@@ -58,7 +58,7 @@ class UnifiedLogger:
 
         return wandb
 
-    def update_args_for_hypertuning(self, args: dict, experiment: Callable = None):
+    def update_args_for_hypertuning(self, args: Namespace, experiment: Optional[Callable] = None):
         '''
         Consumes the experiment object provided by init_hypertuning() and updates the args dict
         '''
@@ -71,8 +71,9 @@ class UnifiedLogger:
 
         return args
 
-    def init_wandb_sweep(self) -> int:
+    def init_wandb_sweep(self) -> str:
         '''
+        Deprecated. Use `optuna`.
         Setup Wandb Seep configs. Only run after wandb_logger() has been called
         '''
         sweep_configuration = {
@@ -84,13 +85,14 @@ class UnifiedLogger:
                 "drop_rate": {"max": 0.2, "min": 0.0},
                 "weight_decay": {"max": 1e-3, "min": 1e-5},
                 "grad_clip": {"max": 1.0, "min": 0.1},
-                "warmup_steps": {"values": list(range(0, 1000, 100))}
+                "warmup_steps": {"values": list(range(0, 1000, 100))},
             },
-            "early_terminate": {"type": "hyperband", "max_iter": 48, "s": 4}
+            "early_terminate": {"type": "hyperband", "max_iter": 48, "s": 4},
         }
 
-        sweep_id = wandb.sweep(sweep=sweep_configuration, project="ReAct_Jax",
-                               entity='neel')
+        sweep_id = wandb.sweep(
+            sweep=sweep_configuration, project="ReAct_Jax", entity="neel"
+        )
 
         return sweep_id
 
