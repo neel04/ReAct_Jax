@@ -52,25 +52,21 @@ def main(key: PRNGKeyArray):
 
     # ========= Training/Hypertuning =========
     init_hyperparams = [
-        {"lr": 7e-4, "drop_rate": 0.02, "weight_decay": 1e-4, "warmup_steps": 170, "beta_1": 0.95, "beta_2": 0.98, "nesterov": False},
-        {"lr": 1e-4, "drop_rate": 0.00, "weight_decay": 1e-4, "warmup_steps": 200, "beta_1": 0.95, "beta_2": 0.99, "nesterov": True}
+        {"lr": 7e-4, "drop_rate": 0.01, "weight_decay": 1e-4, "warmup_steps": 17, "beta_1": 0.95, "beta_2": 0.98, "nesterov": False},
+        {"lr": 1e-4, "drop_rate": 0.01, "weight_decay": 1e-4, "warmup_steps": 20, "beta_1": 0.95, "beta_2": 0.99, "nesterov": True}
     ]
 
     if args.tune_hyperparams:
         args.group = 'Sweeps_base' if args.baseline else f'Sweeps_{args.max_iters}i'
 
         jax.experimental.multihost_utils.sync_global_devices('Sync up all nodes.')
-        trainloader = train_dataset.create_dataloader(':10%')
+        trainloader = train_dataset.create_dataloader(':5%')
 
         jax.experimental.multihost_utils.sync_global_devices('Sync up all nodes.')
         valloader = val_dataset.create_dataloader('-1%:')
 
         # Create optuna hypertununing study
-        storage = optuna.storages.JournalStorage(
-            optuna.storages.JournalFileStorage(
-                f"./journal_{args.max_iters}i_{args.num_blocks}L_{args.width}.log"
-            ),
-        )
+        storage = f'sqlite:///chkp_{args.max_iters}i_{args.num_blocks}L_{args.width}.db'
 
         study = optuna.create_study(
             study_name=f'Sweeps_{args.max_iters}i_{args.num_blocks}L_{args.width}',
@@ -173,14 +169,16 @@ def kickoff_optuna(trial, **trainer_kwargs):
     my_logger, wandb_logger = logger.my_logger(), logger.wandb_logger(args)
 
     # Store the optuna checkpoint progress
-    if os.path.isfile(
-        f"./journal_{args.max_iters}i_{args.num_blocks}L_{args.width}.log"
-    ):
-        artifact = Artifact(name="Optuna_Checkpoint", type="checkpoint")
+    optuna_chkp_path = f"sqlite:///chkp_{args.max_iters}i_{args.num_blocks}L_{args.width}.log"
+
+    artifact_name = f"Sweeps_{args.max_iters}i" if not args.baseline else "Sweeps_baseline"
+
+    if os.path.isfile(optuna_chkp_path):
+        artifact = Artifact(name=artifact_name, type="OptunaCheckpoint")
 
         artifact.add_file(
-            local_path=f"./journal_{args.max_iters}i_{args.num_blocks}L_{args.width}.log",
-            name="optuna_chkp",
+            local_path=optuna_chkp_path,
+            name=optuna_chkp_path,
         )
 
         artifact.save()

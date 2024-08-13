@@ -1,5 +1,4 @@
-from functools import partial
-from typing import Optional, Tuple, Union
+from typing import Tuple
 
 import equinox as eqx
 import jax
@@ -7,7 +6,7 @@ import jax.numpy as jnp
 from jaxtyping import Array, PRNGKeyArray, PyTree
 from jmp import Policy
 
-from .blocks import LinearProj, LiteAttention, AttentionBlock
+from .blocks import AttentionBlock, LinearProj
 
 policy = Policy(compute_dtype=jnp.bfloat16, param_dtype=jnp.float32, output_dtype=jnp.bfloat16)
 
@@ -21,7 +20,7 @@ class RecurrentModule(eqx.Module):
 
     attention_layers: Array
     post_ln: eqx.nn.LayerNorm
-    reshape_gate: eqx.Module
+    reshape_gate: LinearProj
 
     def __init__(
         self,
@@ -34,7 +33,7 @@ class RecurrentModule(eqx.Module):
     ):
         keys = jax.random.split(key, num_layers)
 
-        make_attn: callable = lambda k: self.make_layer(
+        make_attn = lambda k: self.make_layer(
             seqlen, n_heads, drop_rate, bottleneck, k
         )
 
@@ -54,7 +53,7 @@ class RecurrentModule(eqx.Module):
         pad_mask: Array,
         enable_dropout: bool,
         key: PRNGKeyArray,
-    ) -> Tuple[Array, Array]:
+    ) -> Array:
 
         keys = jax.random.split(key, self.num_layers)
         dynamic_part, static_part = eqx.partition(self.attention_layers, eqx.is_array_like,
@@ -76,7 +75,7 @@ class RecurrentModule(eqx.Module):
             
             return (x, idx + 1), x
 
-        out, history = jax.lax.scan(f=f, init=(x, 0), xs=dynamic_part, unroll=True)
+        out, _ = jax.lax.scan(f=f, init=(x, 0), xs=dynamic_part, unroll=True)
 
         return policy.cast_to_output(out[0])
 
@@ -91,9 +90,9 @@ class React(eqx.Module):
     
     embed_layer: eqx.nn.Embedding
     embed_ln: eqx.nn.LayerNorm
-    main_block: LiteAttention
+    main_block: RecurrentModule
     post_ln: eqx.nn.LayerNorm
-    out_head: eqx.Module
+    out_head: LinearProj
 
     def __init__(
         self,
@@ -136,7 +135,7 @@ class React(eqx.Module):
         
         input_arr, interim_thought, mask = policy.cast_to_compute((input_arr, interim_thought, mask))
 
-        def body_fun(latent: Array, idx: int) -> Tuple[Tuple, Array]:
+        def body_fun(latent: Array, idx: int) -> Tuple[Array, Array]:
             latent = jnp.concatenate([input_arr, latent], axis=-1) 
 
             latent = self.main_block(latent, mask, enable_dropout, key)  # (seqlen, width)
@@ -160,23 +159,23 @@ class React(eqx.Module):
     @eqx.filter_jit
     def __call__(
         self,
-        input_arr: Union[Array, Tuple[Array, Array]],
+        input_arr: Array | Tuple[Array, Array],
         iters_to_do: int,
         pad_mask: Array,
         prev_thought: bool = False,
         is_training: bool = True,
-        key: Optional[PRNGKeyArray] = None,
+        key: PRNGKeyArray = jax.random.PRNGKey(0),
     ) -> Tuple[Array, Array]:
 
-        embed_fn: callable = lambda x: self.embed_ln(self.embed_layer(x))
+        embed_fn = lambda x: self.embed_ln(self.embed_layer(x))
 
         if prev_thought:
             assert isinstance(input_arr, tuple), 'prev_thought is True, but input_arr is not a tuple'
             input_arr, interim_thought = input_arr
-            input_arr = jax.vmap(embed_fn)(input_arr) # (batch, seqlen, bottleneck)
+            input_arr: Array = jax.vmap(embed_fn)(input_arr) # (batch, seqlen, bottleneck)
         else:
-            input_arr = jax.vmap(embed_fn)(input_arr) # (batch, seqlen, bottleneck)
-            interim_thought = input_arr.copy() # has to be a copy of the embedded + normed array
+            input_arr: Array = jax.vmap(embed_fn)(input_arr)  # (batch, seqlen, bottleneck)
+            interim_thought = input_arr.copy()  # has to be a copy of the embedded + normed array
 
         input_arr, interim_thought = policy.cast_to_compute((input_arr, interim_thought))
 

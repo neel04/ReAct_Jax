@@ -6,7 +6,7 @@ import equinox as eqx
 import jax
 import jax.numpy as jnp
 from jax import tree_util as jtu
-from jaxtyping import Array, PRNGKeyArray
+from jaxtyping import Array, PRNGKeyArray 
 
 def convert_flops(params: int) -> str:
     if params == 0:
@@ -118,7 +118,7 @@ def save_eqx_obj(save_dir: str, filename: str, obj: tuple):
     eqx.tree_serialise_leaves(filename, obj)
 
 
-def load_eqx_obj(filepath: str, obj: tuple) -> tuple:
+def load_eqx_obj(filepath: str, obj: eqx.Module) -> eqx.Module:
     return eqx.tree_deserialise_leaves(path_or_file=filepath, like=obj)
 
 
@@ -126,10 +126,12 @@ def broad_to_bsz(arr: Array, shape: tuple) -> Array:
     return jnp.broadcast_to(arr, shape)
 
 
-def count_params(model: eqx.Module) -> int:
-    params_fn = lambda model: sum(
-        x.size for x in jax.tree_util.tree_leaves(eqx.filter(model, eqx.is_array))
-    )  # noqa: E731
+def count_params(model: eqx.Module) -> None:
+    def params_fn(model):
+        return sum(
+            x.size for x in jax.tree_util.tree_leaves(eqx.filter(model, eqx.is_array))
+        )
+
     num_params, non_embed_params = params_fn(model), params_fn(model.main_block)
 
     num_params /= 1_000_000
@@ -138,9 +140,6 @@ def count_params(model: eqx.Module) -> int:
     print(
         f"\nModel # of parameters: {num_params:.2f}M\n# of recurrent parameters: {non_embed_params:.2f}M\n"
     )
-
-    return num_params
-
 
 def get_rand_nums(
     key: PRNGKeyArray,

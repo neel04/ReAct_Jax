@@ -1,6 +1,7 @@
 import argparse
+from argparse import Namespace
 
-def parse_args():
+def parse_args() -> Namespace:
     description = "Training script - kicks off training of the model"
     epilog = "Hyperparameters defaults may not be optimal. Please use --help to check available options."
 
@@ -82,9 +83,6 @@ def parse_args():
     parser.add_argument('--checkpoint_path', type=str, default=None,
                         help='Path to checkpoint. Default: None')
     
-    parser.add_argument('--prompt', type=str, default=None,
-                        help='input for inference. Default: None')
-    
     parser.add_argument('--resume', type=str, default=None,
                         help='Obtain WandB run_path from Overview tab and append the'
                              'step number. \nExample arg: "neel/ReAct_Jax/6ktmhalt/ + 200"')
@@ -96,6 +94,68 @@ def parse_args():
                         help='Tune hyperparameters using wandb sweep. Default: False')
 
     args = parser.parse_args()
+    return args
+
+
+def get_inference_args() -> Namespace:
+    description = "Inference script for sampling from a trained model"
+
+    parser = argparse.ArgumentParser(description=description)
+
+    # These defaults should be mostly fine
+    
+    parser.add_argument('--seqlen', type=int, default=512,
+                        help='Sequence length. Default: 512')
+
+    parser.add_argument('--max_iters', type=int, default=3,
+                        help='Number of iterations. Default: 3')
+
+    parser.add_argument('--num_classes', type=int, default=50304,
+                        help='Number of target classes OR vocab size. Default: 50304')
+
+    parser.add_argument('--num_tokens', type=int, default=64,
+                        help="Number of output tokens to generate. Default: 64")
+
+    # Likely need to be overwritten
+
+    parser.add_argument('--checkpoint_path', type=str, default='./',
+                        help='Path for the model checkpoint. Default: ./')
+
+    parser.add_argument('--n_heads', type=int, default=4,
+                        help='Number of attention heads. Default: 4')
+
+    parser.add_argument('--width', type=int, default=384,
+                        help='Width dimension. Default: 384')
+
+    parser.add_argument('--baseline', action='store_true', default=False,
+                        help='Train baseline vanilla transformer model. Default: False')
+
+    parser.add_argument('--num_blocks', type=int, default=1,
+                        help='Number of attention blocks. Default: 1')
+
+    parser.add_argument('--system_prompt', type=str, default="",
+                        help="The user system prompt provided to the model")
+
+    parser.add_argument('--prompt', type=str, default="",
+                        help="The user prompt provided to the model")
+
+    parser.add_argument('--temp', type=float, default=0.5,
+                        help="The temperature applied pre-softmax. Default: 0.5")
+
+    parser.add_argument('--temperature', type=float, default=0.7,
+                    help="The temperature applied pre-softmax. Default: 0.7")
+
+    parser.add_argument('--top_k', type=int, default=50,
+                        help="The number of highest probability vocabulary tokens to keep for top-k sampling. Default: 50")
+
+    parser.add_argument('--top_p', type=float, default=0.9,
+                        help="The cumulative probability for nucleus sampling. Default: 0.9")
+
+    parser.add_argument('--repetition_penalty', type=float, default=1.2,
+                        help="The parameter for repetition penalty. 1.0 means no penalty. Default: 1.2")
+
+    args = parser.parse_args()
+
     return args
 
 if __name__ == '__main__':

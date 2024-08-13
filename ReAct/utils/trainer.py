@@ -1,21 +1,20 @@
 import os
-from typing import Any, Callable, Optional, Tuple, Union
-
+import wandb
 import equinox as eqx
 import jax
+import jax.experimental.mesh_utils as mesh_utils
 import jax.numpy as jnp
+import jax.sharding as jshard
 import optax
 import optuna
 
+from typing import Any, Callable, Optional, Tuple, Union
 from jaxtyping import Array, PRNGKeyArray, PyTree
-import jax.experimental.mesh_utils as mesh_utils
-import jax.sharding as jshard
 from jmp import Policy
-
 from torch.utils.data import DataLoader
 from tqdm.auto import tqdm
 
-import wandb
+from inferencer import Inferencer
 from ReAct.model.baseline import GPT
 from ReAct.model.react import React
 from ReAct.utils.helpers import (
@@ -24,13 +23,11 @@ from ReAct.utils.helpers import (
     load_eqx_obj,
     save_eqx_obj,
 )
-
 from ReAct.utils.losses import (
-    cross_entropy_with_logits,
     _cross_entropy_with_logits_bwd,
     _cross_entropy_with_logits_fwd,
+    cross_entropy_with_logits,
 )
-
 
 half, full = jnp.bfloat16, jnp.float32
 policy = Policy(compute_dtype=half, param_dtype=half, output_dtype=half)
@@ -120,7 +117,7 @@ def make_step(
 
 class Trainer:
     def __init__(self,
-                 args: dict,
+                 args: Any,
                  logger: Tuple,
                  loaders: Tuple,
                  decode_fn: Callable,
@@ -141,9 +138,6 @@ class Trainer:
 
         self.my_logger.info(f"Using Args: {self.args}\n")
 
-        # Assign each arg as a class attribute
-        self.__dict__.update(vars(self.args))
-
     def evaluate_acc(self, model: Union[React, GPT], is_baseline: bool, loader: DataLoader, eval_iters: int, keys: PRNGKeyArray):
 
         model = eqx.filter_shard(model, replicated)
@@ -156,7 +150,7 @@ class Trainer:
             seq, label, pad_mask = eqx.filter_shard((seq, label, pad_mask), sharding)
             seq, label, pad_mask = policy.cast_to_compute((seq, label, pad_mask))
 
-            acc, loss, ppl = self.compute_metrics(is_baseline, model, seq, label, pad_mask, eval_iters, self.num_classes, keys)
+            acc, loss, ppl = self.compute_metrics(is_baseline, model, seq, label, pad_mask, eval_iters, self.args.num_classes, keys)
 
             metrics_sum += jnp.array([acc, loss, ppl])
 
@@ -168,25 +162,25 @@ class Trainer:
     def set_optim_and_scheduler(self, model: eqx.Module) -> Tuple[Callable, PyTree, eqx.Module]:
         assert model is not None, 'Model is not initialized'
 
-        total_steps = self.epochs * self.dataset_length
+        total_steps = self.args.epochs * self.dataset_length
 
         self.schedule_fn = optax.warmup_cosine_decay_schedule(
-            init_value=self.lr / 2,
-            peak_value=self.lr,
-            end_value=self.lr / 10,
-            warmup_steps=self.warmup_steps,
+            init_value=self.args.lr / 2,
+            peak_value=self.args.lr,
+            end_value=self.args.lr / 10,
+            warmup_steps=self.args.warmup_steps,
             decay_steps=total_steps,
         )
 
         # optimizer with weight decay
         optim = optax.chain(
-            optax.clip_by_block_rms(self.grad_clip),
+            optax.clip_by_block_rms(self.args.grad_clip),
             optax.adamw(
                 learning_rate=self.schedule_fn,
-                weight_decay=self.weight_decay,
-                b1=self.beta_1,
-                b2=self.beta_2,
-                nesterov=self.nesterov
+                weight_decay=self.args.weight_decay,
+                b1=self.args.beta_1,
+                b2=self.args.beta_2,
+                nesterov=self.args.nesterov
             ),
         )
 
@@ -209,19 +203,34 @@ class Trainer:
 
         return filter_spec
 
-    def init_model(self, key: PRNGKeyArray):
+    def init_model(self, key: PRNGKeyArray) -> Tuple[PyTree, Union[React, GPT]]:
 
-        if self.baseline:
+        if self.args.baseline:
             self.max_iters = 1 # baseline model only does one pass
 
-            model = GPT(self.n_heads, self.seqlen, self.num_blocks, self.width,
-                        self.drop_rate, self.num_classes, key)
+            model = GPT(
+                self.args.n_heads,
+                self.args.seqlen,
+                self.args.num_blocks,
+                self.args.width,
+                self.args.drop_rate,
+                self.args.num_classes,
+                key,
+            )
         else:
-            model = React(self.n_heads, self.seqlen, self.max_iters, self.num_blocks, self.width,
-                           self.drop_rate, self.num_classes, key)
+            model = React(
+                self.args.n_heads,
+                self.args.seqlen,
+                self.args.max_iters,
+                self.args.num_blocks,
+                self.args.width,
+                self.args.drop_rate,
+                self.args.num_classes,
+                key,
+            )
 
         # switch to half precision
-        if self.bf16:
+        if self.args.bf16:
             model = policy.cast_to_param(model)
 
         _, opt_state, model = self.set_optim_and_scheduler(model)
@@ -234,17 +243,17 @@ class Trainer:
     
     def resume_training(self, model: eqx.Module, opt_state: eqx.Module):
         # extracting out the paths
-        run_path, step = self.resume.split('+')
+        run_path, step = self.args.resume.split('+')
         run_path, step = run_path.strip(), int(step.strip())
 
         base_path = "https://api.wandb.ai/files/"
         model_path = f'{base_path}{run_path}/model_{step}.eqx'
 
         # wget both files to ReAct/outputs/, if they those files don't exist
-        if not os.path.exists(f'{self.save_dir}model_{step}.eqx'):
-            os.system(f'wget -O {self.save_dir}model_{step}.eqx {model_path}')
+        if not os.path.exists(f'{self.args.save_dir}model_{step}.eqx'):
+            os.system(f'wget -O {self.args.save_dir}model_{step}.eqx {model_path}')
 
-        model, opt_state = load_eqx_obj(f'{self.save_dir}model_{step}.eqx', (model, opt_state))
+        model, opt_state = load_eqx_obj(f'{self.args.save_dir}model_{step}.eqx', (model, opt_state))
 
         self.my_logger.info(f'-------- Resuming training from step {step} ---------\n')
 
@@ -308,19 +317,19 @@ class Trainer:
         optim, _, _ = self.set_optim_and_scheduler(model)
         filter_spec = self.get_filterspec(model)
 
-        if self.resume:
+        if self.args.resume:
             model, opt_state, epoch_done = self.resume_training(model, opt_state)
         else:
             epoch_done = 0
 
         print(f'Model: {model}')
         
-        for epoch in range(epoch_done, self.epochs):
+        for epoch in range(epoch_done, self.args.epochs):
             # init empty metrics
             epoch_key = jnp.array([epoch, epoch + 1]).astype(jnp.uint32)
             train_acc, train_loss, train_ppl = [], [], []
 
-            keys = jax.random.split(epoch_key, self.batch_size)
+            keys = jax.random.split(epoch_key, self.args.batch_size)
             
             for step, batch in tqdm(enumerate(self.trainloader), total=self.dataset_length, desc=f'Epoch {epoch}'):
                 step += step_done # for multiple epochs
@@ -329,10 +338,10 @@ class Trainer:
                 seq, label, pad_mask = eqx.filter_shard((seq, label,pad_mask), sharding)
                 seq, label, pad_mask = policy.cast_to_compute((seq, label, pad_mask))
                 loss, model, opt_state = make_step(model, opt_state, filter_spec, seq, label, pad_mask,
-                                                   self.max_iters, optim, self.num_classes, keys)
+                                                   self.args.max_iters, optim, self.args.num_classes, keys)
 
                 if step % 100 == 0:
-                    accuracy, loss, perplexity = self.compute_metrics(self.baseline, model, seq, label, pad_mask, self.max_iters, self.num_classes, keys)
+                    accuracy, loss, perplexity = self.compute_metrics(self.args.baseline, model, seq, label, pad_mask, self.args.max_iters, self.args.num_classes, keys)
 
                     train_acc.append(accuracy)
                     train_loss.append(loss)
@@ -344,7 +353,7 @@ class Trainer:
                         {
                             'Train/loss': loss,
                             'Train/Lr': self.schedule_fn(epoch + 1 * step).item(),
-                            'Train/tokens': step * self.batch_size * self.seqlen,
+                            'Train/tokens': step * self.args.batch_size * self.args.seqlen,
                         },
                         step=step
                     )
@@ -353,7 +362,7 @@ class Trainer:
                         self.my_logger.warning(f'\nLoss is NaN at step {step}')
                         return loss
 
-                if (step + 1) % self.log_interval == 0 and len(train_acc) > 0:
+                if (step + 1) % self.args.log_interval == 0 and len(train_acc) > 0:
                     # Compute cumulatives
                     cum_train_acc = sum(train_acc) / len(train_acc)
                     cum_train_loss = sum(train_loss) / len(train_loss)
@@ -363,7 +372,7 @@ class Trainer:
                     train_acc, train_loss, train_ppl = [], [], []
 
                     ## Validation
-                    (val_acc, val_loss, val_ppl), val_sample = self.evaluate_acc(model, self.baseline, self.valloader, self.max_iters, keys)
+                    (val_acc, val_loss, val_ppl), val_sample = self.evaluate_acc(model, self.args.baseline, self.valloader, self.max_iters, keys)
 
                     self.wandb_logger.log(
                         {
@@ -389,13 +398,13 @@ class Trainer:
                     self.my_logger.info(f'Validation accuracy: {val_acc} | using {self.max_iters} iterations')
                     self.my_logger.info(f'Cumulative Training accuracy: {cum_train_acc}\n')
 
-                    self.generate(model, sample_x, metadata={'type': 'train', 'step': step}, max_new_tokens=64)
-                    self.generate(model, val_sample_x, metadata={'type': 'val', 'step': step}, max_new_tokens=64)
+                    self.generate_from_model(model, sample_x, metadata={'type': 'train', 'step': step}, max_new_tokens=64)
+                    self.generate_from_model(model, val_sample_x, metadata={'type': 'val', 'step': step}, max_new_tokens=64)
 
-                if not self.tune_hyperparams and (step + 1) % self.save_interval == 0:
-                    filepath = f"{self.save_dir}model_{epoch}_{step}.eqx"
+                if not self.args.tune_hyperparams and (step + 1) % self.args.save_interval == 0:
+                    filepath = f"{self.args.save_dir}model_{epoch}_{step}.eqx"
                     
-                    save_eqx_obj(self.save_dir, filepath, (model, opt_state))
+                    save_eqx_obj(self.args.save_dir, filepath, (model, opt_state))
                     
                     self.my_logger.info(f'Model saved at {filepath}')
                     self.wandb_logger.save(filepath)
@@ -409,41 +418,25 @@ class Trainer:
         
         return val_loss
 
-    def generate(self, model: eqx.Module, input_arr: Array, metadata: dict, max_new_tokens: int, temperature: float = 0.5):
-        '''
-        Take a conditioning sequence, call output_head to obtain a prediction
-        and autoregressively complete the sequence max_new_tokens times.
-        '''
-        key = jax.random.PRNGKey(0)
-        inference_model = eqx.nn.inference_mode(model)
+    def generate_from_model(
+        self,
+        model: eqx.Module,
+        input_arr: Array,
+        metadata: dict,
+        max_new_tokens: int,
+        temperature: float = 0.5,
+    ):
+        inferencer = Inferencer(self.args, self.key)
 
-        prompt = f'Prompt: {self.decode_fn(input_arr)}'
+        decoded_input: str = self.decode_fn(input_arr)
 
-        for _ in range(max_new_tokens):
-            if input_arr.shape[0] < self.seqlen:
-                padded_array = jnp.pad(input_arr, (0, self.seqlen - input_arr.shape[0]))
-            else:
-                padded_array = input_arr
+        prompt = f'Prompt: {decoded_input}'
 
-            pad_mask = jnp.array([1 if i != 0 else 0 for i in padded_array])
-
-            # Find the correct index to extract the logits from
-            try:
-                zero_idx = jnp.where(padded_array == 0)[0][0]
-            except IndexError:
-                zero_idx = self.seqlen
-
-            if self.baseline:
-                logits = inference_model(padded_array, pad_mask, False, key)
-            else:
-                logits = inference_model(padded_array, self.max_iters, pad_mask, False, False, key)[0]
-            
-            logits = logits[zero_idx - 1, :] # extract the logits for the last token
-            gen = jax.nn.softmax(logits / temperature).argmax() # greedy decoding
-            input_arr = jnp.concatenate([input_arr, gen.reshape(-1)]) # append the generated token for AR
+        model_gen = inferencer.sample_model(model, decoded_input, max_new_tokens, temperature).strip()
 
         # Format the generated text
-        model_gen = f'model generation: {self.decode_fn(input_arr[-max_new_tokens:-1])}\n'
+        model_gen = f'model generation: {model_gen}\n'
+
         self.my_logger.info(prompt)
         self.my_logger.info(model_gen)
 
@@ -453,5 +446,3 @@ class Trainer:
         new_table.add_data(metadata["step"], prompt, model_gen, metadata["type"])
 
         self.wandb_logger.log({"Generated Samples": new_table})
-
-        return input_arr

@@ -1,4 +1,4 @@
-from typing import Dict, List, Optional
+from typing import Dict, List, Optional, Any
 
 from tokenizers import normalizers
 from tokenizers.normalizers import NFD, Lowercase, StripAccents
@@ -29,16 +29,18 @@ class Tok:
         
         self.tokenizer.add_special_tokens({'pad_token': '[PAD]'})
     
-    def encode(self, text: List[str]) -> Dict[str, List]:
+    def encode(self, text: List[str] | str) -> Dict[str, List]:
         return self.tokenizer(text,
                               padding='max_length',
                               max_length=self.max_length,
                               truncation=True)
     
-    def decode(self, ids: list):
-        # convert ids to a list of ints
-        ids = [int(i) for i in ids]
-        decoded = self.tokenizer.decode(ids, skip_special_tokens=False)
+    def decode(self, ids: Any) -> str:
+        ids = [int(i) for i in ids] # ensure its integers
+
+        decoded = self.tokenizer.decode(
+            ids, skip_special_tokens=False, clean_up_tokenization_spaces=True
+        )
         
         return decoded.replace('!', '')
     
@@ -56,14 +58,3 @@ class Tok:
     
     def __len__(self):
         return self.max_length
-
-if __name__ == '__main__':
-    tok = Tok(None, 32)
-    out = tok(['Sam and alice go and stab diana for no good reason (they are pschyopaths)', 'mask off'])
-    
-    print('Vocab size:', tok.tokenizer.get_vocab_size())
-    print(dict(zip(out[0].tokens, out[0].ids)))
-    
-    print(
-        tok.decode([13482, 338, 20854])
-    )
