@@ -3,8 +3,6 @@ import jax
 import optuna
 import platform
 
-jax.config.update("jax_compilation_cache_dir", "./ReAct/compilation_cache")
-
 if platform.processor() != "arm":
     jax.distributed.initialize()  # don't run on apple sillicon
 
