@@ -401,6 +401,8 @@ class Trainer:
                     self.generate_from_model(model, sample_x, metadata={'type': 'train', 'step': step}, max_new_tokens=64)
                     self.generate_from_model(model, val_sample_x, metadata={'type': 'val', 'step': step}, max_new_tokens=64)
 
+                    jax.experimental.multihost_utils.sync_global_devices('Sync up all nodes after inference.')
+
                 if not self.args.tune_hyperparams and (step + 1) % self.args.save_interval == 0:
                     filepath = f"{self.args.save_dir}model_{epoch}_{step}.eqx"
                     
