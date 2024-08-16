@@ -83,8 +83,6 @@ class Inferencer:
         model_input = self.encode_input(prompt)
     
         def generate(model_input: Array, num_tokens: int) -> Array:
-
-            @eqx.filter_jit
             def sample_token(padded_array: Array):
                 pad_mask = jnp.where(padded_array == self.pad_token, 0, 1)
 

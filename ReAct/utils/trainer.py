@@ -285,9 +285,9 @@ class Trainer:
         keys = keys[:input_arr.shape[0], ...] # take a batch_size sized slice of the keys
 
         if is_baseline:
-            pred_y = jax.vmap(model, in_axes=(0, 0, None, 0))(input_arr, pad_mask, False, keys)
+            pred_y = jax.vmap(model, in_axes=(0, 0, None, 0))(input_arr, pad_mask, False, keys) # type: ignore
         else:
-            pred_y = jax.vmap(model, in_axes=(0, None, 0, None, None, 0))(input_arr, eval_iters, pad_mask, False, False, keys)[0]
+            pred_y = jax.vmap(model, in_axes=(0, None, 0, None, None, 0))(input_arr, eval_iters, pad_mask, False, False, keys)[0] # type:ignore
 
         y_hat = jax.nn.softmax(pred_y, axis=-1).argmax(-1)
 
@@ -445,9 +445,7 @@ class Trainer:
                 result_queue.put(e)
 
         result_queue = queue.Queue()
-        generation_thread = threading.Thread(
-            target=generate_with_timeout, args=(result_queue,)
-        )
+        generation_thread = threading.Thread(target=generate_with_timeout, args=(result_queue,))
         generation_thread.start()
         generation_thread.join(timeout)
 
