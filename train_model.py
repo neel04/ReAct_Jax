@@ -40,23 +40,25 @@ def main(key: PRNGKeyArray):
             dataset = MiniPileDataset
         case 'github':
             dataset = GithubCodeDataset
+        case _:
+            raise ValueError(f"Unsupported dataset '{args.dataset}'. Supported datasets are 'tinystories', 'owt', 'minipile', 'github'.")
 
     train_dataset = dataset(split='train', max_length=args.seqlen, bsz=args.batch_size)
     val_dataset = dataset(split='test', max_length=args.seqlen, bsz=args.batch_size)
 
     # ========= Training/Hypertuning =========
     init_hyperparams = [
-        {"lr": 7e-4, "drop_rate": 0.01, "weight_decay": 1e-4, "warmup_steps": 170, "beta_1": 0.95, "beta_2": 0.98, "nesterov": False},
-        {"lr": 1e-4, "drop_rate": 0.01, "weight_decay": 1e-4, "warmup_steps": 200, "beta_1": 0.95, "beta_2": 0.99, "nesterov": True}
+        {"lr": 1e-3, "drop_rate": 0.01, "weight_decay": 1e-4, "warmup_steps": 50, "beta_1": 0.9,  "beta_2": 0.98, "nesterov": True},
+        {"lr": 7e-4, "drop_rate": 0.01, "weight_decay": 3e-4, "warmup_steps": 250, "beta_1": 0.95, "beta_2": 0.999, "nesterov": True}
     ]
 
     if args.tune_hyperparams:
         args.group = 'Sweeps_base' if args.baseline else f'Sweeps_{args.max_iters}i'
 
-        jax.experimental.multihost_utils.sync_global_devices('Sync up all nodes.')
+        jax.experimental.multihost_utils.sync_global_devices('Sync up all nodes.') # type: ignore
         trainloader = train_dataset.create_dataloader(':10%')
 
-        jax.experimental.multihost_utils.sync_global_devices('Sync up all nodes.')
+        jax.experimental.multihost_utils.sync_global_devices('Sync up all nodes.')  # type: ignore
         valloader = val_dataset.create_dataloader('-1%:')
 
         # Create optuna hypertununing study
@@ -107,7 +109,7 @@ def main(key: PRNGKeyArray):
             lambda trial: kickoff_optuna(trial=trial, **trainer_kwargs),
             n_trials=50,
             callbacks=[wandbc],
-            gc_after_trial=True
+            gc_after_trial=True,
         )
 
         fig = optuna.visualization.plot_optimization_history(study)
@@ -117,10 +119,10 @@ def main(key: PRNGKeyArray):
         print(f'\nValue: {study.best_trial.value}\nParams: {study.best_trial.params}\n')
 
     else:
-        jax.experimental.multihost_utils.sync_global_devices('Sync up all nodes.')
+        jax.experimental.multihost_utils.sync_global_devices("Sync up all nodes.")  # type: ignore
         trainloader = train_dataset.create_dataloader(":99%")
         
-        jax.experimental.multihost_utils.sync_global_devices('Sync up all nodes.')
+        jax.experimental.multihost_utils.sync_global_devices('Sync up all nodes.')  # type: ignore
         valloader = val_dataset.create_dataloader("-1%:")
 
         logger = UnifiedLogger(args, level="DEBUG")

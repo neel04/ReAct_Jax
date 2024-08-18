@@ -1,12 +1,15 @@
 import math
 import os
-from typing import Callable, Optional, Tuple
+from logging import Logger
+from typing import Any, Callable, Optional, Tuple, Union
 
 import equinox as eqx
 import jax
 import jax.numpy as jnp
-from jax import tree_util as jtu
-from jaxtyping import Array, PRNGKeyArray 
+from jaxtyping import Array, PRNGKeyArray, PyTree
+
+from ReAct.model.baseline import GPT
+from ReAct.model.react import React
 
 def convert_flops(params: int) -> str:
     if params == 0:
@@ -30,7 +33,7 @@ def convert_flops(params: int) -> str:
     return "%s %s" % (s, size_name[i])
 
 
-def calc_performance_metrics(args, my_logger: Callable) -> None:
+def calc_performance_metrics(args, my_logger: Logger) -> None:
     """
     Estimates FLOPs consumed during a single fwd + bwd pass.
     Taken from EleutherAI's GPT-NeoX repo: https://rb.gy/33d6zg
@@ -82,9 +85,7 @@ def calc_performance_metrics(args, my_logger: Callable) -> None:
     )
 
 
-def xla_calc_flops(
-    fn: Callable, static_argnums: Tuple[int], args: Tuple, my_logger: Callable
-) -> None:
+def xla_calc_flops(fn: Callable, static_argnums: Tuple[int], args: Tuple[Any], my_logger: Logger) -> int:
     """
     Estimates FLOPs consumed during `fn` execution.
     Use's XLA HLO analysis to estimate FLOPs.
@@ -92,8 +93,10 @@ def xla_calc_flops(
     Returns: the total number of FLOPs
     """
     compiled = jax.jit(fn, static_argnums=static_argnums).lower(*args).compile()
-    flops = compiled.cost_analysis()[0]["flops"]
+    flops = compiled.cost_analysis()[0]["flops"] # type: ignore
     my_logger.info(f"XLA estimate of Total FLOPs for {fn.__name__}: {convert_flops(int(flops))}\n")
+
+    return flops
 
 
 def safe_softmax(x: Array, axis: int) -> Array:
@@ -106,7 +109,7 @@ def safe_softmax(x: Array, axis: int) -> Array:
 
 
 def half_precision(model: eqx.Module) -> eqx.Module:
-    return jtu.tree_map(
+    return jax.tree_util.tree_map(
         lambda x: x.astype(jnp.bfloat16) if eqx.is_inexact_array(x) else x, model
     )
 
@@ -118,7 +121,7 @@ def save_eqx_obj(save_dir: str, filename: str, obj: tuple):
     eqx.tree_serialise_leaves(filename, obj)
 
 
-def load_eqx_obj(filepath: str, obj: eqx.Module) -> eqx.Module:
+def load_eqx_obj(filepath: str, obj: PyTree[Any]) -> PyTree[Any]:
     return eqx.tree_deserialise_leaves(path_or_file=filepath, like=obj)
 
 
@@ -126,7 +129,7 @@ def broad_to_bsz(arr: Array, shape: tuple) -> Array:
     return jnp.broadcast_to(arr, shape)
 
 
-def count_params(model: eqx.Module) -> None:
+def count_params(model: Union[GPT, React]) -> None:
     def params_fn(model):
         return sum(
             x.size for x in jax.tree_util.tree_leaves(eqx.filter(model, eqx.is_array))
@@ -164,16 +167,3 @@ def get_rand_nums(
         )
 
     return dist.astype(int)
-
-@jax.jit
-def inverted_freq(arr: Array):
-    arr = arr.sort(0)
-
-    values, counts = jnp.unique(arr, return_counts=True, size=64)
-
-    # Replace 0s with any element for scaling to work
-    counts = jnp.where(counts == 0, counts[0], counts)
-
-    inv_weights = counts.max() / counts  # scale it down
-
-    return inv_weights[arr - arr.min()]

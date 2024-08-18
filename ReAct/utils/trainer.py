@@ -11,7 +11,7 @@ import optax
 import optuna
 
 from typing import Any, Callable, Optional, Tuple, Union
-from jaxtyping import Array, PRNGKeyArray, PyTree
+from jaxtyping import Array, Int, PRNGKeyArray, PyTree
 from jmp import Policy
 from torch.utils.data import DataLoader
 from tqdm.auto import tqdm
@@ -147,7 +147,7 @@ class Trainer:
         metrics_sum = jnp.zeros(3)  # [acc, loss, ppl]
         num_batches = len(loader)
 
-        for step, batch in tqdm(enumerate(loader), total=len(loader), desc='Validating'):
+        for _, batch in tqdm(enumerate(loader), total=len(loader), desc='Validating'):
             seq, label, pad_mask = jnp.asarray(batch['text'])
             seq, label, pad_mask = eqx.filter_shard((seq, label, pad_mask), sharding)
             seq, label, pad_mask = policy.cast_to_compute((seq, label, pad_mask))
@@ -243,7 +243,7 @@ class Trainer:
 
         return opt_state, model
     
-    def resume_training(self, model: eqx.Module, opt_state: eqx.Module):
+    def resume_training(self, model: PyTree, opt_state: eqx.Module) -> tuple[PyTree, PyTree, int]:
         # extracting out the paths
         run_path, step = self.args.resume.split('+')
         run_path, step = run_path.strip(), int(step.strip())
@@ -272,7 +272,7 @@ class Trainer:
         eval_iters: int,  # static
         num_classes: int,  # static
         keys: PRNGKeyArray,
-    ):
+    )-> tuple[Array, Int[Array, "1"], Array]:
         '''
         Computes the accuracy, perplexity, loss of the model w.r.t batch
         '''
@@ -339,8 +339,19 @@ class Trainer:
                 seq, label, pad_mask = jnp.asarray(batch['text'])
                 seq, label, pad_mask = eqx.filter_shard((seq, label,pad_mask), sharding)
                 seq, label, pad_mask = policy.cast_to_compute((seq, label, pad_mask))
-                loss, model, opt_state = make_step(model, opt_state, filter_spec, seq, label, pad_mask,
-                                                   self.args.max_iters, optim, self.args.num_classes, keys)
+
+                loss, model, opt_state = make_step(
+                    model=model,
+                    opt_state=opt_state,
+                    filter_spec=filter_spec,
+                    x=seq,
+                    y=label,
+                    pad_mask=pad_mask,
+                    iters_to_do=self.args.max_iters,
+                    optim=optim,
+                    num_classes=self.args.num_classes,
+                    keys=keys,
+                )
 
                 if step % 100 == 0:
                     accuracy, loss, perplexity = self.compute_metrics(self.args.baseline, model, seq, label, pad_mask, self.args.max_iters, self.args.num_classes, keys)
@@ -403,7 +414,7 @@ class Trainer:
                     self.generate_from_model(model, sample_x, metadata={'type': 'train', 'step': step}, max_new_tokens=64)
                     self.generate_from_model(model, val_sample_x, metadata={'type': 'val', 'step': step}, max_new_tokens=64)
 
-                    jax.experimental.multihost_utils.sync_global_devices('Sync up all nodes after inference.')
+                    jax.experimental.multihost_utils.sync_global_devices('Sync up all nodes after inference.') # type: ignore
 
                 if not self.args.tune_hyperparams and (step + 1) % self.args.save_interval == 0:
                     filepath = f"{self.args.save_dir}model_{epoch}_{step}.eqx"
