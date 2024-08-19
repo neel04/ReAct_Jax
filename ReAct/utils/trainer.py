@@ -159,7 +159,7 @@ class Trainer:
         # Compute cumulatives
         cum_acc, cum_loss, cum_ppl = metrics_sum / num_batches
 
-        return (cum_acc, cum_loss, cum_ppl), seq[0]  # return one sample for viz
+        return (cum_acc, cum_loss, cum_ppl), seq[0]  # type: ignore
 
     def set_optim_and_scheduler(self, model: eqx.Module) -> Tuple[Callable, PyTree, eqx.Module]:
         assert model is not None, 'Model is not initialized'
@@ -310,7 +310,7 @@ class Trainer:
         loss, progress = metrics
 
         if trial is not None:
-            trial.report(loss, progress)
+            trial.report(loss, step=progress)
 
     def train(self, trial: Optional[Any] = None) -> float:
         step_done, val_loss = 0, 999.9
