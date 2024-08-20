@@ -9,6 +9,7 @@ import jax.numpy as jnp
 from jaxtyping import Array, PRNGKeyArray, PyTree
 
 from ReAct.model.baseline import GPT
+from ReAct.model.blocks import LinearProj
 from ReAct.model.react import React
 
 def convert_flops(params: int) -> str:
@@ -113,6 +114,25 @@ def half_precision(model: eqx.Module) -> eqx.Module:
         lambda x: x.astype(jnp.bfloat16) if eqx.is_inexact_array(x) else x, model
     )
 
+def megatron_init(weight: Array, key: PRNGKeyArray) -> Array:
+    """
+    Init all the weights with the Megatron paper init
+    """
+    dims = weight.shape
+    stddev = (0.33 / dims[0]) ** 0.5
+    lim = 1 / math.sqrt(dims[1])
+
+    return jax.random.uniform(key, dims, minval=-lim, maxval=lim) * stddev
+
+def is_linear(x: Any):
+    return isinstance(x, eqx.nn.Linear) or isinstance(x, LinearProj)
+
+def get_weights(m: PyTree):
+    return [
+        x.weight
+        for x in jax.tree_util.tree_leaves(m, is_leaf=is_linear)
+        if is_linear(x)
+    ]
 
 def save_eqx_obj(save_dir: str, filename: str, obj: tuple):
     if not os.path.exists(save_dir):

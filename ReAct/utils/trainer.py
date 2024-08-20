@@ -22,7 +22,9 @@ from ReAct.model.react import React
 from ReAct.utils.helpers import (
     calc_performance_metrics,
     count_params,
+    get_weights,
     load_eqx_obj,
+    megatron_init,
     save_eqx_obj,
 )
 from ReAct.utils.losses import (
@@ -230,6 +232,16 @@ class Trainer:
                 self.args.num_classes,
                 key,
             )
+
+        # custom weight init
+        weights= get_weights(model)
+
+        new_weights = [
+            megatron_init(weight, subkey)
+            for weight, subkey in zip(weights, jax.random.split(key, len(weights)))
+        ]
+
+        model = eqx.tree_at(get_weights, model, new_weights)
 
         # switch to half precision
         if self.args.bf16:
