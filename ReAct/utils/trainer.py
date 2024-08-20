@@ -311,6 +311,10 @@ class Trainer:
 
         if trial is not None:
             trial.report(loss, step=progress)
+            self.my_logger.info(f"\nReported metric: {loss} @ {progress} to optuna.")
+            
+            if trial.should_prune():
+                raise optuna.exceptions.TrialPruned()
 
     def train(self, trial: Optional[Any] = None) -> float:
         step_done, val_loss = 0, 999.9
@@ -389,45 +393,43 @@ class Trainer:
 
                     self.wandb_logger.log(
                         {
-                            'Train/acc': cum_train_acc,
-                            'Train/cum_loss': cum_train_loss,
-                            'Train/ppl': cum_train_ppl,
-                            'Val/acc': val_acc,
-                            'Val/loss': val_loss,
-                            'Val/ppl': val_ppl,
+                            "Train/acc": cum_train_acc,
+                            "Train/cum_loss": cum_train_loss,
+                            "Train/ppl": cum_train_ppl,
+                            "Val/acc": val_acc,
+                            "Val/loss": val_loss,
+                            "Val/ppl": val_ppl,
                         },
-                        step=step
+                        step=step,
                     )
                     
                     # Report metrics to optuna
-                    if trial is not None and trial.should_prune():
-                        self.optuna_log(trial, (val_loss, step))
-                        raise optuna.exceptions.TrialPruned()
+                    self.optuna_log(trial, (val_loss, step))
 
                     ## Visualize one sample and model prediction
                     sample_x, val_sample_x = seq[0][:16], val_sample[:16]
 
                     self.my_logger.info(f"epoch={epoch}, step={step}, loss={loss}")
-                    self.my_logger.info(f'Validation accuracy: {val_acc} | using {self.args.max_iters} iterations')
-                    self.my_logger.info(f'Cumulative Training accuracy: {cum_train_acc}\n')
+                    self.my_logger.info(f"Validation accuracy: {val_acc} | using {self.args.max_iters} iterations")
+                    self.my_logger.info(f"Cumulative Training accuracy: {cum_train_acc}\n")
 
-                    self.generate_from_model(model, sample_x, metadata={'type': 'train', 'step': step}, max_new_tokens=64)
-                    self.generate_from_model(model, val_sample_x, metadata={'type': 'val', 'step': step}, max_new_tokens=64)
+                    self.generate_from_model(model, sample_x, metadata={"type": "train", "step": step}, max_new_tokens=64)
+                    self.generate_from_model(model, val_sample_x, metadata={"type": "val", "step": step}, max_new_tokens=64)
 
-                    jax.experimental.multihost_utils.sync_global_devices('Sync up all nodes after inference.') # type: ignore
+                    jax.experimental.multihost_utils.sync_global_devices("Sync up all nodes after inference.") # type: ignore
 
                 if not self.args.tune_hyperparams and (step + 1) % self.args.save_interval == 0:
                     filepath = f"{self.args.save_dir}model_{epoch}_{step}.eqx"
-                    
+
                     save_eqx_obj(self.args.save_dir, filepath, (model, opt_state))
                     
-                    self.my_logger.info(f'Model saved at {filepath}')
+                    self.my_logger.info(f"Model saved at {filepath}")
                     self.wandb_logger.save(filepath)
 
             step_done = step
             self.optuna_log(trial, (val_loss, step))
             
-            print(f'Epoch {epoch} done!')
+            print(f"Epoch {epoch} done!")
 
         self.wandb_logger.finish() # Cleanup
         

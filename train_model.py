@@ -48,7 +48,7 @@ def main(key: PRNGKeyArray):
 
     # ========= Training/Hypertuning =========
     init_hyperparams = [
-        {"lr": 5e-4, "drop_rate": 0.01, "weight_decay": 1e-4, "warmup_steps": 50, "beta_1": 0.9,  "beta_2": 0.98, "nesterov": False}
+        {"lr": 5e-5, "drop_rate": 0.01, "weight_decay": 1e-4, "warmup_steps": 50, "beta_1": 0.9,  "beta_2": 0.98, "nesterov": True}
     ]
 
     if args.tune_hyperparams:
@@ -64,7 +64,7 @@ def main(key: PRNGKeyArray):
         storage = f'sqlite:///chkp_{args.max_iters}i_{args.num_blocks}L_{args.width}.db'
 
         study = optuna.create_study(
-            study_name=f'Sweeps_{args.max_iters}i_{args.num_blocks}L_{args.width}',
+            study_name=f"Sweeps_{args.max_iters}i_{args.num_blocks}L_{args.width}",
             direction="minimize",
             load_if_exists=True,
             storage=storage,
@@ -74,10 +74,7 @@ def main(key: PRNGKeyArray):
                 consider_endpoints=True,
                 n_startup_trials=5,
             ),
-            pruner=optuna.pruners.MedianPruner(
-                n_startup_trials=5,
-                n_min_trials=5
-            )
+            pruner=optuna.pruners.MedianPruner(n_startup_trials=5, n_min_trials=5),
         )
 
         wandb_kwargs = {
@@ -106,7 +103,7 @@ def main(key: PRNGKeyArray):
 
         study.optimize(
             lambda trial: kickoff_optuna(trial=trial, **trainer_kwargs),
-            n_trials=50,
+            n_trials=60,
             callbacks=[wandbc],
             gc_after_trial=True,
         )
