@@ -404,6 +404,8 @@ class Trainer:
                     ## Validation
                     (val_acc, val_loss, val_ppl), val_sample = self.evaluate_acc(model, self.args.baseline, self.valloader, self.args.max_iters, keys)
 
+                    grads, updates = get_leaves(grads), get_leaves(updates)
+
                     self.wandb_logger.log(
                         {
                             "Train/acc": cum_train_acc,
@@ -412,8 +414,8 @@ class Trainer:
                             "Val/acc": val_acc,
                             "Val/loss": val_loss,
                             "Val/ppl": val_ppl,
-                            "Gradients": get_leaves(grads),
-                            "Updates": get_leaves(updates),
+                            "Gradients": wandb.Histogram(grads, num_bins=64),
+                            "Updates": wandb.Histogram(updates, num_bins=64),
                         },
                         step=step,
                     )
