@@ -44,7 +44,8 @@ sharding = jshard.PositionalSharding(devices)
 replicated = sharding.replicate()
 
 # Stable CE (w/ z-loss) from PaLM
-ce_loss = cross_entropy_with_logits
+# ce_loss = cross_entropy_with_logits
+ce_loss = optax.losses.safe_softmax_cross_entropy
 # ce_loss.defvjp(_cross_entropy_with_logits_fwd, _cross_entropy_with_logits_bwd)
 
 @eqx.filter_jit
@@ -66,7 +67,7 @@ def vanilla_fwd(model: GPT, input_arr: Array, pad_mask: Array, iters_to_do: int,
 @eqx.filter_jit
 def _compute_softmax_cross_entropy_loss(pred_y: Array, y_one_hot: Array) -> Array:
 
-    loss, _ = ce_loss(pred_y, y_one_hot, 1e-4) # (batch_size, seqlen)
+    loss  = ce_loss(pred_y, y_one_hot) # (batch_size, seqlen)
 
     return loss.sum((-1, -2)).mean() # mean across batch
 

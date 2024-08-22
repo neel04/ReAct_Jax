@@ -22,7 +22,7 @@ import jax.numpy as jnp
 
 @jax.custom_vjp
 def cross_entropy_with_logits(
-    logits: jnp.ndarray, targets: jnp.ndarray, z_loss: float
+    logits: jnp.ndarray, targets: jnp.ndarray, z_loss: float = 1e-4
 ) -> Tuple[jnp.ndarray, jnp.ndarray]:
     """Computes cross entropy loss with stable custom gradient.
 
