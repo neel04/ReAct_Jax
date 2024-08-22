@@ -45,7 +45,7 @@ replicated = sharding.replicate()
 
 # Stable CE (w/ z-loss) from PaLM
 ce_loss = cross_entropy_with_logits
-ce_loss.defvjp(_cross_entropy_with_logits_fwd, _cross_entropy_with_logits_bwd)
+# ce_loss.defvjp(_cross_entropy_with_logits_fwd, _cross_entropy_with_logits_bwd)
 
 @eqx.filter_jit
 def iters_fwd(model: React, input_arr: Array, pad_mask: Array, iters_to_do: int, key: PRNGKeyArray) -> Array:
