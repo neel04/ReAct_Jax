@@ -140,6 +140,10 @@ def save_eqx_obj(save_dir: str, filename: str, obj: tuple):
 
     eqx.tree_serialise_leaves(filename, obj)
 
+def get_leaves(x: PyTree) -> Array:
+    return jax.flatten_util.ravel_pytree(
+        jax.tree_util.tree_flatten(x, eqx.is_array)[0]
+    )[0]
 
 def load_eqx_obj(filepath: str, obj: PyTree[Any]) -> PyTree[Any]:
     return eqx.tree_deserialise_leaves(path_or_file=filepath, like=obj)

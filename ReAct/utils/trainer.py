@@ -22,6 +22,7 @@ from ReAct.model.react import React
 from ReAct.utils.helpers import (
     calc_performance_metrics,
     count_params,
+    get_leaves,
     get_weights,
     load_eqx_obj,
     megatron_init,
@@ -117,7 +118,7 @@ def make_step(
     # shard the outputs as well
     model, opt_state = eqx.filter_shard((model, opt_state), replicated)
 
-    return loss, model, opt_state
+    return loss, model, opt_state, grads, updates
 
 class Trainer:
     def __init__(self,
@@ -178,7 +179,7 @@ class Trainer:
 
         # optimizer with weight decay
         optim = optax.chain(
-            optax.clip_by_block_rms(self.args.grad_clip),
+            optax.clip_by_global_norm(self.args.grad_clip),
             optax.adamw(
                 learning_rate=self.schedule_fn,
                 weight_decay=self.args.weight_decay,
@@ -356,7 +357,7 @@ class Trainer:
                 seq, label, pad_mask = eqx.filter_shard((seq, label,pad_mask), sharding)
                 seq, label, pad_mask = policy.cast_to_compute((seq, label, pad_mask))
 
-                loss, model, opt_state = make_step(
+                loss, model, opt_state, grads, updates = make_step(
                     model=model,
                     opt_state=opt_state,
                     filter_spec=filter_spec,
@@ -391,7 +392,7 @@ class Trainer:
                         self.my_logger.warning(f'\nLoss is NaN at step {step}')
                         return loss
 
-                if (step + 1) % self.args.log_interval == 0 and len(train_acc) > 0:
+                if step % self.args.log_interval == 0 and len(train_acc) > 0:
                     # Compute cumulatives
                     cum_train_acc = sum(train_acc) / len(train_acc)
                     cum_train_loss = sum(train_loss) / len(train_loss)
@@ -411,6 +412,8 @@ class Trainer:
                             "Val/acc": val_acc,
                             "Val/loss": val_loss,
                             "Val/ppl": val_ppl,
+                            "Gradients": get_leaves(grads),
+                            "Updates": get_leaves(updates),
                         },
                         step=step,
                     )
