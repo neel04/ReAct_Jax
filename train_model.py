@@ -107,7 +107,7 @@ def main(key: PRNGKeyArray):
 
         study.optimize(
             lambda trial: kickoff_optuna(trial=trial, **trainer_kwargs),
-            n_trials=60,
+            n_trials=100,
             callbacks=[wandbc],
             gc_after_trial=True,
         )
