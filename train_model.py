@@ -48,7 +48,7 @@ def main(key: PRNGKeyArray):
 
     # ========= Training/Hypertuning =========
     init_hyperparams = [
-        {"lr": 5e-5, "drop_rate": 0.01, "weight_decay": 1e-4, "warmup_steps": 50, "beta_1": 0.9,  "beta_2": 0.98, "nesterov": True}
+        {"lr": 2e-5, "drop_rate": 0.01, "weight_decay": 1e-5, "warmup_steps": 50, "beta_1": 0.9,  "beta_2": 0.98, "nesterov": True}
     ]
 
     if args.tune_hyperparams:
@@ -72,9 +72,13 @@ def main(key: PRNGKeyArray):
                 seed=69,
                 consider_magic_clip=True,
                 consider_endpoints=True,
+                multivariate=True,
+                warn_independent_sampling=True,
                 n_startup_trials=5,
             ),
-            pruner=optuna.pruners.MedianPruner(n_startup_trials=5, n_min_trials=5),
+            pruner=optuna.pruners.PercentilePruner(
+                percentile=25.0, n_startup_trials=5, n_min_trials=5, n_warmup_steps=499
+            ),
         )
 
         wandb_kwargs = {

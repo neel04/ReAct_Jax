@@ -1,4 +1,4 @@
-from typing import Callable
+from typing import Callable, Optional
 
 import equinox as eqx
 import jax
@@ -8,11 +8,11 @@ from jmp import Policy
 
 from .blocks import AttentionBlock, LinearProj
 
-policy = Policy(compute_dtype=jnp.bfloat16, param_dtype=jnp.bfloat16, output_dtype=jnp.bfloat16)
+policy = Policy(compute_dtype=jnp.bfloat16, param_dtype=jnp.float32, output_dtype=jnp.bfloat16)
 
 # ruff: noqa: E402, E731
 
-class main_block(eqx.Module):
+class VanillaModule(eqx.Module):
     '''
     Main block of the GPT model where you just compute
     all the attention blocks sequentially
@@ -33,19 +33,21 @@ class main_block(eqx.Module):
         
         self.attention_blocks = eqx.filter(eqx.filter_vmap(make_block)(keys), eqx.is_array_like)
     
-    def __call__(self,
-                 input_arr: Array,
-                 pad_mask: Array,
-                 enable_dropout: bool,
-                 key: PRNGKeyArray) -> Array:
-        
-        enable_dropout: bool = True
-        key: PRNGKeyArray = key
+    def __call__(
+        self,
+        input_arr: Array,
+        pad_mask: Array,
+        enable_dropout: bool = True,
+        key: Optional[PRNGKeyArray] = None,
+    ) -> Array:
         
         input_arr, pad_mask = policy.cast_to_compute((input_arr, pad_mask))
         
-        dynamic_part, static_part = eqx.partition(self.attention_blocks, eqx.is_array_like,
-                                                  is_leaf=lambda x: isinstance(x, eqx.nn.Dropout))
+        dynamic_part, static_part = eqx.partition(
+            self.attention_blocks,
+            eqx.is_array_like,
+            is_leaf=lambda x: isinstance(x, eqx.nn.Dropout),
+        )
         
         def f(input_arr: Array, _dynamic_bl: PyTree):
             block = eqx.combine(_dynamic_bl, static_part)
@@ -63,10 +65,11 @@ class GPT(eqx.Module):
     '''
     __name__ = 'GPT'
     
-    embed_layer: eqx.Module
-    embed_ln: eqx.Module
-    main_block: eqx.Module
-    out_head: eqx.Module
+    embed_layer: eqx.nn.Embedding
+    embed_ln: eqx.nn.LayerNorm
+    unemb_ln: eqx.nn.LayerNorm
+    main_block: VanillaModule
+    out_head: LinearProj
     
     def __init__(self,
                  n_heads: int,
@@ -85,25 +88,11 @@ class GPT(eqx.Module):
         ) * ((2 / (5 * width)) ** 0.5)
 
         self.embed_ln = eqx.nn.LayerNorm(width)
+        self.unemb_ln = eqx.nn.LayerNorm(width)
         self.embed_layer = eqx.nn.Embedding(weight=embed_weights)
 
-        self.main_block = main_block(seqlen, width, n_heads, drop_rate, num_blocks, key=keys[1])
+        self.main_block = VanillaModule(seqlen, width, n_heads, drop_rate, num_blocks, key=keys[1])
         self.out_head = LinearProj(width, vocab_size, key=keys[2])
-    
-    def positional_encoding(self, seq_len: int, d_model: int):
-        '''
-        Generates the positional encoding for the input sequence
-        of shape (batch_size, max_seq_len, d_model) which would be added
-        to the sequence embeddings.
-        '''
-        position = jnp.arange(seq_len).reshape(-1, 1)
-        div_term = jnp.exp(jnp.arange(0, d_model, 2) * -(jnp.log(10000.0) / d_model))
-        pe = jnp.zeros((seq_len, d_model))
-
-        pe = pe.at[:, 0::2].set(jnp.sin(position * div_term))
-        pe = pe.at[:, 1::2].set(jnp.cos(position * div_term))
-
-        return pe
     
     @eqx.filter_jit
     def __call__(self,
@@ -111,8 +100,8 @@ class GPT(eqx.Module):
                  pad_mask: Array,
                  enable_dropout: bool,
                  key: PRNGKeyArray) -> Array:
-        
-        embed_fn: callable = lambda x: self.embed_ln(self.embed_layer(x))
+
+        embed_fn = lambda x: self.embed_ln(self.embed_layer(x))
 
         input_arr = jax.vmap(embed_fn)(input_arr) # (batch, seqlen, bottleneck)
 
@@ -120,4 +109,6 @@ class GPT(eqx.Module):
 
         output = self.main_block(input_arr, pad_mask, enable_dropout, key)
 
-        return policy.cast_to_output(self.out_head(output))
+        output = jax.vmap(self.unemb_ln)(output)
+
+        return self.out_head(output)

@@ -50,12 +50,14 @@ ce_loss.defvjp(_cross_entropy_with_logits_fwd, _cross_entropy_with_logits_bwd)
 @eqx.filter_jit
 def iters_fwd(model: React, input_arr: Array, pad_mask: Array, iters_to_do: int, key: PRNGKeyArray) -> Array:
     # Only n passes, but track the gradient
-    output, _ = model(input_arr,
-                      iters_to_do=iters_to_do,
-                      pad_mask=pad_mask,
-                      prev_thought=False,
-                      is_training=True,
-                      key=key)
+    output, _ = model(
+        input_arr,
+        iters_to_do=iters_to_do,
+        pad_mask=pad_mask,
+        prev_thought=False,
+        is_training=True,
+        key=key,
+    )
 
     return output
 
@@ -303,7 +305,7 @@ class Trainer:
 
         # compute loss
         y_one_hot = jax.nn.one_hot(label, num_classes=num_classes) # (batch_size, seqlen, num_classes)
-        loss = optax.softmax_cross_entropy(pred_y, y_one_hot).mean()
+        loss = ce_loss(pred_y, y_one_hot)[0].mean()
 
         # compute perplexity
         perplexity = jnp.exp(loss)

@@ -92,6 +92,7 @@ class React(eqx.Module):
     embed_ln: eqx.nn.LayerNorm
     main_block: RecurrentModule
     post_ln: eqx.nn.LayerNorm
+    unemb_ln: eqx.nn.LayerNorm
     out_head: LinearProj
 
     def __init__(
@@ -105,7 +106,7 @@ class React(eqx.Module):
         vocab_size: int,
         key: PRNGKeyArray,
     ):
-        key1, key2, key3, key4 = jax.random.split(key, 4)
+        key1, key2, key3 = jax.random.split(key, 3)
 
         self.max_iters = max_iters
         self.width = width
@@ -120,6 +121,7 @@ class React(eqx.Module):
         self.main_block = RecurrentModule(seqlen, drop_rate, n_heads, num_blocks, width, key=key2)
 
         self.post_ln = eqx.nn.LayerNorm(width)
+        self.unemb_ln = eqx.nn.LayerNorm(width)
         self.out_head = LinearProj(width, vocab_size, key=key3)
 
     @eqx.filter_jit
@@ -146,7 +148,7 @@ class React(eqx.Module):
             
             return latent, latent
 
-        output, hist = eqx.internal.scan(
+        output, _ = eqx.internal.scan(
             f=body_fun,
             init=interim_thought,
             xs=jnp.arange(iters_to_do),
@@ -180,5 +182,7 @@ class React(eqx.Module):
         input_arr, interim_thought = policy.cast_to_compute((input_arr, interim_thought))
 
         output = self.iterate_for_steps(interim_thought, input_arr, pad_mask, iters_to_do, is_training, key)  # (batch, seqlen, bottleneck)
+
+        output = jax.vmap(self.unemb_ln)(output)
 
         return self.out_head(output), output
