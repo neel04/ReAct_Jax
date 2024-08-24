@@ -44,9 +44,8 @@ sharding = jshard.PositionalSharding(devices)
 replicated = sharding.replicate()
 
 # Stable CE (w/ z-loss) from PaLM
-# ce_loss = cross_entropy_with_logits
-ce_loss = optax.losses.safe_softmax_cross_entropy
-# ce_loss.defvjp(_cross_entropy_with_logits_fwd, _cross_entropy_with_logits_bwd)
+ce_loss = cross_entropy_with_logits
+ce_loss.defvjp(_cross_entropy_with_logits_fwd, _cross_entropy_with_logits_bwd)
 
 @eqx.filter_jit
 def iters_fwd(model: React, input_arr: Array, pad_mask: Array, iters_to_do: int, key: PRNGKeyArray) -> Array:
@@ -67,9 +66,9 @@ def vanilla_fwd(model: GPT, input_arr: Array, pad_mask: Array, iters_to_do: int,
 @eqx.filter_jit
 def _compute_softmax_cross_entropy_loss(pred_y: Array, y_one_hot: Array) -> Array:
 
-    loss  = ce_loss(pred_y, y_one_hot) # (batch_size, seqlen)
+    loss, _  = ce_loss(pred_y, y_one_hot) # (batch_size, seqlen)
 
-    return loss.sum((-1, -2)).mean() # mean across batch
+    return loss.mean()
 
 @eqx.filter_jit
 def make_step(
@@ -89,13 +88,11 @@ def make_step(
     x, y, pad_mask = eqx.filter_shard((x, y, pad_mask), sharding)
 
     @eqx.filter_value_and_grad
-    def compute_loss(model: Union[React, GPT], static_model: PyTree, x: Array, y: Array, pad_mask: Array,
+    def compute_loss(model: Union[React, GPT], x: Array, y: Array, pad_mask: Array,
                     iters_to_do: int, num_classes: int, keys: PRNGKeyArray) -> Array:
         '''
-        Computes the loss of the model w.r.t the input. Is a closure for accessing static_model
+        Computes the loss of the model w.r.t the input.
         '''
-        model = eqx.combine(model, static_model)
-
         if model.__name__ == 'ReAct':
             forward = iters_fwd
         else:
@@ -107,11 +104,7 @@ def make_step(
 
         return loss
 
-    diff_model, static_model = eqx.partition(
-        model, filter_spec, is_leaf=lambda x: isinstance(x, eqx.nn.Dropout)
-    )
-
-    loss, grads = compute_loss(diff_model, static_model, x, y, pad_mask, iters_to_do, num_classes, keys)
+    loss, grads = compute_loss(model, x, y, pad_mask, iters_to_do, num_classes, keys)
     grads = policy.cast_to_compute(grads) # cast to bfloat16
     updates, opt_state = optim.update(grads, opt_state, model)
     model = eqx.apply_updates(model, updates)
