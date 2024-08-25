@@ -77,7 +77,7 @@ def main(key: PRNGKeyArray):
                 n_startup_trials=5,
             ),
             pruner=optuna.pruners.PercentilePruner(
-                percentile=25.0, n_startup_trials=5, n_min_trials=5, n_warmup_steps=499
+                percentile=25.0, n_startup_trials=5, n_min_trials=5, n_warmup_steps=750
             ),
         )
 
