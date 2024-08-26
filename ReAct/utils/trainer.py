@@ -398,9 +398,20 @@ class Trainer:
                     train_acc, train_loss, train_ppl = [], [], []
 
                     ## Validation
-                    (val_acc, val_loss, val_ppl), val_sample = self.evaluate_acc(model, self.args.baseline, self.valloader, self.args.max_iters, keys)
+                    (val_acc, val_loss, val_ppl), val_sample = self.evaluate_acc(
+                        model,
+                        self.args.baseline,
+                        self.valloader,
+                        self.args.max_iters,
+                        keys,
+                    )
 
-                    grads, updates = get_leaves(grads), get_leaves(updates)
+                    # Flattten the PyTrees
+                    grads, updates, weights = (
+                        get_leaves(grads),
+                        get_leaves(updates),
+                        get_leaves(model),
+                    )
 
                     self.wandb_logger.log(
                         {
@@ -412,10 +423,11 @@ class Trainer:
                             "Val/ppl": val_ppl,
                             "Gradients": wandb.Histogram(grads, num_bins=64),
                             "Updates": wandb.Histogram(updates, num_bins=64),
+                            "Weights": wandb.Histogram(weights, num_bins=64),
                         },
                         step=step,
                     )
-                    
+
                     # Report metrics to optuna
                     self.optuna_log(trial, (val_loss, step))
 
