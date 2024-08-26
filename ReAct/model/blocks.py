@@ -69,6 +69,8 @@ class AttentionBlock(eqx.Module):
     def _make_self_attention_mask(self, pad_mask: Int[Array, "seqlen"]) -> Array:
         mask = jnp.ones((self.seqlen, self.seqlen))
         mask = jnp.tril(mask)
+        mask = mask * pad_mask[:, None] * pad_mask[None, :]
+
         return mask
 
     def __call__(

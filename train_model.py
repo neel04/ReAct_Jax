@@ -21,14 +21,15 @@ from ReAct.utils.trainer import Trainer
 
 def main(key: PRNGKeyArray):
     args = parse_args()
+
     config.update('jax_threefry_partitionable', True) # for parallelization
+    config.update("jax_default_matmul_precision", "bfloat16")
     
     # Enter debugging mode, disabling JIT
     if args.debug:
         config.update("jax_debug_nans", True)
         config.update("jax_debug_infs", True)
-        config.update("jax_disable_jit", False)
-        config.update("jax_default_matmul_precision", "bfloat16")
+        config.update("jax_disable_jit", True)
 
     # ========= Data =========
     match args.dataset.lower():
@@ -48,7 +49,7 @@ def main(key: PRNGKeyArray):
 
     # ========= Training/Hypertuning =========
     init_hyperparams = [
-        {"lr": 2e-5, "drop_rate": 0.01, "weight_decay": 1e-5, "warmup_steps": 50, "beta_1": 0.9,  "beta_2": 0.98, "nesterov": True}
+        {"lr": 6e-4, "drop_rate": 0.01, "weight_decay": 1e-5, "warmup_steps": 200, "beta_1": 0.9,  "beta_2": 0.9, "nesterov": True}
     ]
 
     if args.tune_hyperparams:
