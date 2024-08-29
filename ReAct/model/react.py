@@ -56,8 +56,12 @@ class RecurrentModule(eqx.Module):
     ) -> Array:
 
         keys = jax.random.split(key, self.num_layers)
-        dynamic_part, static_part = eqx.partition(self.attention_layers, eqx.is_array_like,
-                                                  is_leaf=lambda x: isinstance(x, eqx.nn.Dropout))
+
+        dynamic_part, static_part = eqx.partition(
+            self.attention_layers,
+            eqx.is_array_like,
+            is_leaf=lambda x: isinstance(x, eqx.nn.Dropout),
+        )
 
         x, pad_mask = policy.cast_to_compute((x, pad_mask))  # (seqlen, bottleneck)
 

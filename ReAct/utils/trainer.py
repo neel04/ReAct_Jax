@@ -89,6 +89,8 @@ def make_step(
     model, opt_state = eqx.filter_shard((model, opt_state), replicated)
     x, y, pad_mask = eqx.filter_shard((x, y, pad_mask), sharding)
 
+    dynamic_model = eqx.filter(model, eqx.is_inexact_array)
+
     @eqx.filter_value_and_grad
     def compute_loss(model: Union[React, GPT], x: Array, y: Array, pad_mask: Array,
                     iters_to_do: int, num_classes: int, keys: PRNGKeyArray) -> Array:
@@ -108,7 +110,7 @@ def make_step(
 
     loss, grads = compute_loss(model, x, y, pad_mask, iters_to_do, num_classes, keys)
     grads = policy.cast_to_compute(grads) # cast to bfloat16
-    updates, opt_state = optim.update(grads, opt_state, model)
+    updates, opt_state = optim.update(grads, opt_state, dynamic_model)
     model = eqx.apply_updates(model, updates)
 
     # shard the outputs as well
@@ -175,7 +177,7 @@ class Trainer:
 
         # optimizer with weight decay
         optim = optax.chain(
-            optax.clip_by_global_norm(self.args.grad_clip),
+            optax.adaptive_grad_clip(self.args.grad_clip),
             optax.adamw(
                 learning_rate=self.schedule_fn,
                 weight_decay=self.args.weight_decay,
@@ -185,7 +187,7 @@ class Trainer:
             ),
         )
 
-        opt_state = optim.init(eqx.filter(model, eqx.is_array_like))
+        opt_state = optim.init(eqx.filter(model, eqx.is_array))
 
         return optim, opt_state, model
 
@@ -252,23 +254,34 @@ class Trainer:
 
         return opt_state, model
     
-    def resume_training(self, model: PyTree, opt_state: eqx.Module) -> tuple[PyTree, PyTree, int]:
-        # extracting out the paths
-        run_path, step = self.args.resume.split('+')
-        run_path, step = run_path.strip(), int(step.strip())
+    def resume_training(self, model: PyTree, opt_state: eqx.Module) -> tuple[PyTree, PyTree, int, int]:
+        if isinstance(self.args.resume, str):
+            run_path, epoch, step = self.args.resume.split("+")
+            run_path, epoch, step = run_path.strip(), int(epoch.strip()), int(step.strip())
 
-        base_path = "https://api.wandb.ai/files/"
-        model_path = f'{base_path}{run_path}/model_{step}.eqx'
+            base_path = "https://api.wandb.ai/files/"
+            model_path = f'{base_path}{run_path}/model_{epoch}_{step}.eqx'
 
-        # wget both files to ReAct/outputs/, if they those files don't exist
-        if not os.path.exists(f'{self.args.save_dir}model_{step}.eqx'):
-            os.system(f'wget -O {self.args.save_dir}model_{step}.eqx {model_path}')
+            # wget both files to ReAct/outputs/, if those files don't exist
+            if not os.path.exists(f'{self.args.save_dir}model_{epoch}_{step}.eqx'):
+                os.system(f'wget -O {self.args.save_dir}model_{epoch}_{step}.eqx {model_path}')
+        else:
+            # get the model with max step & epoch number living in `save_dir`
+            files = [
+                os.path.join(self.args.save_dir, file)
+                for file in os.listdir(self.args.save_dir)
+                if file.endswith("eqx")
+            ]
 
-        model, opt_state = load_eqx_obj(f'{self.args.save_dir}model_{step}.eqx', (model, opt_state))
+            get_info = lambda idx: os.path.basename(latest_file).split(".")[0].split("_")[idx]  # noqa: E731
+            latest_file = max(files, key=os.path.getctime)
+            step, epoch = int(get_info(-1)), int(get_info(-2))
 
-        self.my_logger.info(f'-------- Resuming training from step {step} ---------\n')
+        model, opt_state = load_eqx_obj( f"{self.args.save_dir}model_{epoch}_{step}.eqx", (model, opt_state) )
 
-        return model, opt_state, step
+        self.my_logger.info(f'\n-------- Resuming training from step {step} ---------\n')
+
+        return model, opt_state, step, epoch
 
     @eqx.filter_jit
     def compute_metrics(
@@ -326,16 +339,14 @@ class Trainer:
                 raise optuna.exceptions.TrialPruned()
 
     def train(self, trial: Optional[Any] = None) -> float:
-        step_done, val_loss = 0, 999.9
+        step_done, epoch_done, val_loss = 0, 0, 999.9
         
         opt_state, model = self.init_model(self.key)
         optim, _, _ = self.set_optim_and_scheduler(model)
         filter_spec = self.get_filterspec(model)
 
-        if self.args.resume:
-            model, opt_state, epoch_done = self.resume_training(model, opt_state)
-        else:
-            epoch_done = 0
+        if self.args.resume is not False:
+            model, opt_state, step_done, epoch_done = self.resume_training(model, opt_state)
 
         print(f'Model: {model}')
         

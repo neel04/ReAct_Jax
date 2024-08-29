@@ -49,14 +49,22 @@ def main(key: PRNGKeyArray):
 
     # ========= Training/Hypertuning =========
     init_hyperparams = [
-        {"lr": 6e-4, "drop_rate": 0.01, "weight_decay": 1e-5, "warmup_steps": 200, "beta_1": 0.9,  "beta_2": 0.9, "nesterov": True}
+        {
+            "lr": 6e-4,
+            "drop_rate": 0.01,
+            "weight_decay": 1e-5,
+            "warmup_steps": 200,
+            "beta_1": 0.9,
+            "beta_2": 0.9,
+            "nesterov": True,
+        }
     ]
 
     if args.tune_hyperparams:
         args.group = 'Sweeps_base' if args.baseline else f'Sweeps_{args.max_iters}i'
 
         jax.experimental.multihost_utils.sync_global_devices('Sync up all nodes.') # type: ignore
-        trainloader = train_dataset.create_dataloader(':10%')
+        trainloader = train_dataset.create_dataloader(':20%')
 
         jax.experimental.multihost_utils.sync_global_devices('Sync up all nodes.')  # type: ignore
         valloader = val_dataset.create_dataloader('-1%:')
@@ -148,17 +156,18 @@ def kickoff_optuna(trial, **trainer_kwargs):
     args = trainer_kwargs['args']
 
     args.epochs = 1
-    
+
     # Regularization hyperparams
-    args.lr = trial.suggest_float('lr', 1e-6, 1e-2)
-    args.drop_rate = trial.suggest_float('drop_rate', 0.0, 0.03, step=0.01)
-    args.weight_decay = trial.suggest_float('weight_decay', 1e-7, 1e-3)
-    args.warmup_steps = trial.suggest_int('warmup_steps', 0, 500, step=50)
+    args.lr = trial.suggest_float("lr", 1e-6, 1e-2)
+    args.drop_rate = trial.suggest_float("drop_rate", 0.0, 0.03, step=0.01)
+    args.weight_decay = trial.suggest_float("weight_decay", 1e-6, 1e-2)
+    args.warmup_steps = trial.suggest_int("warmup_steps", 0, 500, step=50)
 
     # Optimizer hyperparams
-    args.beta_1 = trial.suggest_categorical('beta_1', [0.8, 0.85, 0.9, 0.95, 0.98, 0.99])
-    args.beta_2 = trial.suggest_categorical('beta_2', [0.9, 0.95, 0.98, 0.99, 0.999])
-    args.nesterov = trial.suggest_categorical('nesterov', [True, False])
+    args.beta_1 = trial.suggest_categorical("beta_1", [0.8, 0.85, 0.9, 0.95, 0.98, 0.99])
+    args.beta_2 = trial.suggest_categorical("beta_2", [0.85, 0.9, 0.95, 0.98, 0.99, 0.999])
+    args.nesterov = trial.suggest_categorical("nesterov", [True, False])
+    args.grad_clip = trial.suggest_float("grad_clip", 0.5, 2.0, step=0.1)
 
     args = trainer_kwargs['args']
 

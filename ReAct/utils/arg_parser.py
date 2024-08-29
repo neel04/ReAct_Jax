@@ -83,9 +83,9 @@ def parse_args() -> Namespace:
     parser.add_argument('--checkpoint_path', type=str, default=None,
                         help='Path to checkpoint. Default: None')
     
-    parser.add_argument('--resume', type=str, default=None,
+    parser.add_argument('--resume', nargs='?', default=False,
                         help='Obtain WandB run_path from Overview tab and append the'
-                             'step number. \nExample arg: "neel/ReAct_Jax/6ktmhalt/ + 200"')
+                             'epoch & step number with a +. \nExample arg: "neel/ReAct_Jax/6ktmhalt/ + 0 + 200"')
     
     parser.add_argument('--baseline', action='store_true', default=False,
                         help='Train baseline vanilla transformer model. Default: False')
