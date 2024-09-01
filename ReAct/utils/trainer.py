@@ -478,40 +478,14 @@ class Trainer:
         metadata: dict,
         max_new_tokens: int,
         temperature: float = 0.5,
-        timeout: float = 120.0,  # Default timeout of 30 seconds
     ):
         decoded_input: str = self.decode_fn(input_arr)
         prompt = f"Prompt: {decoded_input}"
 
-        def generate_with_timeout(result_queue):
-            try:
-                inferencer = Inferencer(self.args, self.key)
-                model_gen = inferencer.sample_model(
-                    model, decoded_input, max_new_tokens, temperature
-                ).strip()
-                result_queue.put(model_gen)
-            except Exception as e:
-                result_queue.put(e)
-
-        result_queue = queue.Queue()
-        generation_thread = threading.Thread(target=generate_with_timeout, args=(result_queue,))
-        generation_thread.start()
-        generation_thread.join(timeout)
-
-        if generation_thread.is_alive():
-            self.my_logger.warning(f"Model generation timed out after {timeout} seconds")
-            # Attempt to terminate the thread (this is not guaranteed to work in Python)
-            generation_thread.join(0.1)
-            model_gen = "[Generation timed out]"
-        else:
-            try:
-                model_gen = result_queue.get_nowait()
-                if isinstance(model_gen, Exception):
-                    self.my_logger.error(f"Error during model generation: {str(model_gen)}")
-                    model_gen = "[Generation failed]"
-            except queue.Empty:
-                self.my_logger.error("Model generation failed without producing a result")
-                model_gen = "[Generation failed]"
+        inferencer = Inferencer(self.args, self.key)
+        model_gen = inferencer.sample_model(
+            model, decoded_input, max_new_tokens, temperature
+        ).strip()
 
         # Format the generated text
         model_gen = f"model generation: {model_gen}\n"
