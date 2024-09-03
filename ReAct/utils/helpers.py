@@ -6,6 +6,7 @@ from typing import Any, Callable, Optional, Tuple, Union
 import equinox as eqx
 import jax
 import jax.numpy as jnp
+from jax_array_info import sharding_info
 from jaxtyping import Array, PRNGKeyArray, PyTree
 
 from ReAct.model.baseline import GPT
@@ -113,6 +114,16 @@ def half_precision(model: eqx.Module) -> eqx.Module:
     return jax.tree_util.tree_map(
         lambda x: x.astype(jnp.bfloat16) if eqx.is_inexact_array(x) else x, model
     )
+
+def viz_obj(model: PyTree):
+    model = eqx.filter(model, eqx.is_array)
+
+    def viz_fn(leaf):
+        print(f"\n=== leaf: {leaf.shape} ===\n")
+        return sharding_info(leaf)
+
+    jax.tree_util.tree_map(viz_fn, model)
+
 
 def megatron_init(weight: Array, key: PRNGKeyArray) -> Array:
     """

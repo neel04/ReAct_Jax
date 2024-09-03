@@ -1,21 +1,17 @@
 import os
-import wandb
+from typing import Any, Callable, Optional, Tuple, Union
+
 import equinox as eqx
-import threading
-import queue
 import jax
-import jax.experimental.mesh_utils as mesh_utils
 import jax.numpy as jnp
-import jax.sharding as jshard
 import optax
 import optuna
-
-from typing import Any, Callable, Optional, Tuple, Union
 from jaxtyping import Array, Int, PRNGKeyArray, PyTree
 from jmp import Policy
 from torch.utils.data import DataLoader
 from tqdm.auto import tqdm
 
+import wandb
 from inferencer import Inferencer
 from ReAct.model.baseline import GPT
 from ReAct.model.react import React
@@ -33,15 +29,11 @@ from ReAct.utils.losses import (
     _cross_entropy_with_logits_fwd,
     cross_entropy_with_logits,
 )
+from ReAct.utils.sharding import get_strategy
 
 half, full = jnp.bfloat16, jnp.float32
 policy = Policy(compute_dtype=half, param_dtype=half, output_dtype=half)
-
-# Setting up distributed stuff
-num_devices = len(jax.devices())
-devices = mesh_utils.create_device_mesh((num_devices, 1))
-sharding = jshard.PositionalSharding(devices)
-replicated = sharding.replicate()
+strategy = get_strategy('megatron', 2)
 
 # Stable CE (w/ z-loss) from PaLM
 ce_loss = cross_entropy_with_logits
@@ -85,9 +77,8 @@ def make_step(
     num_classes: int,
     keys: PRNGKeyArray,
 ):
-    replicated = sharding.replicate()
-    model, opt_state = eqx.filter_shard((model, opt_state), replicated)
-    x, y, pad_mask = eqx.filter_shard((x, y, pad_mask), sharding)
+    x, y, pad_mask = strategy.shard_data((x, y, pad_mask))
+    model, opt_state = strategy.shard_model((model, opt_state))
 
     dynamic_model = eqx.filter(model, eqx.is_inexact_array)
 
@@ -114,7 +105,7 @@ def make_step(
     model = eqx.apply_updates(model, updates)
 
     # shard the outputs as well
-    model, opt_state = eqx.filter_shard((model, opt_state), replicated)
+    model, opt_state = strategy.shard_model((model, opt_state))
 
     return loss, model, opt_state, grads, updates
 
@@ -143,14 +134,14 @@ class Trainer:
 
     def evaluate_acc(self, model: Union[React, GPT], is_baseline: bool, loader: DataLoader, eval_iters: int, keys: PRNGKeyArray):
 
-        model = eqx.filter_shard(model, replicated)
+        model = strategy.shard_model((model))
 
         metrics_sum = jnp.zeros(3)  # [acc, loss, ppl]
         num_batches = len(loader)
 
         for _, batch in tqdm(enumerate(loader), total=len(loader), desc='Validating'):
             seq, label, pad_mask = jnp.asarray(batch['text'])
-            seq, label, pad_mask = eqx.filter_shard((seq, label, pad_mask), sharding)
+            seq, label, pad_mask = strategy.shard_data((seq, label, pad_mask))
             seq, label, pad_mask = policy.cast_to_compute((seq, label, pad_mask))
 
             acc, loss, ppl = self.compute_metrics(is_baseline, model, seq, label, pad_mask, eval_iters, self.args.num_classes, keys)
@@ -247,10 +238,10 @@ class Trainer:
             model = policy.cast_to_param(model)
 
         _, opt_state, model = self.set_optim_and_scheduler(model)
-        model = eqx.filter_shard(model, replicated)
-        
-        count_params(model) # prints to stdout
-        calc_performance_metrics(self.args, self.my_logger) # logs via logger
+
+        model, opt_state = strategy.shard_model((model, opt_state))
+        count_params(model)  # prints to stdout
+        calc_performance_metrics(self.args, self.my_logger)  # logs via logger
 
         return opt_state, model
     
@@ -299,10 +290,8 @@ class Trainer:
         Computes the accuracy, perplexity, loss of the model w.r.t batch
         '''
         # sharding everything
-        model = eqx.filter_shard(model, replicated)
-        input_arr, label, pad_mask = eqx.filter_shard(
-            (input_arr, label, pad_mask), sharding
-        )
+        model = strategy.shard_model(model)
+        input_arr, label, pad_mask = strategy.shard_data((input_arr, label, pad_mask))
 
         keys = keys[:input_arr.shape[0], ...] # take a batch_size sized slice of the keys
 
@@ -358,10 +347,10 @@ class Trainer:
             keys = jax.random.split(epoch_key, self.args.batch_size)
             
             for step, batch in tqdm(enumerate(self.trainloader), total=self.dataset_length, desc=f'Epoch {epoch}'):
-                step += step_done # for multiple epochs
+                step += step_done  # for multiple epochs
 
-                seq, label, pad_mask = jnp.asarray(batch['text'])
-                seq, label, pad_mask = eqx.filter_shard((seq, label,pad_mask), sharding)
+                seq, label, pad_mask = jnp.asarray(batch["text"])
+                seq, label, pad_mask = strategy.shard_data((seq, label, pad_mask))
                 seq, label, pad_mask = policy.cast_to_compute((seq, label, pad_mask))
 
                 loss, model, opt_state, grads, updates = make_step(

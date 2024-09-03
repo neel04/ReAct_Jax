@@ -20,6 +20,7 @@ RUN pip3 install -U -q jax[tpu] -f https://storage.googleapis.com/jax-releases/l
 RUN pip3 install -q transformers datasets scalax tokenizers icecream wandb einops torch tqdm jaxtyping optax optuna equinox rich
 RUN pip3 install -U tensorboard-plugin-profile optuna-integration plotly
 RUN pip3 install git+https://github.com/deepmind/jmp
+RUN pip3 install git+https://github.com/Findus23/jax-array-info.git
 
 WORKDIR /ReAct_Jax
 
