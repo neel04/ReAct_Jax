@@ -48,6 +48,10 @@ class Sharding(ABC):
     def shard_model(self, tree: PyTree) -> PyTree:
         ...
 
+    @abstractmethod
+    def shard_one_hot(self, tree: PyTree) -> PyTree:
+        ...
+
     def get_devices(self):
         return mesh_utils.create_device_mesh(
             (jax.device_count() // self.model_axis, self.model_axis),
@@ -93,6 +97,9 @@ class DDPSharding(Sharding):
 
     def shard_model(self, tree: PyTree) -> PyTree:
         return jtu.tree_map(self.ddp_sharding, tree)
+
+    def shard_one_hot(self, tree: PyTree) -> PyTree:
+        return tree
         
     def ddp_sharding(self, leaf: PyTree) -> PyTree:
         return leaf
@@ -110,6 +117,9 @@ class SimpleMPSharding(Sharding):
 
     def shard_model(self, tree: PyTree) -> PyTree:
         return jtu.tree_map(self.simple_sharding, tree)
+
+    def shard_one_hot(self, tree: PyTree) -> PyTree:
+        return self.shard(tree, NamedSharding(self.mesh, P('data', None, 'model')))
 
     def simple_sharding(self, leaf: PyTree) -> PyTree:
         if not eqx.is_array(leaf):
@@ -141,6 +151,9 @@ class MegatronSharding(Sharding):
         is_leaf = lambda x: isinstance(x, list)  # noqa: E731
         tree = self.add_indices_to_tree(tree, dims_to_count = 3)
         return jtu.tree_map(self.megatron_sharding, tree, is_leaf=is_leaf)
+
+    def shard_one_hot(self, tree: PyTree) -> PyTree:
+        return self.shard(tree, NamedSharding(self.mesh, P("data", None, "model")))
 
     def megatron_sharding(self, leaf_and_index: PyTree[Tuple]) -> PyTree:
         leaf, idx = leaf_and_index

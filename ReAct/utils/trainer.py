@@ -23,6 +23,7 @@ from ReAct.utils.helpers import (
     load_eqx_obj,
     megatron_init,
     save_eqx_obj,
+    viz_obj
 )
 from ReAct.utils.losses import (
     _cross_entropy_with_logits_bwd,
@@ -40,7 +41,12 @@ ce_loss = cross_entropy_with_logits
 ce_loss.defvjp(_cross_entropy_with_logits_fwd, _cross_entropy_with_logits_bwd)
 
 @eqx.filter_jit
-def iters_fwd(model: React, input_arr: Array, pad_mask: Array, iters_to_do: int, key: PRNGKeyArray) -> Array:
+def iters_fwd(
+    model: React, input_arr: Array, pad_mask: Array, iters_to_do: int, key: PRNGKeyArray
+) -> Array:
+    model = strategy.shard_model(model)
+    input_arr, pad_mask = strategy.shard_data((input_arr, pad_mask))
+
     # Only n passes, but track the gradient
     output, _ = model(
         input_arr,
@@ -54,12 +60,16 @@ def iters_fwd(model: React, input_arr: Array, pad_mask: Array, iters_to_do: int,
     return output
 
 @eqx.filter_jit
-def vanilla_fwd(model: GPT, input_arr: Array, pad_mask: Array, iters_to_do: int, key: PRNGKeyArray) -> Array:
+def vanilla_fwd(
+    model: GPT, input_arr: Array, pad_mask: Array, iters_to_do: int, key: PRNGKeyArray
+) -> Array:
+    model = strategy.shard_model(model)
+    input_arr, pad_mask = strategy.shard_data((input_arr, pad_mask))
+
     return model(input_arr, pad_mask, enable_dropout=True, key=key)
 
 @eqx.filter_jit
 def _compute_softmax_cross_entropy_loss(pred_y: Array, y_one_hot: Array) -> Array:
-
     loss, _  = ce_loss(pred_y, y_one_hot) # (batch_size, seqlen)
 
     return loss.mean()
@@ -77,10 +87,9 @@ def make_step(
     num_classes: int,
     keys: PRNGKeyArray,
 ):
-    x, y, pad_mask = strategy.shard_data((x, y, pad_mask))
-    model, opt_state = strategy.shard_model((model, opt_state))
-
     dynamic_model = eqx.filter(model, eqx.is_inexact_array)
+    x, y, pad_mask = strategy.shard_data((x, y, pad_mask))
+    dynamic_model, model, opt_state = strategy.shard_model((dynamic_model, model, opt_state))
 
     @eqx.filter_value_and_grad
     def compute_loss(model: Union[React, GPT], x: Array, y: Array, pad_mask: Array,
@@ -94,20 +103,22 @@ def make_step(
             forward = vanilla_fwd
 
         pred_y = jax.vmap(forward, in_axes=(None, 0, 0, None, 0))(model, x, pad_mask, iters_to_do, keys) # (batch_size, seqlen, num_classes)
-        y_one_hot = jax.nn.one_hot(y, num_classes=num_classes) # (batch_size, seqlen, num_classes)
+        y_one_hot = strategy.shard_one_hot(jax.nn.one_hot(y, num_classes=num_classes)) # (batch_size, seqlen, num_classes)
         loss = _compute_softmax_cross_entropy_loss(pred_y, y_one_hot)
 
         return loss
 
     loss, grads = compute_loss(model, x, y, pad_mask, iters_to_do, num_classes, keys)
-    grads = policy.cast_to_compute(grads) # cast to bfloat16
+    grads = strategy.shard_model(policy.cast_to_compute(grads))  # cast to bfloat16
     updates, opt_state = optim.update(grads, opt_state, dynamic_model)
+    updates = strategy.shard_model(updates)
     model = eqx.apply_updates(model, updates)
 
     # shard the outputs as well
     model, opt_state = strategy.shard_model((model, opt_state))
 
     return loss, model, opt_state, grads, updates
+
 
 class Trainer:
     def __init__(self,
