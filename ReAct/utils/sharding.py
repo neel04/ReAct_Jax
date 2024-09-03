@@ -49,8 +49,9 @@ class Sharding(ABC):
         ...
 
     def get_devices(self):
-        num_devices = len(jax.devices())
-        return mesh_utils.create_device_mesh((num_devices // self.model_axis, self.model_axis))
+        return mesh_utils.create_device_mesh(
+            (jax.device_count() // self.model_axis, self.model_axis)
+        )
 
     @staticmethod
     def shard(a: PyTree, _sharding: NamedSharding) -> PyTree:
