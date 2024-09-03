@@ -50,7 +50,8 @@ class Sharding(ABC):
 
     def get_devices(self):
         return mesh_utils.create_device_mesh(
-            (jax.device_count() // self.model_axis, self.model_axis)
+            (jax.device_count() // self.model_axis, self.model_axis),
+            allow_split_physical_axes=True,
         )
 
     @staticmethod
