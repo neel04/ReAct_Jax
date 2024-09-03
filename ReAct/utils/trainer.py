@@ -33,7 +33,7 @@ from ReAct.utils.sharding import get_strategy
 
 half, full = jnp.bfloat16, jnp.float32
 policy = Policy(compute_dtype=half, param_dtype=half, output_dtype=half)
-strategy = get_strategy('megatron', 2)
+strategy = get_strategy('megatron', 4)
 
 # Stable CE (w/ z-loss) from PaLM
 ce_loss = cross_entropy_with_logits
