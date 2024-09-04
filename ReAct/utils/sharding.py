@@ -99,10 +99,18 @@ class DDPSharding(Sharding):
         return jtu.tree_map(self.ddp_sharding, tree)
 
     def shard_one_hot(self, tree: PyTree) -> PyTree:
-        return tree
+        return self.shard_data(tree)
         
     def ddp_sharding(self, leaf: PyTree) -> PyTree:
-        return leaf
+        if not eqx.is_array(leaf):
+            return leaf
+
+        sharding_ = NamedSharding(self.mesh, P())
+
+        if leaf.ndim >= 1:
+            sharding_ = NamedSharding(self.mesh, P(None))
+
+        return self.shard(leaf, sharding_)
 
 class SimpleMPSharding(Sharding):
     def __init__(self, strategy: str, model_axis: int = 2) -> None:

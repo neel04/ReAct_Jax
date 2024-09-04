@@ -101,7 +101,8 @@ def make_step(
             forward = vanilla_fwd
 
         pred_y = jax.vmap(forward, in_axes=(None, 0, 0, None, 0))(model, x, pad_mask, iters_to_do, keys) # (batch_size, seqlen, num_classes)
-        y_one_hot = strategy.shard_one_hot(jax.nn.one_hot(y, num_classes=num_classes)) # (batch_size, seqlen, num_classes)
+        y_one_hot = jax.nn.one_hot(y, num_classes=num_classes) # (batch_size, seqlen, num_classes)
+        pred_y, y_one_hot = strategy.shard_one_hot((pred_y, y_one_hot))
         loss = _compute_softmax_cross_entropy_loss(pred_y, y_one_hot)
 
         return loss
@@ -146,7 +147,14 @@ class Trainer:
 
         self.my_logger.info(f"Using Args: {self.args}\n")
 
-    def evaluate_acc(self, model: Union[React, GPT], is_baseline: bool, loader: DataLoader, eval_iters: int, keys: PRNGKeyArray):
+    def evaluate_acc(
+        self,
+        model: Union[React, GPT],
+        is_baseline: bool,
+        loader: DataLoader,
+        eval_iters: int,
+        keys: PRNGKeyArray,
+    ):
 
         model = strategy.shard_model((model))
 
@@ -158,7 +166,7 @@ class Trainer:
             seq, label, pad_mask = strategy.shard_data((seq, label, pad_mask))
             seq, label, pad_mask = policy.cast_to_compute((seq, label, pad_mask))
 
-            acc, loss, ppl = self.compute_metrics(is_baseline, model, seq, label, pad_mask, eval_iters, self.args.num_classes, keys)
+            acc, loss, ppl = self.compute_metrics(model, is_baseline, seq, label, pad_mask, eval_iters, self.args.num_classes, keys)
 
             metrics_sum += jnp.array([acc, loss, ppl])
 
@@ -259,7 +267,9 @@ class Trainer:
 
         return opt_state, model
     
-    def resume_training(self, model: PyTree, opt_state: eqx.Module) -> tuple[PyTree, PyTree, int, int]:
+    def resume_training(
+        self, model: PyTree, opt_state: eqx.Module
+    ) -> tuple[PyTree, PyTree, int, int]:
         if isinstance(self.args.resume, str):
             run_path, epoch, step = self.args.resume.split("+")
             run_path, epoch, step = run_path.strip(), int(epoch.strip()), int(step.strip())
@@ -288,18 +298,18 @@ class Trainer:
 
         return model, opt_state, step, epoch
 
-    @eqx.filter_jit
+    @eqx.filter_jit(donate='all')
     def compute_metrics(
         self,
-        is_baseline: bool,
         model: eqx.Module,
+        is_baseline: bool,
         input_arr: Array,
         label: Array,
         pad_mask: Array,
         eval_iters: int,  # static
         num_classes: int,  # static
         keys: PRNGKeyArray,
-    )-> tuple[Array, Int[Array, "1"], Array]:
+    ) -> tuple[Array, Int[Array, "1"], Array]:
         '''
         Computes the accuracy, perplexity, loss of the model w.r.t batch
         '''
@@ -381,7 +391,7 @@ class Trainer:
                 )
 
                 if step % 100 == 0:
-                    accuracy, loss, perplexity = self.compute_metrics(self.args.baseline, model, seq, label, pad_mask, self.args.max_iters, self.args.num_classes, keys)
+                    accuracy, loss, perplexity = self.compute_metrics(model, self.args.baseline, seq, label, pad_mask, self.args.max_iters, self.args.num_classes, keys)
 
                     train_acc.append(accuracy)
                     train_loss.append(loss)
