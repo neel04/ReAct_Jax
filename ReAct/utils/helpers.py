@@ -1,7 +1,7 @@
 import math
 import os
 from logging import Logger
-from typing import Any, Callable, Optional, Tuple, Union
+from typing import Any, Callable, List, Optional, Tuple, Union
 
 import equinox as eqx
 import jax
@@ -123,6 +123,14 @@ def viz_obj(model: PyTree):
         return sharding_info(leaf)
 
     jax.tree_util.tree_map(viz_fn, model)
+
+def get_spec_on_larger_dim(leaf: PyTree, key: str = "model") -> List[str | None]:
+    p_spec = [
+        key if i == leaf.shape.index(max(leaf.shape)) else None
+        for i in range(len(leaf.shape))
+    ]
+
+    return p_spec
 
 
 def megatron_init(weight: Array, key: PRNGKeyArray) -> Array:

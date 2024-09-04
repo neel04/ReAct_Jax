@@ -11,7 +11,7 @@ from jax.sharding import PartitionSpec as P
 from jaxtyping import Array, PyTree
 
 from ReAct.model.baseline import GPT
-from ReAct.utils.helpers import viz_obj
+from ReAct.utils.helpers import get_spec_on_larger_dim, viz_obj
 
 
 def get_strategy(strategy: str, *args):
@@ -155,7 +155,7 @@ class MegatronSharding(Sharding):
     def shard_one_hot(self, tree: PyTree) -> PyTree:
         return self.shard(tree, NamedSharding(self.mesh, P("data", None, "model")))
 
-    def megatron_sharding(self, leaf_and_index: PyTree[Tuple]) -> PyTree:
+    def megatron_sharding(self, leaf_and_index: Tuple[PyTree, int]) -> PyTree:
         leaf, idx = leaf_and_index
 
         if not eqx.is_array(leaf):
@@ -172,15 +172,8 @@ class MegatronSharding(Sharding):
 
         # embedding and unembedding
         if leaf.ndim == 2:
-            if max(leaf.shape) >= 2**14:
-                # shard the bigger index
-                p_spec = [
-                    "model" if i == leaf.shape.index(max(leaf.shape)) else None
-                    for i in range(len(leaf.shape))
-                ]
-                sharding_ = NamedSharding(self.mesh, P(*p_spec))
-            else:
-                sharding_ = NamedSharding(self.mesh, P(None, 'model'))
+            p_spec = get_spec_on_larger_dim(leaf)
+            sharding_ = NamedSharding(self.mesh, P(*p_spec))
 
         if leaf.ndim == 3:
             if idx % 2 == 0:

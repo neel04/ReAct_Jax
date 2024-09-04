@@ -23,7 +23,6 @@ from ReAct.utils.helpers import (
     load_eqx_obj,
     megatron_init,
     save_eqx_obj,
-    viz_obj
 )
 from ReAct.utils.losses import (
     _cross_entropy_with_logits_bwd,
@@ -34,7 +33,6 @@ from ReAct.utils.sharding import get_strategy
 
 half, full = jnp.bfloat16, jnp.float32
 policy = Policy(compute_dtype=half, param_dtype=half, output_dtype=half)
-strategy = get_strategy('megatron', 4)
 
 # Stable CE (w/ z-loss) from PaLM
 ce_loss = cross_entropy_with_logits
@@ -121,13 +119,18 @@ def make_step(
 
 
 class Trainer:
-    def __init__(self,
-                 args: Any,
-                 logger: Tuple,
-                 loaders: Tuple,
-                 decode_fn: Callable,
-                 dataset_size: Optional[int] = None,
-                 key: PRNGKeyArray = jax.random.PRNGKey(69)):
+    def __init__(
+        self,
+        args: Any,
+        logger: Tuple,
+        loaders: Tuple,
+        decode_fn: Callable,
+        dataset_size: Optional[int] = None,
+        key: PRNGKeyArray = jax.random.PRNGKey(69),
+    ):
+
+        global strategy
+        strategy = get_strategy(args.strategy, args.model_axis)
 
         self.decode_fn = decode_fn # decode the ids to text
         self.text_data: list = []
