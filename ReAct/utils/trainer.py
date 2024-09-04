@@ -412,7 +412,7 @@ class Trainer:
                         self.my_logger.warning(f'\nLoss is NaN at step {step}')
                         return loss
 
-                if step % self.args.log_interval == 0 and len(train_acc) > 0:
+                if (step + 1) % self.args.log_interval == 0 and len(train_acc) > 0:
                     # Compute cumulatives
                     cum_train_acc = sum(train_acc) / len(train_acc)
                     cum_train_loss = sum(train_loss) / len(train_loss)
