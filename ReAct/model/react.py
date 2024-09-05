@@ -178,9 +178,9 @@ class React(eqx.Module):
         if prev_thought:
             assert isinstance(input_arr, tuple), 'prev_thought is True, but input_arr is not a tuple'
             input_arr, interim_thought = input_arr
-            input_arr: Array = jax.vmap(embed_fn)(input_arr) # (batch, seqlen, bottleneck)
+            input_arr = jax.vmap(embed_fn)(input_arr) # (batch, seqlen, bottleneck)
         else:
-            input_arr: Array = jax.vmap(embed_fn)(input_arr)  # (batch, seqlen, bottleneck)
+            input_arr = jax.vmap(embed_fn)(input_arr)  # (batch, seqlen, bottleneck)
             interim_thought = input_arr.copy()  # has to be a copy of the embedded + normed array
 
         input_arr, interim_thought = policy.cast_to_compute((input_arr, interim_thought))

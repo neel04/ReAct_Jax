@@ -174,3 +174,4 @@ cython_debug/
 *pyrightconfig.json
 *compilation_cache*
 typings/
+devlog.md

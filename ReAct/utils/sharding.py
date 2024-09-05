@@ -86,11 +86,7 @@ class DDPSharding(Sharding):
         self.mesh = self.get_mesh()
 
     def get_mesh(self) -> Mesh:
-        num_devices = len(jax.devices())
-        devices = mesh_utils.create_device_mesh((num_devices, 1))
-        mesh = Mesh(devices, axis_names=('data', None))
-
-        return mesh
+        return Mesh(self.get_devices().reshape(-1), axis_names=('data'))
 
     def shard_data(self, tree: PyTree | Array) -> PyTree | Array:
         return self.shard(tree, NamedSharding(self.mesh, P('data')))
@@ -106,9 +102,6 @@ class DDPSharding(Sharding):
             return leaf
 
         sharding_ = NamedSharding(self.mesh, P())
-
-        if leaf.ndim >= 1:
-            sharding_ = NamedSharding(self.mesh, P(None))
 
         return self.shard(leaf, sharding_)
 
@@ -175,8 +168,6 @@ class MegatronSharding(Sharding):
         if leaf.ndim == 1:
             if max(leaf.shape) >= 2**14:
                 sharding_ = NamedSharding(self.mesh, P('model'))
-            else:
-                sharding_ = NamedSharding(self.mesh, P(None))
 
         # embedding and unembedding
         if leaf.ndim == 2:
