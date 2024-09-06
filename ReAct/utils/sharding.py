@@ -86,7 +86,7 @@ class DDPSharding(Sharding):
         self.mesh = self.get_mesh()
 
     def get_mesh(self) -> Mesh:
-        return Mesh(self.get_devices().reshape(-1), axis_names=('data'))
+        return Mesh(self.get_devices(), axis_names=('data', 'model'))
 
     def shard_data(self, tree: PyTree | Array) -> PyTree | Array:
         return self.shard(tree, NamedSharding(self.mesh, P('data')))
@@ -95,7 +95,7 @@ class DDPSharding(Sharding):
         return jtu.tree_map(self.ddp_sharding, tree)
 
     def shard_one_hot(self, tree: PyTree) -> PyTree:
-        return self.shard_data(tree)
+        return tree
         
     def ddp_sharding(self, leaf: PyTree) -> PyTree:
         if not eqx.is_array(leaf):

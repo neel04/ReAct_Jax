@@ -23,6 +23,7 @@ from ReAct.utils.helpers import (
     load_eqx_obj,
     megatron_init,
     save_eqx_obj,
+    viz_obj
 )
 from ReAct.utils.losses import (
     _cross_entropy_with_logits_bwd,
