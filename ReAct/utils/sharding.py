@@ -88,7 +88,8 @@ class DDPSharding(Sharding):
         return eqx.filter_shard(tree, NamedSharding(self.mesh, P('data')))
 
     def shard_model(self, tree: PyTree) -> PyTree:
-        return jtu.tree_map(self.ddp_sharding, tree)
+        # return jtu.tree_map(self.ddp_sharding, tree)
+        return eqx.filter_shard(tree, NamedSharding(self.mesh, P()))
 
     def shard_one_hot(self, tree: PyTree) -> PyTree:
         return tree
