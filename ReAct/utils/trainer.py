@@ -23,7 +23,6 @@ from ReAct.utils.helpers import (
     load_eqx_obj,
     megatron_init,
     save_eqx_obj,
-    viz_obj
 )
 from ReAct.utils.losses import (
     _cross_entropy_with_logits_bwd,
@@ -262,7 +261,7 @@ class Trainer:
 
         _, opt_state, model = self.set_optim_and_scheduler(model)
 
-        model, opt_state = strategy.shard_model((model, opt_state))
+        model = strategy.shard_model(model)
         count_params(model)  # prints to stdout
         calc_performance_metrics(self.args, self.my_logger)  # logs via logger
 

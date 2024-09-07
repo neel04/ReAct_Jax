@@ -58,10 +58,6 @@ class Sharding(ABC):
             allow_split_physical_axes=True,
         )
 
-    @staticmethod
-    def shard(a: PyTree, _sharding: NamedSharding) -> PyTree:
-        return eqx.filter_shard(a,_sharding)
-    
     def add_indices_to_tree(self, tree: PyTree, start_index: int = 0, dims_to_count = 3):
         '''
         dims_to_count: leaves of what `.ndim` would be counted.
@@ -89,7 +85,7 @@ class DDPSharding(Sharding):
         return Mesh(self.get_devices(), axis_names=('data', 'model'))
 
     def shard_data(self, tree: PyTree | Array) -> PyTree | Array:
-        return self.shard(tree, NamedSharding(self.mesh, P('data')))
+        return eqx.filter_shard(tree, NamedSharding(self.mesh, P('data')))
 
     def shard_model(self, tree: PyTree) -> PyTree:
         return jtu.tree_map(self.ddp_sharding, tree)
@@ -103,7 +99,10 @@ class DDPSharding(Sharding):
 
         sharding_ = NamedSharding(self.mesh, P())
 
-        return self.shard(leaf, sharding_)
+        if leaf.ndim >= 2:
+            sharding_ = NamedSharding(self.mesh, P('model'))
+
+        return eqx.filter_shard(leaf, sharding_)
 
 class SimpleMPSharding(Sharding):
     def __init__(self, strategy: str, model_axis: int = 2) -> None:
@@ -114,13 +113,13 @@ class SimpleMPSharding(Sharding):
         return Mesh(self.get_devices(), axis_names=('data', 'model'))
 
     def shard_data(self, tree: PyTree | Array) -> PyTree | Array:
-        return self.shard(tree, NamedSharding(self.mesh, P('data')))
+        return eqx.filter_shard(tree, NamedSharding(self.mesh, P('data')))
 
     def shard_model(self, tree: PyTree) -> PyTree:
         return jtu.tree_map(self.simple_sharding, tree)
 
     def shard_one_hot(self, tree: PyTree) -> PyTree:
-        return self.shard(tree, NamedSharding(self.mesh, P('data', None, 'model')))
+        return eqx.filter_shard(tree, NamedSharding(self.mesh, P('data', None, 'model')))
 
     def simple_sharding(self, leaf: PyTree) -> PyTree:
         if not eqx.is_array(leaf):
@@ -134,7 +133,7 @@ class SimpleMPSharding(Sharding):
         if leaf.ndim >= 2:
             sharding_ = NamedSharding(self.mesh, P(None, "model"))
 
-        return self.shard(leaf, sharding_)
+        return eqx.filter_shard(leaf, sharding_)
 
 
 class MegatronSharding(Sharding):
@@ -146,7 +145,7 @@ class MegatronSharding(Sharding):
         return Mesh(self.get_devices(), axis_names=('data', 'model'))
 
     def shard_data(self, tree: PyTree | Array) -> PyTree | Array:
-        return self.shard(tree, NamedSharding(self.mesh, P('data')))
+        return eqx.filter_shard(tree, NamedSharding(self.mesh, P('data')))
     
     def shard_model(self, tree: PyTree) -> PyTree:
         is_leaf = lambda x: isinstance(x, list)  # noqa: E731
@@ -154,7 +153,7 @@ class MegatronSharding(Sharding):
         return jtu.tree_map(self.megatron_sharding, tree, is_leaf=is_leaf)
 
     def shard_one_hot(self, tree: PyTree) -> PyTree:
-        return self.shard(tree, NamedSharding(self.mesh, P("data", None, "model")))
+        return eqx.filter_shard(tree, NamedSharding(self.mesh, P("data", None, "model")))
 
     def megatron_sharding(self, leaf_and_index: Tuple[PyTree, int]) -> PyTree:
         leaf, idx = leaf_and_index
@@ -180,7 +179,7 @@ class MegatronSharding(Sharding):
             else:
                 sharding_ = NamedSharding(self.mesh, P(None, "model", None))
 
-        return self.shard(leaf, sharding_)
+        return eqx.filter_shard(leaf, sharding_)
 
 
 if __name__ == "__main__":
