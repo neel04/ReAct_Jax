@@ -42,9 +42,6 @@ ce_loss.defvjp(_cross_entropy_with_logits_fwd, _cross_entropy_with_logits_bwd)
 def iters_fwd(
     model: React, input_arr: Array, pad_mask: Array, iters_to_do: int, key: PRNGKeyArray
 ) -> Array:
-    model = strategy.shard_model(model)
-    input_arr, pad_mask = strategy.shard_data((input_arr, pad_mask))
-
     # Only n passes, but track the gradient
     output, _ = model(
         input_arr,
@@ -61,9 +58,6 @@ def iters_fwd(
 def vanilla_fwd(
     model: GPT, input_arr: Array, pad_mask: Array, iters_to_do: int, key: PRNGKeyArray
 ) -> Array:
-    model = strategy.shard_model(model)
-    input_arr, pad_mask = strategy.shard_data((input_arr, pad_mask))
-
     return model(input_arr, pad_mask, enable_dropout=True, key=key)
 
 @eqx.filter_jit
