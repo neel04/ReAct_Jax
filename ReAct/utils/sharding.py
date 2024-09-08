@@ -88,7 +88,8 @@ class DDPSharding(Sharding):
 
     def shard_data(self, tree: PyTree | Array) -> PyTree | Array:
         # return eqx.filter_shard(tree, NamedSharding(self.mesh, P('data')))
-        return eqx.filter_shard(tree, self.get_mesh())
+        mesh = Mesh(self.get_devices(), axis_names=P("data", "model"))
+        return eqx.filter_shard(tree, NamedSharding(mesh, P("data")))
 
     def shard_model(self, tree: PyTree) -> PyTree:
         # return jtu.tree_map(self.ddp_sharding, tree)
