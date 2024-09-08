@@ -66,8 +66,9 @@ def _compute_softmax_cross_entropy_loss(pred_y: Array, y_one_hot: Array) -> Arra
 
     return loss.mean()
 
-@eqx.filter_jit(donate='all')
+@eqx.filter_jit(donate='all-except-first')
 def make_step(
+    keys: PRNGKeyArray,
     model: Union[React, GPT],
     opt_state: PyTree,
     filter_spec: PyTree,
@@ -77,7 +78,6 @@ def make_step(
     iters_to_do: int,
     optim: Callable,
     num_classes: int,
-    keys: PRNGKeyArray,
 ):
     dynamic_model = eqx.filter(model, eqx.is_inexact_array)
     x, y, pad_mask = strategy.shard_data((x, y, pad_mask))
@@ -160,7 +160,7 @@ class Trainer:
             seq, label, pad_mask = strategy.shard_data((seq, label, pad_mask))
             seq, label, pad_mask = policy.cast_to_compute((seq, label, pad_mask))
 
-            acc, loss, ppl = self.compute_metrics(model, is_baseline, seq, label, pad_mask, eval_iters, self.args.num_classes, keys)
+            acc, loss, ppl = self.compute_metrics(keys, model, is_baseline, seq, label, pad_mask, eval_iters, self.args.num_classes)
 
             metrics_sum += jnp.array([acc, loss, ppl])
 
@@ -292,21 +292,21 @@ class Trainer:
 
         return model, opt_state, step, epoch
 
-    @eqx.filter_jit(donate='all')
+    @eqx.filter_jit(donate="all-except-first")
     def compute_metrics(
         self,
+        keys: PRNGKeyArray,
         model: eqx.Module,
         is_baseline: bool,
         input_arr: Array,
         label: Array,
         pad_mask: Array,
-        eval_iters: int,  # static
-        num_classes: int,  # static
-        keys: PRNGKeyArray,
+        eval_iters: int,
+        num_classes: int,
     ) -> tuple[Array, Int[Array, "1"], Array]:
-        '''
+        """
         Computes the accuracy, perplexity, loss of the model w.r.t batch
-        '''
+        """
         # sharding everything
         model = strategy.shard_model(model)
         input_arr, label, pad_mask = strategy.shard_data((input_arr, label, pad_mask))
@@ -372,6 +372,7 @@ class Trainer:
                 seq, label, pad_mask = policy.cast_to_compute((seq, label, pad_mask))
 
                 loss, model, opt_state, grads, updates = make_step(
+                    keys=keys,
                     model=model,
                     opt_state=opt_state,
                     filter_spec=filter_spec,
@@ -381,11 +382,10 @@ class Trainer:
                     iters_to_do=self.args.max_iters,
                     optim=optim,
                     num_classes=self.args.num_classes,
-                    keys=keys,
                 )
 
                 if step % 100 == 0:
-                    accuracy, loss, perplexity = self.compute_metrics(model, self.args.baseline, seq, label, pad_mask, self.args.max_iters, self.args.num_classes, keys)
+                    accuracy, loss, perplexity = self.compute_metrics(keys, model, self.args.baseline, seq, label, pad_mask, self.args.max_iters, self.args.num_classes)
 
                     train_acc.append(accuracy)
                     train_loss.append(loss)
