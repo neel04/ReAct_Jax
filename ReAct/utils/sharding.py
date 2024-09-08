@@ -82,19 +82,15 @@ class DDPSharding(Sharding):
         self.mesh = self.get_mesh()
 
     def get_mesh(self):
-        # return Mesh(self.get_devices(), axis_names=('data', 'model'))
-        devices = mesh_utils.create_device_mesh((jax.device_count(), 1))
-        return jax.sharding.PositionalSharding(devices)
+        return Mesh(self.get_devices(), axis_names=('data', 'model'))
 
     def shard_data(self, tree: PyTree | Array) -> PyTree | Array:
         # return eqx.filter_shard(tree, NamedSharding(self.mesh, P('data')))
-        mesh = Mesh(self.get_devices(), axis_names=P("data", "model"))
-        return eqx.filter_shard(tree, NamedSharding(mesh, P("data")))
+        return eqx.filter_shard(tree, NamedSharding(self.get_mesh(), P("data")))
 
     def shard_model(self, tree: PyTree) -> PyTree:
         # return jtu.tree_map(self.ddp_sharding, tree)
-        mesh = Mesh(self.get_devices(), axis_names=P("data", "model"))
-        return eqx.filter_shard(tree, NamedSharding(mesh, P()))
+        return eqx.filter_shard(tree, NamedSharding(self.get_mesh(), P()))
 
     def shard_one_hot(self, tree: PyTree) -> PyTree:
         return tree
