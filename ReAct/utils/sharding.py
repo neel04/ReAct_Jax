@@ -89,7 +89,6 @@ class DDPSharding(Sharding):
 
     def shard_model(self, tree: PyTree) -> PyTree:
         return jtu.tree_map(self.ddp_sharding, tree)
-        # return eqx.filter_shard(tree, NamedSharding(self.mesh, P()))
 
     def shard_one_hot(self, tree: PyTree) -> PyTree:
         return tree
@@ -111,7 +110,7 @@ class SimpleMPSharding(Sharding):
         return Mesh(self.get_devices(), axis_names=('data', 'model'))
 
     def shard_data(self, tree: PyTree | Array) -> PyTree | Array:
-        return eqx.filter_shard(tree, NamedSharding(self.mesh, P('data')))
+        return eqx.filter_shard(tree, NamedSharding(self.mesh, P("data")))
 
     def shard_model(self, tree: PyTree) -> PyTree:
         return jtu.tree_map(self.simple_sharding, tree)
@@ -125,11 +124,11 @@ class SimpleMPSharding(Sharding):
 
         sharding_ = NamedSharding(self.mesh, P())
 
-        if leaf.ndim == 1:
-            sharding_ = NamedSharding(self.mesh, P("model"))
+        # if leaf.ndim == 1:
+        #     sharding_ = NamedSharding(self.mesh, P("model"))
 
-        if leaf.ndim >= 2:
-            sharding_ = NamedSharding(self.mesh, P(None, "model"))
+        # if leaf.ndim >= 2:
+        #     sharding_ = NamedSharding(self.mesh, P(None, "model"))
 
         return eqx.filter_shard(leaf, sharding_)
 
