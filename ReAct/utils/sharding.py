@@ -124,11 +124,11 @@ class SimpleMPSharding(Sharding):
 
         sharding_ = NamedSharding(self.mesh, P())
 
-        if leaf.ndim == 1:
-            sharding_ = NamedSharding(self.mesh, P("model"))
+        # if leaf.ndim == 1:
+        #     sharding_ = NamedSharding(self.mesh, P("model"))
 
-        # if leaf.ndim >= 2:
-        #     sharding_ = NamedSharding(self.mesh, P(None, "model"))
+        if leaf.ndim >= 2:
+            sharding_ = NamedSharding(self.mesh, P(None, "model"))
 
         return eqx.filter_shard(leaf, sharding_)
 
