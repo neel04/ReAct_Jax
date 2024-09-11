@@ -122,7 +122,7 @@ class SimpleMPSharding(Sharding):
         if not eqx.is_array(leaf):
             return leaf
 
-        sharding_ = NamedSharding(self.mesh, P())
+        # sharding_ = NamedSharding(self.mesh, P())
 
         # if leaf.ndim == 1:
         #     sharding_ = NamedSharding(self.mesh, P("model"))
