@@ -156,7 +156,8 @@ class React(eqx.Module):
             f=body_fun,
             init=interim_thought,
             xs=jnp.arange(iters_to_do),
-            kind="checkpointed",
+            # kind="checkpointed",
+            kind="lax",
             checkpoints=iters_to_do,
         )
 
