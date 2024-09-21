@@ -75,3 +75,7 @@ If Docker is unresponsive, just restart docker service:
 ```bash
 gcloud compute tpus tpu-vm ssh --zone "us-central2-b" $INSTANCE_NAME --worker 'all' --project "react-jax" --command 'sudo systemctl restart docker'
 ```
+
+# Credits
+
+Google AI/ML Developer Programs team supported this work by providing Google Cloud Credits.
