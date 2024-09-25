@@ -30,9 +30,11 @@ class VanillaModule(eqx.Module):
         
         keys = jax.random.split(key, num_blocks)
         make_block: Callable = lambda k: AttentionBlock(seqlen, n_heads, drop_rate, bottleneck, k)  # noqa: E731
-        
-        self.attention_blocks = eqx.filter(eqx.filter_vmap(make_block)(keys), eqx.is_array_like)
-    
+
+        self.attention_blocks = [
+            eqx.filter(make_block(k), eqx.is_array_like) for k in keys
+        ]
+
     def __call__(
         self,
         input_arr: Array,
@@ -43,19 +45,17 @@ class VanillaModule(eqx.Module):
         
         input_arr, pad_mask = policy.cast_to_compute((input_arr, pad_mask))
         
-        dynamic_part, static_part = eqx.partition(
-            self.attention_blocks,
-            eqx.is_array_like,
-            is_leaf=lambda x: isinstance(x, eqx.nn.Dropout),
-        )
-        
-        def f(input_arr: Array, _dynamic_bl: PyTree):
-            block = eqx.combine(_dynamic_bl, static_part)
+        def f(input_arr: Array, block: PyTree):
+            input_arr = policy.cast_to_compute(input_arr)
+
             output = block(input_arr, input_arr, pad_mask, enable_dropout, key)
 
             return policy.cast_to_output(output), None
 
-        out, _ = jax.lax.scan(f=f, init=input_arr, xs=dynamic_part, unroll=2)
+        out = input_arr
+
+        for block in self.attention_blocks:
+            out, _ = f(out, block)
         
         return policy.cast_to_output(out)
         

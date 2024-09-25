@@ -1,6 +1,7 @@
 import os
 from abc import ABC, abstractmethod
-from typing import List, Tuple
+from dataclasses import fields
+from typing import Annotated, Any, List, Tuple
 
 import equinox as eqx
 import jax
@@ -58,7 +59,13 @@ class Sharding(ABC):
             allow_split_physical_axes=True,
         )
 
-    def add_indices_to_tree(self, tree: PyTree, start_index: int = 0, dims_to_count = 3):
+    @staticmethod
+    def unwrap_struct(tgt: PyTree[Annotated[str, "DataclassInstance"]]) -> Tuple[Any]:
+        get_val = lambda x: getattr(x, fields(x)[0].name)  # noqa: E731
+        return tuple(map(get_val, tgt))
+
+    @staticmethod
+    def add_indices_to_tree(tree: PyTree, start_index: int = 0, dims_to_count: int  = 3):
         '''
         dims_to_count: leaves of what `.ndim` would be counted.
         '''
@@ -88,12 +95,12 @@ class DDPSharding(Sharding):
         return eqx.filter_shard(tree, NamedSharding(self.mesh, P("data")))
 
     def shard_model(self, tree: PyTree) -> PyTree:
-        return jtu.tree_map(self.ddp_sharding, tree)
+        return jtu.tree_map_with_path(self.ddp_sharding, tree)
 
     def shard_one_hot(self, tree: PyTree) -> PyTree:
         return tree
         
-    def ddp_sharding(self, leaf: PyTree) -> PyTree:
+    def ddp_sharding(self, kp: Annotated[str, "DataclassInstance"], leaf: PyTree) -> PyTree:
         if not eqx.is_array(leaf):
             return leaf
 
@@ -113,19 +120,19 @@ class SimpleMPSharding(Sharding):
         return eqx.filter_shard(tree, NamedSharding(self.mesh, P("data")))
 
     def shard_model(self, tree: PyTree) -> PyTree:
-        return jtu.tree_map(self.simple_sharding, tree)
+        return jtu.tree_map_with_path(self.simple_sharding, tree)
 
     def shard_one_hot(self, tree: PyTree) -> PyTree:
         return eqx.filter_shard(tree, NamedSharding(self.mesh, P('data', None, 'model')))
 
-    def simple_sharding(self, leaf: PyTree) -> PyTree:
+    def simple_sharding(self, kp: Annotated[str, "DataclassInstance"], leaf: PyTree) -> PyTree:
         if not eqx.is_array(leaf):
             return leaf
 
-        # sharding_ = NamedSharding(self.mesh, P())
+        sharding_ = NamedSharding(self.mesh, P())
 
-        # if leaf.ndim == 1:
-        #     sharding_ = NamedSharding(self.mesh, P("model"))
+        if leaf.ndim == 1:
+            sharding_ = NamedSharding(self.mesh, P("model"))
 
         if leaf.ndim == 2:
             sharding_ = NamedSharding(self.mesh, P(None, "model"))
@@ -146,43 +153,30 @@ class MegatronSharding(Sharding):
         return eqx.filter_shard(tree, NamedSharding(self.mesh, P('data')))
     
     def shard_model(self, tree: PyTree) -> PyTree:
-        is_leaf = lambda x: isinstance(x, list)  # noqa: E731
-        tree = self.add_indices_to_tree(tree, dims_to_count = 3)
-        return jtu.tree_map(self.megatron_sharding, tree, is_leaf=is_leaf)
+        return jtu.tree_map_with_path(self.megatron_sharding, tree)
 
     def shard_one_hot(self, tree: PyTree) -> PyTree:
-        return eqx.filter_shard(tree, NamedSharding(self.mesh, P("data", None, "model")))
+        return tree
 
-    def megatron_sharding(self, leaf_and_index: Tuple[PyTree, int]) -> PyTree:
-        leaf, idx = leaf_and_index
+    def megatron_sharding(self, kp: Annotated[str, "DataclassInstance"], leaf: PyTree) -> PyTree:
+        sharding_ = NamedSharding(self.mesh, P())
 
         if not eqx.is_array(leaf):
             return leaf
 
-        sharding_ = NamedSharding(self.mesh, P())
-
-        # LN params and embedding 1Ds
-        if leaf.ndim == 1:
-            if max(leaf.shape) >= 2**14:
-                sharding_ = NamedSharding(self.mesh, P('model'))
-
-        # embedding and unembedding
         if leaf.ndim == 2:
             p_spec = get_spec_on_larger_dim(leaf)
             sharding_ = NamedSharding(self.mesh, P(*p_spec))
-
-        if leaf.ndim == 3:
-            if idx % 2 == 0:
-                sharding_ = NamedSharding(self.mesh, P(None, None, "model"))
-            else:
-                sharding_ = NamedSharding(self.mesh, P(None, "model", None))
 
         return eqx.filter_shard(leaf, sharding_)
 
 
 if __name__ == "__main__":
+    # import sys
+    # sys.path.append('.')
+
     os.environ["XLA_FLAGS"] = "--xla_force_host_platform_device_count=8"
-    assert len(jax.devices()) == 8, "Hosts not correctly spoofed"
+    assert jax.device_count() == 8, "Hosts not correctly spoofed"
 
     key = jax.random.PRNGKey(0)
     BSZ, SEQLEN, WIDTH = 32, 256, 64
@@ -198,3 +192,5 @@ if __name__ == "__main__":
 
     print('\n ++++++++ Sharded data: +++++++++++\n')
     jax.debug.visualize_array_sharding(data)
+
+    print(model)
