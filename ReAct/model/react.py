@@ -1,4 +1,4 @@
-from typing import Tuple
+from typing import List, Tuple
 
 import equinox as eqx
 import jax
@@ -18,7 +18,7 @@ class RecurrentModule(eqx.Module):
     '''
     num_layers: int = eqx.field(static=True)
 
-    attention_layers: Array
+    attention_layers: List[PyTree]
     post_ln: eqx.nn.LayerNorm
     reshape_gate: LinearProj
 
@@ -33,15 +33,15 @@ class RecurrentModule(eqx.Module):
     ):
         keys = jax.random.split(key, num_layers)
 
-        make_attn = lambda k: self.make_layer(
-            seqlen, n_heads, drop_rate, bottleneck, k
-        )
+        make_attn = lambda k: self.make_layer(seqlen, n_heads, drop_rate, bottleneck, k)
 
         self.num_layers = num_layers
         self.post_ln = eqx.nn.LayerNorm(bottleneck)
         self.reshape_gate = LinearProj(bottleneck * 2, bottleneck, key=keys[0])
 
-        self.attention_layers = eqx.filter(eqx.filter_vmap(make_attn)(keys), eqx.is_array_like)
+        self.attention_layers = [
+            eqx.filter(make_attn(k), eqx.is_array_like) for k in keys
+        ]
 
     @staticmethod
     def make_layer(seqlen: int, n_heads: int, drop_rate: float, bottleneck: int, key: PRNGKeyArray) -> AttentionBlock:
@@ -57,31 +57,28 @@ class RecurrentModule(eqx.Module):
 
         keys = jax.random.split(key, self.num_layers)
 
-        dynamic_part, static_part = eqx.partition(
-            self.attention_layers,
-            eqx.is_array_like,
-            is_leaf=lambda x: isinstance(x, eqx.nn.Dropout),
-        )
-
         x, pad_mask = policy.cast_to_compute((x, pad_mask))  # (seqlen, bottleneck)
 
-        x = self.reshape_gate(x) # downsample the concatenated array
-        
-        def f(input_tup: Tuple[Array, int], _dynamic_bl: PyTree) -> Tuple[Tuple[Array, int], Array]:
-            x, idx = input_tup
-            layer = eqx.combine(_dynamic_bl, static_part) # reconstruct the layer
+        x = self.reshape_gate(x)  # downsample the concatenated array
 
-            x = layer(x, x, pad_mask, enable_dropout, keys[idx])
+        def f(input_tup: Tuple[Array, int], block: PyTree) -> Tuple[Tuple[Array, int], Array]:
+            x, idx = input_tup
+
+            x = block(x, x, pad_mask, enable_dropout, keys[idx])
 
             x = jax.vmap(self.post_ln)(x)
 
-            x = policy.cast_to_compute(x) # casting to bf16
-            
+            x = policy.cast_to_compute(x)  # casting to bf16
+
             return (x, idx + 1), x
 
-        out, _ = jax.lax.scan(f=f, init=(x, 0), xs=dynamic_part, unroll=True)
+        out = (x, 0)
+
+        for block in self.attention_layers:
+            out, _ = f(out, block)
 
         return policy.cast_to_output(out[0])
+
 
 class React(eqx.Module):
     '''

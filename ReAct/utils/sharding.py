@@ -18,40 +18,36 @@ from ReAct.utils.helpers import get_spec_on_larger_dim, viz_obj
 def get_strategy(strategy: str, *args):
     strategy = strategy.strip().lower()
     match strategy:
-        case 'ddp':
+        case "ddp":
             strat = DDPSharding(*args)
-    
-        case 'simple mp':
+
+        case "simple mp":
             strat = SimpleMPSharding(*args)
 
-        case 'megatron':
+        case "megatron":
             strat = MegatronSharding(*args)
 
         case _:
-            raise NotImplementedError(f'Strategy {strategy} does not exist.')
+            raise NotImplementedError(f"Strategy {strategy} does not exist.")
 
     return strat
 
-        
+
 class Sharding(ABC):
     def __init__(self, model_axis: int = 1) -> None:
         self.model_axis = model_axis
 
     @abstractmethod
-    def get_mesh(self) -> Mesh:
-        ...
+    def get_mesh(self) -> Mesh: ...
 
     @abstractmethod
-    def shard_data(self, tree: PyTree) -> PyTree:
-        ...
+    def shard_data(self, tree: PyTree) -> PyTree: ...
 
     @abstractmethod
-    def shard_model(self, tree: PyTree) -> PyTree:
-        ...
+    def shard_model(self, tree: PyTree) -> PyTree: ...
 
     @abstractmethod
-    def shard_one_hot(self, tree: PyTree) -> PyTree:
-        ...
+    def shard_one_hot(self, tree: PyTree) -> PyTree: ...
 
     def get_devices(self):
         return mesh_utils.create_device_mesh(
@@ -65,10 +61,11 @@ class Sharding(ABC):
         return tuple(map(get_val, tgt))
 
     @staticmethod
-    def add_indices_to_tree(tree: PyTree, start_index: int = 0, dims_to_count: int  = 3):
-        '''
+    def add_indices_to_tree(tree: PyTree, start_index: int = 0, dims_to_count: int = 3):
+        """
         dims_to_count: leaves of what `.ndim` would be counted.
-        '''
+        """
+
         def add_index(leaf, index):
             return [leaf, index[0]]
 
@@ -80,8 +77,11 @@ class Sharding(ABC):
             start_index += 1 if leaf.ndim >= 3 else 0
             return [start_index - 1]
 
-        indexed_tree = jtu.tree_map(add_index, tree, jtu.tree_map(index_incrementer, tree))
+        indexed_tree = jtu.tree_map(
+            add_index, tree, jtu.tree_map(index_incrementer, tree)
+        )
         return indexed_tree
+
 
 class DDPSharding(Sharding):
     def __init__(self, model_axis: int = 1) -> None:
@@ -89,7 +89,7 @@ class DDPSharding(Sharding):
         self.mesh = self.get_mesh()
 
     def get_mesh(self):
-        return Mesh(self.get_devices(), axis_names=('data', 'model'))
+        return Mesh(self.get_devices(), axis_names=("data", "model"))
 
     def shard_data(self, tree: PyTree | Array) -> PyTree | Array:
         return eqx.filter_shard(tree, NamedSharding(self.mesh, P("data")))
@@ -99,8 +99,10 @@ class DDPSharding(Sharding):
 
     def shard_one_hot(self, tree: PyTree) -> PyTree:
         return tree
-        
-    def ddp_sharding(self, kp: Annotated[str, "DataclassInstance"], leaf: PyTree) -> PyTree:
+
+    def ddp_sharding(
+        self, kp: Annotated[str, "DataclassInstance"], leaf: PyTree
+    ) -> PyTree:
         if not eqx.is_array(leaf):
             return leaf
 
@@ -108,13 +110,14 @@ class DDPSharding(Sharding):
 
         return eqx.filter_shard(leaf, sharding_)
 
+
 class SimpleMPSharding(Sharding):
     def __init__(self, strategy: str, model_axis: int = 2) -> None:
         super().__init__(model_axis)
         self.mesh = self.get_mesh()
-    
+
     def get_mesh(self) -> Mesh:
-        return Mesh(self.get_devices(), axis_names=('data', 'model'))
+        return Mesh(self.get_devices(), axis_names=("data", "model"))
 
     def shard_data(self, tree: PyTree | Array) -> PyTree | Array:
         return eqx.filter_shard(tree, NamedSharding(self.mesh, P("data")))
@@ -123,9 +126,11 @@ class SimpleMPSharding(Sharding):
         return jtu.tree_map_with_path(self.simple_sharding, tree)
 
     def shard_one_hot(self, tree: PyTree) -> PyTree:
-        return eqx.filter_shard(tree, NamedSharding(self.mesh, P('data', None, 'model')))
+        return tree
 
-    def simple_sharding(self, kp: Annotated[str, "DataclassInstance"], leaf: PyTree) -> PyTree:
+    def simple_sharding(
+        self, kp: Annotated[str, "DataclassInstance"], leaf: PyTree
+    ) -> PyTree:
         if not eqx.is_array(leaf):
             return leaf
 
@@ -147,18 +152,20 @@ class MegatronSharding(Sharding):
         self.mesh = self.get_mesh()
 
     def get_mesh(self) -> Mesh:
-        return Mesh(self.get_devices(), axis_names=('data', 'model'))
+        return Mesh(self.get_devices(), axis_names=("data", "model"))
 
     def shard_data(self, tree: PyTree | Array) -> PyTree | Array:
-        return eqx.filter_shard(tree, NamedSharding(self.mesh, P('data')))
-    
+        return eqx.filter_shard(tree, NamedSharding(self.mesh, P("data")))
+
     def shard_model(self, tree: PyTree) -> PyTree:
         return jtu.tree_map_with_path(self.megatron_sharding, tree)
 
     def shard_one_hot(self, tree: PyTree) -> PyTree:
         return tree
 
-    def megatron_sharding(self, kp: Annotated[str, "DataclassInstance"], leaf: PyTree) -> PyTree:
+    def megatron_sharding(
+        self, kp: Annotated[str, "DataclassInstance"], leaf: PyTree
+    ) -> PyTree:
         sharding_ = NamedSharding(self.mesh, P())
 
         if not eqx.is_array(leaf):
@@ -182,7 +189,7 @@ if __name__ == "__main__":
     BSZ, SEQLEN, WIDTH = 32, 256, 64
 
     model = GPT(4, SEQLEN, 2, WIDTH, 0.01, 50304, key=key)
-    strategy= get_strategy('megatron', 1)
+    strategy = get_strategy("megatron", 1)
 
     data = jax.numpy.ones((BSZ, SEQLEN))
     data = strategy.shard_data(tree=data)
@@ -190,7 +197,7 @@ if __name__ == "__main__":
 
     viz_obj(sharded_model)
 
-    print('\n ++++++++ Sharded data: +++++++++++\n')
+    print("\n ++++++++ Sharded data: +++++++++++\n")
     jax.debug.visualize_array_sharding(data)
 
     print(model)
