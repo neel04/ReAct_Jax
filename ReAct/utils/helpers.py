@@ -1,7 +1,7 @@
 import math
 import os
 from logging import Logger
-from typing import Any, Callable, List, Optional, Tuple, Union
+from typing import Annotated, Any, Callable, List, Optional, Tuple, Union
 
 import equinox as eqx
 import jax
@@ -9,9 +9,6 @@ import jax.numpy as jnp
 from jax_array_info import sharding_info
 from jaxtyping import Array, PRNGKeyArray, PyTree
 
-from ReAct.model.baseline import GPT
-from ReAct.model.blocks import LinearProj
-from ReAct.model.react import React
 
 def convert_flops(params: int) -> str:
     if params == 0:
@@ -143,15 +140,17 @@ def megatron_init(weight: Array, key: PRNGKeyArray) -> Array:
 
     return jax.random.uniform(key, dims, minval=-lim, maxval=lim) * stddev
 
-def is_linear(x: Any):
-    return isinstance(x, eqx.nn.Linear) or isinstance(x, LinearProj)
+def get_weights(m: PyTree, layer: PyTree):
 
-def get_weights(m: PyTree):
+    def is_linear(x: Any):
+        return isinstance(x, eqx.nn.Linear) or isinstance(x, layer)
+
     return [
         x.weight
         for x in jax.tree_util.tree_leaves(m, is_leaf=is_linear)
         if is_linear(x)
     ]
+
 
 def save_eqx_obj(save_dir: str, filename: str, obj: tuple):
     if not os.path.exists(save_dir):
@@ -172,7 +171,7 @@ def broad_to_bsz(arr: Array, shape: tuple) -> Array:
     return jnp.broadcast_to(arr, shape)
 
 
-def count_params(model: Union[GPT, React]) -> None:
+def count_params(model: Union[Annotated[str, 'GPT'], Annotated[str, 'React']]) -> None:
     def params_fn(model):
         return sum(
             x.size for x in jax.tree_util.tree_leaves(eqx.filter(model, eqx.is_array))

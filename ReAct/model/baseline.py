@@ -1,10 +1,12 @@
-from typing import Callable, Optional
+from typing import Optional
 
 import equinox as eqx
 import jax
 import jax.numpy as jnp
 from jaxtyping import Array, PRNGKeyArray, PyTree
 from jmp import Policy
+
+from ReAct.utils.sharding import Sharding
 
 from .blocks import AttentionBlock, LinearProj
 
@@ -18,22 +20,34 @@ class VanillaModule(eqx.Module):
     all the attention blocks sequentially
     '''
 
+    sharding: Sharding = eqx.field(static=True)
     attention_blocks: PyTree[AttentionBlock]
     
-    def __init__(self,
-                 seqlen: int,
-                 bottleneck: int,
-                 n_heads: int,
-                 drop_rate: float,
-                 num_blocks: int,
-                 key: PRNGKeyArray):
+    def __init__(
+        self,
+        seqlen: int,
+        bottleneck: int,
+        n_heads: int,
+        drop_rate: float,
+        num_blocks: int,
+        key: PRNGKeyArray,
+        strategy: Sharding
+    ):
         
+        self.sharding = strategy
         keys = jax.random.split(key, num_blocks)
-        make_block: Callable = lambda k: AttentionBlock(seqlen, n_heads, drop_rate, bottleneck, k)  # noqa: E731
+
+        make_attn = lambda k: self.make_layer(
+            self.sharding, seqlen, n_heads, drop_rate, bottleneck, k
+        )
 
         self.attention_blocks = [
-            eqx.filter(make_block(k), eqx.is_array_like) for k in keys
+            eqx.filter(make_attn(k), eqx.is_array_like) for k in keys
         ]
+
+    @staticmethod
+    def make_layer(strategy: Sharding, seqlen: int, n_heads: int, drop_rate: float, bottleneck: int, key: PRNGKeyArray) -> AttentionBlock:
+        return AttentionBlock(seqlen, n_heads, drop_rate, bottleneck, key, strategy)
 
     def __call__(
         self,
@@ -43,14 +57,14 @@ class VanillaModule(eqx.Module):
         key: Optional[PRNGKeyArray] = None,
     ) -> Array:
         
-        input_arr, pad_mask = policy.cast_to_compute((input_arr, pad_mask))
+        input_arr, pad_mask = self.sharding.shard_cast((input_arr, pad_mask))
         
         def f(input_arr: Array, block: PyTree):
-            input_arr = policy.cast_to_compute(input_arr)
+            input_arr = self.sharding.shard_cast(input_arr)
 
             output = block(input_arr, input_arr, pad_mask, enable_dropout, key)
 
-            return policy.cast_to_output(output), None
+            return self.sharding.shard_cast(output), None
 
         out = input_arr
 
@@ -60,28 +74,33 @@ class VanillaModule(eqx.Module):
         return policy.cast_to_output(out)
         
 class GPT(eqx.Module):
-    '''
+    """
     Vanilla Transformer model
-    '''
-    __name__ = 'GPT'
-    
+    """
+
+    __name__ = "GPT"
+
+    sharding: Sharding = eqx.field(static=True)
     embed_layer: eqx.nn.Embedding
     embed_ln: eqx.nn.LayerNorm
     unemb_ln: eqx.nn.LayerNorm
     main_block: VanillaModule
     out_head: LinearProj
-    
-    def __init__(self,
-                 n_heads: int,
-                 seqlen: int,
-                 num_blocks: int,
-                 width: int,
-                 drop_rate: float,
-                 vocab_size: int,
-                 key: PRNGKeyArray):
-        
+
+    def __init__(
+        self,
+        n_heads: int,
+        seqlen: int,
+        num_blocks: int,
+        width: int,
+        drop_rate: float,
+        vocab_size: int,
+        key: PRNGKeyArray,
+        strategy: Sharding,
+    ):
+        self.sharding = strategy
         keys = jax.random.split(key, 3)
-        
+
         # Custom initialization for the Embedding Layer
         embed_weights: Array = jax.random.normal(
             key, (vocab_size, width), dtype=jnp.float32
@@ -91,23 +110,33 @@ class GPT(eqx.Module):
         self.unemb_ln = eqx.nn.LayerNorm(width)
         self.embed_layer = eqx.nn.Embedding(weight=embed_weights)
 
-        self.main_block = VanillaModule(seqlen, width, n_heads, drop_rate, num_blocks, key=keys[1])
-        self.out_head = LinearProj(width, vocab_size, key=keys[2])
-    
-    @eqx.filter_jit
-    def __call__(self,
-                 input_arr: Array,
-                 pad_mask: Array,
-                 enable_dropout: bool,
-                 key: PRNGKeyArray) -> Array:
+        self.main_block = VanillaModule(
+            seqlen,
+            width,
+            n_heads,
+            drop_rate,
+            num_blocks,
+            key=keys[1],
+            strategy=self.sharding,
+        )
 
+        self.out_head = LinearProj(
+            width, vocab_size, key=keys[2], strategy=self.sharding
+        )
+
+    @eqx.filter_jit
+    def __call__(
+        self, input_arr: Array, pad_mask: Array, enable_dropout: bool, key: PRNGKeyArray
+    ) -> Array:
         embed_fn = lambda x: self.embed_ln(self.embed_layer(x))
 
-        input_arr = jax.vmap(embed_fn)(input_arr) # (batch, seqlen, bottleneck)
+        input_arr = jax.vmap(embed_fn)(input_arr)  # (batch, seqlen, bottleneck)
 
-        input_arr, pad_mask = policy.cast_to_compute((input_arr, pad_mask))
+        input_arr, pad_mask = self.sharding.shard_cast((input_arr, pad_mask))
 
         output = self.main_block(input_arr, pad_mask, enable_dropout, key)
+
+        output = self.sharding.shard_cast(output)
 
         output = jax.vmap(self.unemb_ln)(output)
 

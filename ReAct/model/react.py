@@ -1,10 +1,12 @@
-from typing import List, Tuple
+from typing import Any, List, Tuple
 
 import equinox as eqx
 import jax
 import jax.numpy as jnp
 from jaxtyping import Array, PRNGKeyArray, PyTree
 from jmp import Policy
+
+from ReAct.utils.sharding import Sharding
 
 from .blocks import AttentionBlock, LinearProj
 
@@ -16,6 +18,7 @@ class RecurrentModule(eqx.Module):
     '''
     Bunch of Attentionlayers in a pseuo-LSTM fashion
     '''
+    sharding: Sharding = eqx.field(static=True)
     num_layers: int = eqx.field(static=True)
 
     attention_layers: List[PyTree]
@@ -30,22 +33,29 @@ class RecurrentModule(eqx.Module):
         num_layers: int,
         bottleneck: int,
         key: PRNGKeyArray,
+        strategy: Sharding
     ):
+
+        self.sharding = strategy
+        self.num_layers = num_layers
         keys = jax.random.split(key, num_layers)
 
-        make_attn = lambda k: self.make_layer(seqlen, n_heads, drop_rate, bottleneck, k)
+        make_attn = lambda k: self.make_layer(
+            self.sharding, seqlen, n_heads, drop_rate, bottleneck, k
+        )
 
-        self.num_layers = num_layers
         self.post_ln = eqx.nn.LayerNorm(bottleneck)
-        self.reshape_gate = LinearProj(bottleneck * 2, bottleneck, key=keys[0])
+        self.reshape_gate = LinearProj(
+            bottleneck * 2, bottleneck, key=keys[0], strategy=self.sharding
+        )
 
         self.attention_layers = [
             eqx.filter(make_attn(k), eqx.is_array_like) for k in keys
         ]
 
     @staticmethod
-    def make_layer(seqlen: int, n_heads: int, drop_rate: float, bottleneck: int, key: PRNGKeyArray) -> AttentionBlock:
-        return AttentionBlock(seqlen, n_heads, drop_rate, bottleneck, key)
+    def make_layer(strategy: Sharding, seqlen: int, n_heads: int, drop_rate: float, bottleneck: int, key: PRNGKeyArray) -> AttentionBlock:
+        return AttentionBlock(seqlen, n_heads, drop_rate, bottleneck, key, strategy)
 
     def __call__(
         self,
@@ -86,6 +96,7 @@ class React(eqx.Module):
     '''
     __name__ = 'ReAct'
 
+    sharding: Sharding = eqx.field(static=True)
     max_iters: int = eqx.field(static=True)
     width: int = eqx.field(static=True)
     
@@ -106,9 +117,11 @@ class React(eqx.Module):
         drop_rate: float,
         vocab_size: int,
         key: PRNGKeyArray,
+        strategy: Any
     ):
         key1, key2, key3 = jax.random.split(key, 3)
 
+        self.sharding = strategy
         self.max_iters = max_iters
         self.width = width
 
@@ -119,11 +132,13 @@ class React(eqx.Module):
 
         self.embed_ln = eqx.nn.LayerNorm(width)
         self.embed_layer = eqx.nn.Embedding(weight=embed_weights)
-        self.main_block = RecurrentModule(seqlen, drop_rate, n_heads, num_blocks, width, key=key2)
+        self.main_block = RecurrentModule(
+            seqlen, drop_rate, n_heads, num_blocks, width, key2, self.sharding
+        )
 
         self.post_ln = eqx.nn.LayerNorm(width)
         self.unemb_ln = eqx.nn.LayerNorm(width)
-        self.out_head = LinearProj(width, vocab_size, key=key3)
+        self.out_head = LinearProj(width, vocab_size, key=key3, strategy=self.sharding)
 
     @eqx.filter_jit
     def iterate_for_steps(
@@ -136,16 +151,18 @@ class React(eqx.Module):
         key: PRNGKeyArray,
     ) -> Array:
         
-        input_arr, interim_thought, mask = policy.cast_to_compute((input_arr, interim_thought, mask))
+        input_arr, interim_thought, mask = self.sharding.shard_cast((input_arr, interim_thought, mask))
 
         def body_fun(latent: Array, idx: int) -> Tuple[Array, Array]:
+            latent = self.sharding.shard_cast(latent)
+
             latent = jnp.concatenate([input_arr, latent], axis=-1) 
 
             latent = self.main_block(latent, mask, enable_dropout, key)  # (seqlen, width)
 
             latent = jax.vmap(self.post_ln)(latent)  # Post-LN for stability
 
-            latent = policy.cast_to_output(latent)
+            latent = self.sharding.shard_cast(latent)
             
             return latent, latent
 
@@ -180,7 +197,7 @@ class React(eqx.Module):
             input_arr = jax.vmap(embed_fn)(input_arr)  # (batch, seqlen, bottleneck)
             interim_thought = input_arr.copy()  # has to be a copy of the embedded + normed array
 
-        input_arr, interim_thought = policy.cast_to_compute((input_arr, interim_thought))
+        input_arr, interim_thought = self.sharding.shard_cast((input_arr, interim_thought))
 
         output = self.iterate_for_steps(interim_thought, input_arr, pad_mask, iters_to_do, is_training, key)  # (batch, seqlen, bottleneck)
 

@@ -1,4 +1,5 @@
 import os
+from functools import partial
 from typing import Any, Callable, Optional, Tuple, Union
 
 import equinox as eqx
@@ -14,6 +15,7 @@ from tqdm.auto import tqdm
 import wandb
 from inferencer import Inferencer
 from ReAct.model.baseline import GPT
+from ReAct.model.blocks import LinearProj
 from ReAct.model.react import React
 from ReAct.utils.helpers import (
     calc_performance_metrics,
@@ -31,6 +33,7 @@ from ReAct.utils.losses import (
 )
 from ReAct.utils.sharding import get_strategy
 
+get_linear_weights = partial(get_weights, layer=LinearProj)
 half, full = jnp.bfloat16, jnp.float32
 policy = Policy(compute_dtype=half, param_dtype=half, output_dtype=half)
 
@@ -226,6 +229,7 @@ class Trainer:
                 self.args.drop_rate,
                 self.args.num_classes,
                 key,
+                strategy
             )
         else:
             model = React(
@@ -237,17 +241,18 @@ class Trainer:
                 self.args.drop_rate,
                 self.args.num_classes,
                 key,
+                strategy
             )
 
         # custom weight init
-        weights= get_weights(model)
+        weights= get_linear_weights(model)
 
         new_weights = [
             megatron_init(weight, subkey)
             for weight, subkey in zip(weights, jax.random.split(key, len(weights)))
         ]
 
-        model = eqx.tree_at(get_weights, model, new_weights)
+        model = eqx.tree_at(get_linear_weights, model, new_weights)
 
         # switch to half precision
         if self.args.bf16:

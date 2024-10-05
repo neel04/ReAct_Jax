@@ -1,7 +1,7 @@
 import os
 from abc import ABC, abstractmethod
 from dataclasses import fields
-from typing import Annotated, Any, List, Tuple
+from typing import Annotated, Any, Tuple
 
 import equinox as eqx
 import jax
@@ -10,44 +10,61 @@ from jax.experimental import mesh_utils
 from jax.sharding import Mesh, NamedSharding
 from jax.sharding import PartitionSpec as P
 from jaxtyping import Array, PyTree
+from jmp import Policy
 
-from ReAct.model.baseline import GPT
 from ReAct.utils.helpers import get_spec_on_larger_dim, viz_obj
 
 
 def get_strategy(strategy: str, *args):
-    strategy = strategy.strip().lower()
-    match strategy:
-        case "ddp":
-            strat = DDPSharding(*args)
+    if type(strategy) is str:
+        strategy = strategy.strip().lower()
+        match strategy:
+            case "ddp":
+                strat = DDPSharding(*args)
 
-        case "simple mp":
-            strat = SimpleMPSharding(*args)
+            case "simple mp":
+                strat = SimpleMPSharding(*args)
 
-        case "megatron":
-            strat = MegatronSharding(*args)
+            case "megatron":
+                strat = MegatronSharding(*args)
 
-        case _:
-            raise NotImplementedError(f"Strategy {strategy} does not exist.")
+            case _:
+                raise NotImplementedError(f"Strategy {strategy} does not exist.")
+    else:
+        return strategy
 
     return strat
 
 
 class Sharding(ABC):
     def __init__(self, model_axis: int = 1) -> None:
-        self.model_axis = model_axis
+        self.model_axis: int = model_axis
+        self.policy: Policy | None = None
 
     @abstractmethod
     def get_mesh(self) -> Mesh: ...
 
     @abstractmethod
-    def shard_data(self, tree: PyTree) -> PyTree: ...
+    def shard_data(self, tree: PyTree | Array) -> PyTree | Array: ...
 
     @abstractmethod
     def shard_model(self, tree: PyTree) -> PyTree: ...
 
     @abstractmethod
     def shard_one_hot(self, tree: PyTree) -> PyTree: ...
+
+    def shard_cast(self, tree: PyTree) -> PyTree:
+        """
+        Return the casted & sharded version of the PyTree. Uses `policy.cast_to_compute`
+        """
+        assert (
+            self.policy is not None
+        ), "No policy registered for sharding. Use `filter_shard` instead of `shard_cast`"
+
+        return self.shard_data(self.policy.cast_to_compute(tree))
+
+    def set_policy(self, policy: Policy) -> None:
+        self.policy = policy
 
     def get_devices(self):
         return mesh_utils.create_device_mesh(
@@ -60,27 +77,9 @@ class Sharding(ABC):
         get_val = lambda x: getattr(x, fields(x)[0].name)  # noqa: E731
         return tuple(map(get_val, tgt))
 
-    @staticmethod
-    def add_indices_to_tree(tree: PyTree, start_index: int = 0, dims_to_count: int = 3):
-        """
-        dims_to_count: leaves of what `.ndim` would be counted.
-        """
-
-        def add_index(leaf, index):
-            return [leaf, index[0]]
-
-        def index_incrementer(leaf: PyTree) -> List[int]:
-            if not eqx.is_array(leaf):
-                return [-999]
-
-            nonlocal start_index
-            start_index += 1 if leaf.ndim >= 3 else 0
-            return [start_index - 1]
-
-        indexed_tree = jtu.tree_map(
-            add_index, tree, jtu.tree_map(index_incrementer, tree)
-        )
-        return indexed_tree
+    def __call__(self, policy: Policy):
+        self.policy = policy
+        return self
 
 
 class DDPSharding(Sharding):
@@ -112,7 +111,7 @@ class DDPSharding(Sharding):
 
 
 class SimpleMPSharding(Sharding):
-    def __init__(self, strategy: str, model_axis: int = 2) -> None:
+    def __init__(self, model_axis: int = 2) -> None:
         super().__init__(model_axis)
         self.mesh = self.get_mesh()
 
@@ -141,13 +140,12 @@ class SimpleMPSharding(Sharding):
 
         if leaf.ndim == 2:
             sharding_ = NamedSharding(self.mesh, P(None, "model"))
-            return eqx.filter_shard(leaf, sharding_)
-        else:
-            return leaf
+
+        return eqx.filter_shard(leaf, sharding_)
 
 
 class MegatronSharding(Sharding):
-    def __init__(self, strategy: str, model_axis: int = 2) -> None:
+    def __init__(self, model_axis: int = 2) -> None:
         super().__init__(model_axis)
         self.mesh = self.get_mesh()
 
@@ -166,10 +164,10 @@ class MegatronSharding(Sharding):
     def megatron_sharding(
         self, kp: Annotated[str, "DataclassInstance"], leaf: PyTree
     ) -> PyTree:
-        sharding_ = NamedSharding(self.mesh, P())
-
         if not eqx.is_array(leaf):
             return leaf
+
+        sharding_ = NamedSharding(self.mesh, P())
 
         if leaf.ndim == 2:
             p_spec = get_spec_on_larger_dim(leaf)
