@@ -135,7 +135,7 @@ class Trainer:
     ):
 
         global strategy
-        strategy: Sharding = get_strategy(args.strategy, args.model_axis)
+        strategy = get_strategy(args.strategy, args.model_axis)
 
         self.decode_fn = decode_fn # decode the ids to text
         self.text_data: list = []

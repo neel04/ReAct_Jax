@@ -16,22 +16,25 @@ from ReAct.utils.helpers import get_spec_on_larger_dim, viz_obj
 
 
 def get_strategy(strategy: str, *args):
-    strategy = strategy.strip().lower()
+    if type(strategy) is str:
+        strategy = strategy.strip().lower()
 
-    match strategy:
-        case "ddp":
-            strat = DDPSharding(*args)
+        match strategy:
+            case "ddp":
+                strat = DDPSharding(*args)
 
-        case "simple mp":
-            strat = SimpleMPSharding(*args)
+            case "simple mp":
+                strat = SimpleMPSharding(*args)
 
-        case "megatron":
-            strat = MegatronSharding(*args)
+            case "megatron":
+                strat = MegatronSharding(*args)
 
-        case _:
-            raise NotImplementedError(f"Strategy {strategy} does not exist.")
+            case _:
+                raise NotImplementedError(f"Strategy {strategy} does not exist.")
 
-    return strat
+        return strat
+    else:
+        return strategy
 
 
 class Sharding(ABC):
