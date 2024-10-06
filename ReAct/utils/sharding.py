@@ -16,22 +16,20 @@ from ReAct.utils.helpers import get_spec_on_larger_dim, viz_obj
 
 
 def get_strategy(strategy: str, *args):
-    if type(strategy) is str:
-        strategy = strategy.strip().lower()
-        match strategy:
-            case "ddp":
-                strat = DDPSharding(*args)
+    strategy = strategy.strip().lower()
 
-            case "simple mp":
-                strat = SimpleMPSharding(*args)
+    match strategy:
+        case "ddp":
+            strat = DDPSharding(*args)
 
-            case "megatron":
-                strat = MegatronSharding(*args)
+        case "simple mp":
+            strat = SimpleMPSharding(*args)
 
-            case _:
-                raise NotImplementedError(f"Strategy {strategy} does not exist.")
-    else:
-        return strategy
+        case "megatron":
+            strat = MegatronSharding(*args)
+
+        case _:
+            raise NotImplementedError(f"Strategy {strategy} does not exist.")
 
     return strat
 
@@ -61,7 +59,8 @@ class Sharding(ABC):
             self.policy is not None
         ), "No policy registered for sharding. Use `filter_shard` instead of `shard_cast`"
 
-        return self.shard_data(self.policy.cast_to_compute(tree))
+        # return self.shard_data(self.policy.cast_to_compute(tree))
+        return self.policy.cast_to_compute(tree)
 
     def set_policy(self, policy: Policy) -> None:
         self.policy = policy

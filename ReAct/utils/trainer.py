@@ -31,7 +31,7 @@ from ReAct.utils.losses import (
     _cross_entropy_with_logits_fwd,
     cross_entropy_with_logits,
 )
-from ReAct.utils.sharding import get_strategy
+from ReAct.utils.sharding import Sharding, get_strategy
 
 get_linear_weights = partial(get_weights, layer=LinearProj)
 half, full = jnp.bfloat16, jnp.float32
@@ -87,8 +87,15 @@ def make_step(
     dynamic_model, model, opt_state = strategy.shard_model((dynamic_model, model, opt_state))
 
     @eqx.filter_value_and_grad
-    def compute_loss(model: Union[React, GPT], x: Array, y: Array, pad_mask: Array,
-                    iters_to_do: int, num_classes: int, keys: PRNGKeyArray) -> Array:
+    def compute_loss(
+        model: Union[React, GPT],
+        x: Array,
+        y: Array,
+        pad_mask: Array,
+        iters_to_do: int,
+        num_classes: int,
+        keys: PRNGKeyArray,
+    ) -> Array:
         '''
         Computes the loss of the model w.r.t the input.
         '''
@@ -128,7 +135,7 @@ class Trainer:
     ):
 
         global strategy
-        strategy = get_strategy(args.strategy, args.model_axis)
+        strategy: Sharding = get_strategy(args.strategy, args.model_axis)
 
         self.decode_fn = decode_fn # decode the ids to text
         self.text_data: list = []
