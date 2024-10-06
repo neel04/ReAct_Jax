@@ -31,7 +31,7 @@ from ReAct.utils.losses import (
     _cross_entropy_with_logits_fwd,
     cross_entropy_with_logits,
 )
-from ReAct.utils.sharding import Sharding, get_strategy
+from ReAct.utils.sharding import get_strategy
 
 get_linear_weights = partial(get_weights, layer=LinearProj)
 half, full = jnp.bfloat16, jnp.float32
