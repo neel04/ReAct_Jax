@@ -290,6 +290,84 @@ def get_inference_args() -> Namespace:
 
     return args
 
+def get_evaluation_args():
+    description = "Collects the arguments for evaluating the model on any task"
+
+    parser = argparse.ArgumentParser(description=description)
+
+    # These defaults should be mostly fine
+
+    parser.add_argument(
+        "--seqlen", type=int, default=512, help="Sequence length. Default: 512"
+    )
+
+    parser.add_argument(
+        "--max_iters", type=int, default=3, help="Number of iterations. Default: 3"
+    )
+
+    parser.add_argument(
+        "--num_classes",
+        type=int,
+        default=50304,
+        help="Number of target classes OR vocab size. Default: 50304",
+    )
+
+    parser.add_argument(
+        "--num_tokens",
+        type=int,
+        default=64,
+        help="Number of output tokens to generate. Default: 64",
+    )
+
+    # Likely need to be overwritten
+
+    parser.add_argument(
+        "--checkpoint_path",
+        type=str,
+        default="./",
+        help="Path for the model checkpoint. Default: ./",
+    )
+
+    parser.add_argument(
+        "--n_heads", type=int, default=4, help="Number of attention heads. Default: 4"
+    )
+
+    parser.add_argument(
+        "--width", type=int, default=384, help="Width dimension. Default: 384"
+    )
+
+    parser.add_argument(
+        "--baseline",
+        action="store_true",
+        default=False,
+        help="Train baseline vanilla transformer model. Default: False",
+    )
+
+    parser.add_argument(
+        "--num_blocks",
+        type=int,
+        default=1,
+        help="Number of attention blocks. Default: 1",
+    )
+
+    parser.add_argument(
+        "--strategy",
+        type=str,
+        default='ddp',
+        help="Strategy to use when inferencing. DDP should be enough",
+    )
+
+    parser.add_argument(
+        "--task",
+        type=str,
+        default="hellaswag",
+        help="Which task to evaluate on. See full list on the EAI LM Eval Harness' GitHub repo",
+    )
+
+    args = parser.parse_args()
+
+    return args
+
 
 if __name__ == "__main__":
     args = parse_args()

@@ -187,6 +187,7 @@ class React(eqx.Module):
         key: PRNGKeyArray = jax.random.PRNGKey(0),
     ) -> Tuple[Array, Array]:
 
+        input_arr: Array = self.sharding.shard_cast(input_arr)
         embed_fn = lambda x: self.embed_ln(self.embed_layer(x))
 
         if prev_thought:

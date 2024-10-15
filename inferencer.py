@@ -12,6 +12,7 @@ from ReAct.model.react import React
 from ReAct.utils.arg_parser import get_inference_args
 from ReAct.utils.helpers import count_params, load_eqx_obj
 from ReAct.utils.logger import UnifiedLogger
+from ReAct.utils.sharding import get_strategy
 
 class Inferencer:
     def __init__(self, args: argparse.Namespace, key: PRNGKeyArray):
@@ -24,6 +25,8 @@ class Inferencer:
         self.decode_fn = dummy_dataset.tok.decode
         self.encode_fn = dummy_dataset.tok.encode
 
+        self.strategy = get_strategy(self.args.strategy)
+
     def skeleton_model(self, is_baseline: bool) -> GPT | React:
         if not is_baseline:
             model = React(
@@ -35,6 +38,7 @@ class Inferencer:
                 drop_rate=0.0,
                 vocab_size=self.args.num_classes,
                 key=self.key,
+                strategy=self.strategy
             )
         else:
             model = GPT(
@@ -45,6 +49,7 @@ class Inferencer:
                 drop_rate=0.0,
                 vocab_size=self.args.num_classes,
                 key=self.key,
+                strategy=self.strategy
             )
 
         return model

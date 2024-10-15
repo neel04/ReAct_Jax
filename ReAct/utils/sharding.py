@@ -14,29 +14,6 @@ from jmp import Policy
 
 from ReAct.utils.helpers import get_spec_on_larger_dim, viz_obj
 
-
-def get_strategy(strategy: str, *args):
-    if type(strategy) is str:
-        strategy = strategy.strip().lower()
-
-        match strategy:
-            case "ddp":
-                strat = DDPSharding(*args)
-
-            case "simple mp":
-                strat = SimpleMPSharding(*args)
-
-            case "megatron":
-                strat = MegatronSharding(*args)
-
-            case _:
-                raise NotImplementedError(f"Strategy {strategy} does not exist.")
-
-        return strat
-    else:
-        return strategy
-
-
 class Sharding(ABC):
     def __init__(self, model_axis: int = 1) -> None:
         self.model_axis: int = model_axis
@@ -82,6 +59,26 @@ class Sharding(ABC):
         self.policy = policy
         return self
 
+def get_strategy(strategy: str | Sharding, *args) -> Sharding: 
+    if type(strategy) is str:
+        strategy = strategy.strip().lower()
+
+        match strategy:
+            case "ddp":
+                strat = DDPSharding(*args)
+
+            case "simple mp":
+                strat = SimpleMPSharding(*args)
+
+            case "megatron":
+                strat = MegatronSharding(*args)
+
+            case _:
+                raise NotImplementedError(f"Strategy {strategy} does not exist.")
+
+        return strat
+    else:
+        return strategy # type: ignore
 
 class DDPSharding(Sharding):
     def __init__(self, model_axis: int = 1) -> None:
@@ -160,7 +157,7 @@ class MegatronSharding(Sharding):
         return jtu.tree_map_with_path(self.megatron_sharding, tree)
 
     def shard_one_hot(self, tree: PyTree) -> PyTree:
-        return tree
+        return self.shard_model(tree)
 
     def megatron_sharding(
         self, kp: Annotated[str, "DataclassInstance"], leaf: PyTree

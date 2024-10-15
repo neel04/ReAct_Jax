@@ -54,9 +54,10 @@ class LinearProj(eqx.Module):
 
         lim = 1 / math.sqrt(input_dim)
 
-        self.weight = jax.random.uniform(
-            wkey, (input_dim, output_dim), minval=-lim, maxval=lim
-        ) * math.sqrt(1 / (3 * input_dim))
+        self.weight = self.sharding.shard_model(
+            jax.random.uniform(wkey, (input_dim, output_dim), minval=-lim, maxval=lim)
+            * math.sqrt(1 / (3 * input_dim))
+        )
 
         if use_bias:
             self.bias = jax.random.uniform(bkey, (output_dim,), minval=-lim, maxval=lim)
@@ -68,13 +69,15 @@ class LinearProj(eqx.Module):
         arr: Float[Array, "batch in_dim"],
         mask: Optional[Array] = None,
     ) -> Array:
-        arr, mask = self.sharding.shard_cast((arr, mask))
-
         mask = jnp.ones_like(self.weight) if mask is None else mask
 
-        output = arr @ (self.weight * mask.astype(arr.dtype)) + self.bias
+        arr, mask = self.sharding.shard_cast((arr, mask))
 
-        return self.sharding.shard_cast(output)
+        output = self.sharding.shard_cast(
+            arr @ (self.weight * mask.astype(arr.dtype)) + self.bias
+        )
+
+        return output
 
 class MLP(eqx.Module):
     """A simple MLP - w/ Dropout"""

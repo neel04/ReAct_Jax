@@ -1,4 +1,4 @@
-from typing import Optional
+from typing import Any, Optional
 
 import equinox as eqx
 import jax
@@ -96,7 +96,7 @@ class GPT(eqx.Module):
         drop_rate: float,
         vocab_size: int,
         key: PRNGKeyArray,
-        strategy: Sharding,
+        strategy: Any,
     ):
         self.sharding = strategy
         keys = jax.random.split(key, 3)
@@ -128,16 +128,15 @@ class GPT(eqx.Module):
     def __call__(
         self, input_arr: Array, pad_mask: Array, enable_dropout: bool, key: PRNGKeyArray
     ) -> Array:
+
+        input_arr = self.sharding.shard_cast(input_arr)
         embed_fn = lambda x: self.embed_ln(self.embed_layer(x))
 
         input_arr = jax.vmap(embed_fn)(input_arr)  # (batch, seqlen, bottleneck)
-
         input_arr, pad_mask = self.sharding.shard_cast((input_arr, pad_mask))
 
         output = self.main_block(input_arr, pad_mask, enable_dropout, key)
-
         output = self.sharding.shard_cast(output)
-
         output = jax.vmap(self.unemb_ln)(output)
 
         return self.out_head(output)

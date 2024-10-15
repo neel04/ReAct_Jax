@@ -104,9 +104,16 @@ def make_step(
         else:
             forward = vanilla_fwd
 
-        pred_y = jax.vmap(forward, in_axes=(None, 0, 0, None, 0))(model, x, pad_mask, iters_to_do, keys) # (batch_size, seqlen, num_classes)
-        y_one_hot = jax.nn.one_hot(y, num_classes=num_classes) # (batch_size, seqlen, num_classes)
-        pred_y, y_one_hot = strategy.shard_one_hot((pred_y, y_one_hot))
+        pred_y = strategy.shard_cast(
+            jax.vmap(forward, in_axes=(None, 0, 0, None, 0))(
+                model, x, pad_mask, iters_to_do, keys
+            )
+        )  # (batch_size, seqlen, num_classes)
+
+        y_one_hot = strategy.shard_one_hot(
+            jax.nn.one_hot(y, num_classes=num_classes)
+        ) # (batch_size, seqlen, num_classes)
+
         loss = _compute_softmax_cross_entropy_loss(pred_y, y_one_hot)
 
         return loss
@@ -117,7 +124,7 @@ def make_step(
     updates = strategy.shard_model(updates)
     model = eqx.apply_updates(model, updates)
 
-    # shard the outputs as well
+    # shard the updated state as well
     model, opt_state = strategy.shard_model((model, opt_state))
 
     return loss, model, opt_state, grads, updates

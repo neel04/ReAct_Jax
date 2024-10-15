@@ -29,7 +29,7 @@ def main(key: PRNGKeyArray):
     if args.debug:
         config.update("jax_debug_nans", True)
         config.update("jax_debug_infs", True)
-        config.update("jax_disable_jit", False)
+        config.update("jax_disable_jit", True)
 
     # ========= Data =========
     match args.dataset.lower():

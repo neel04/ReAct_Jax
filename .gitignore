@@ -175,3 +175,4 @@ cython_debug/
 *compilation_cache*
 typings/
 devlog.md
+lm-evaluation-harness
