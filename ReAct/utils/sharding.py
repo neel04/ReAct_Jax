@@ -95,7 +95,7 @@ class DDPSharding(Sharding):
         return jtu.tree_map_with_path(self.ddp_sharding, tree)
 
     def shard_one_hot(self, tree: PyTree) -> PyTree:
-        return tree
+        return self.shard_data(tree)
 
     def ddp_sharding(
         self, kp: Annotated[str, "DataclassInstance"], leaf: PyTree
@@ -123,7 +123,7 @@ class SimpleMPSharding(Sharding):
         return jtu.tree_map_with_path(self.simple_sharding, tree)
 
     def shard_one_hot(self, tree: PyTree) -> PyTree:
-        return tree
+        return self.shard_data(tree)
 
     def simple_sharding(
         self, kp: Annotated[str, "DataclassInstance"], leaf: PyTree
@@ -157,7 +157,7 @@ class MegatronSharding(Sharding):
         return jtu.tree_map_with_path(self.megatron_sharding, tree)
 
     def shard_one_hot(self, tree: PyTree) -> PyTree:
-        return self.shard_model(tree)
+        return self.shard_data(tree)
 
     def megatron_sharding(
         self, kp: Annotated[str, "DataclassInstance"], leaf: PyTree
