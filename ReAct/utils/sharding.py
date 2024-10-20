@@ -39,7 +39,7 @@ class Sharding(ABC):
             self.policy is not None
         ), "No policy registered for sharding. Use `filter_shard` instead of `shard_cast`"
 
-        return self.policy.cast_to_compute(self.shard_data(tree))
+        return self.shard_data(self.policy.cast_to_compute(tree))
 
     def set_policy(self, policy: Policy) -> None:
         self.policy = policy

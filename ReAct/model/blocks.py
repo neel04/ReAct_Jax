@@ -1,5 +1,5 @@
 import math
-from typing import Any, Callable, Optional, Tuple
+from typing import Any, Optional 
 
 import equinox as eqx
 import jax
@@ -14,16 +14,21 @@ policy = Policy(compute_dtype=jnp.bfloat16, param_dtype=jnp.float32, output_dtyp
 # ruff: noqa: F722
 
 class NewGELU(eqx.Module):
+    sharding: Sharding = eqx.field(static=True)
+
+    def __init__(self, strategy: Sharding) -> None:
+        self.sharding = strategy(policy)
+
     @eqx.filter_jit
     def __call__(self, x: jax.Array) -> jax.Array:
         c = math.sqrt(2.0 / math.pi)
         a = 0.044715
 
-        x = policy.cast_to_compute(x)
+        x = self.sharding.shard_cast(x)
 
         output = 0.5 * x * (1.0 + jax.nn.tanh(c * (x + a * jnp.power(x, 3.0))))
+        return self.sharding.shard_cast(output)
 
-        return policy.cast_to_output(output)
 
 class LinearProj(eqx.Module):
     bias: Optional[jax.Array]
@@ -69,12 +74,12 @@ class LinearProj(eqx.Module):
         arr: Float[Array, "batch in_dim"],
         mask: Optional[Array] = None,
     ) -> Array:
-        mask = jnp.ones_like(self.weight) if mask is None else mask
+        _mask = jnp.ones_like(self.weight) if mask is None else mask
 
-        arr, mask = self.sharding.shard_cast((arr, mask))
+        arr, _mask = self.sharding.shard_cast((arr, _mask))
 
         output = self.sharding.shard_cast(
-            arr @ (self.weight * mask.astype(arr.dtype)) + self.bias
+            arr @ (self.weight * _mask.astype(arr.dtype)) + self.bias
         )
 
         return output
@@ -101,7 +106,7 @@ class MLP(eqx.Module):
         self.sharding = strategy(policy)
         self.layer_1 = LinearProj(input_dim, output_dim * 4, key=key1, strategy=strategy)
         self.layer_2 = LinearProj(output_dim * 4, output_dim, key=key2, strategy=strategy)
-        self.act = NewGELU()
+        self.act = NewGELU(strategy)
 
         self.dropout = eqx.nn.Dropout(p=p)
 
@@ -238,145 +243,4 @@ class Lerp(eqx.Module):
 
         output = self.alpha * x + (1 - self.alpha) * y
 
-        return policy.cast_to_output(output)
-
-class GatedBlock(eqx.Module):
-    """Gated Block for any general function"""
-    
-    gate: eqx.Module
-    block: eqx.Module
-    ln: eqx.Module
-    activation: Callable
-    
-    def __init__(
-        self,
-        fun: Callable,
-        args: Tuple,
-        in_dim: int,
-        key: PRNGKeyArray,
-    ):
-
-        self.block = fun(*args) if args else fun
-
-        self.gate = LinearProj(in_dim, in_dim, key=key)
-        self.ln = eqx.nn.LayerNorm(in_dim)
-        self.activation = NewGELU()
-    
-    def __call__(self, x: Array, ctx: Array, call_args: Tuple) -> Array:
-        x, ctx = policy.cast_to_compute((x, ctx))
-
-        x = self.block(x, ctx, *call_args)
-        x = jax.vmap(self.ln)(x)
-
-        x *= jax.nn.silu(self.gate(ctx))
-        
-        return policy.cast_to_output(x)
-
-class GatedMLP(eqx.Module):
-    '''
-    Gated MLP, Mamba-ish style
-    '''
-
-    ln: eqx.Module
-    up_proj: eqx.Module
-    down_proj: eqx.Module
-    gate: eqx.Module
-    activation: callable
-
-    def __init__(self, input_dim: int, output_dim: int, key: PRNGKeyArray):
-        key_1, key_2, key_3, key_4 = jax.random.split(key, 4)
-
-        self.up_proj = LinearProj(input_dim, output_dim, key=key_1)
-        self.gate = LinearProj(input_dim, output_dim, key=key_4)
-        self.down_proj = LinearProj(output_dim, output_dim, key=key_3)
-
-        self.ln = eqx.nn.LayerNorm(output_dim)
-
-        self.activation = NewGELU()
-
-    def __call__(self, arr: Array, cond: Optional[Array] = None) -> Array:
-        cond = arr if cond is None else cond
-        x, cond = policy.cast_to_compute((arr, cond))
-        
-        x = self.activation(self.up_proj(arr))
-        x = jax.vmap(self.ln)(x)
-        x = self.down_proj(x * jax.nn.silu(self.gate(cond)))
-        
-        return policy.cast_to_output(x)
-
-class DynamicGatedMLP(eqx.Module):
-    proj_1: eqx.Module
-    proj_2: eqx.Module
-    ln: eqx.Module
-    act: callable
-
-    def __init__(self, input_dim: int, key: PRNGKeyArray) -> Array:
-
-        keys = jax.random.split(key, 2)
-        output_dim = input_dim * 2
-
-        self.proj_1 = LinearProj(input_dim, output_dim, key=keys[0])
-        self.proj_2 = LinearProj(output_dim, output_dim, key=keys[1])
-        self.ln = eqx.nn.LayerNorm(output_dim)
-        self.act = NewGELU()
-
-    def __call__(
-        self, input_arr: Float[Array, "seqlen width"]
-    ) -> Float[Array, "seqlen width"]:
-
-        input_arr = policy.cast_to_param(input_arr)
-
-        dynamic_weights = self.proj_2(self.act(self.proj_1(input_arr)))
-        dynamic_weights = policy.cast_to_param(dynamic_weights)
-        dynamic_weights = jax.vmap(self.ln)(dynamic_weights)
-        dw_1, dw_2 = jnp.split(dynamic_weights, 2, axis=-1)
-        output = (input_arr @ dw_2.T) @ dw_1
-
-        return policy.cast_to_output(output)
-
-class LiteAttention(eqx.Module):
-    input_dim: int = eqx.field(static=True)
-    weight: eqx.Module
-
-    def __init__(self, input_dim: int, key: PRNGKeyArray):
-        self.input_dim = input_dim
-        self.weight = LinearProj(input_dim, input_dim, use_bias=True, key=key)
-
-    @eqx.filter_jit
-    def __call__(self, x: Float[Array, 'seqlen in_dim'], mask: Array):
-        x = policy.cast_to_compute(x)
-        attn_weights = jax.nn.softmax(self.weight(x.T, mask), axis=1) # type: ignore
-        output = x * attn_weights.T
-        return policy.cast_to_output(output)
-
-class MixerBlock(eqx.Module):
-    '''
-    MixerBlock from MLP-Mixer
-    Is applied in-place for self-attention
-    '''
-    act_1: eqx.Module
-    act_2: eqx.Module
-    norm: eqx.Module
-    channel_mixer: eqx.Module
-    token_mixer: eqx.Module
-    
-    def __init__(self, input_dim: int, seqlen: int, drop_rate: float, key: PRNGKeyArray):
-        key1, key2 = jax.random.split(key, 2)
-        
-        self.norm = eqx.nn.LayerNorm(input_dim)
-        self.act_1 = NewGELU()
-        self.act_2 = NewGELU()
-        
-        self.channel_mixer = MLP(input_dim, input_dim, drop_rate, key=key1)
-        self.token_mixer = LinearProj(seqlen, seqlen, key=key2)
-  
-    def __call__(self, x: Float[Array, 'seqlen in_dim'], mask: Array, enable_dropout: bool, key: PRNGKeyArray) -> Array:
-        x, mask = policy.cast_to_compute((x, mask))
-        
-        arr = x.T
-        arr = self.act_1(self.token_mixer(arr, key=key, mask=mask))
-        arr = jax.vmap(self.norm)(arr.T)
-        x = x + arr
-        output = x + self.act_2(self.channel_mixer(arr, enable_dropout, key=key))
-        
         return policy.cast_to_output(output)

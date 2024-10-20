@@ -1,20 +1,22 @@
 import argparse
 import os
-from typing import Any
+from typing import Any 
 
 import equinox as eqx
 import jax
 import jax.numpy as jnp
 import lm_eval
 from jaxtyping import Array, PRNGKeyArray
+from lm_eval.api.model import TemplateLM
+from lm_eval.tasks import TaskManager
 
 from ReAct.data.owt import OpenWebTextDataset as OWT
 from ReAct.model.baseline import GPT
 from ReAct.model.react import React
 from ReAct.utils.arg_parser import get_evaluation_args
 from ReAct.utils.helpers import load_eqx_obj
-from ReAct.utils.sharding import get_strategy
 from ReAct.utils.logger import UnifiedLogger
+from ReAct.utils.sharding import get_strategy
 
 
 class Evaluator:
@@ -67,7 +69,7 @@ class Evaluator:
         model = self.skeleton_model(self.args.baseline)
         model = load_eqx_obj(self.args.checkpoint_path, model)
 
-        class ReActLM(lm_eval.base.LM):
+        class MyLM(TemplateLM):
             def __init__(
                 self,
                 model: eqx.Module,
@@ -75,15 +77,80 @@ class Evaluator:
                 decode_fn: Any,
                 args: argparse.Namespace,
             ):
+                super().__init__()
+
                 self.model = eqx.nn.inference_mode(model)
                 self.encode_fn = encode_fn
                 self.decode_fn = decode_fn
                 self.args = args
 
-            def loglikelihood(self, requests):
+            @property
+            def eot_token_id(self) -> Any:
+                return 50304
+
+            def tok_encode(self, string: str, **kwargs) -> list[int]:
+                encoded: Array = self.encode_fn(string)
+                encoded = jnp.asarray([i for i in encoded if i != self.eot_token_id])
+
+                return encoded.tolist()
+
+            def _calc_ll(self, arr: Array, target: Array, **kwargs) -> Array:
+                arr, target = jnp.asarray(arr), jnp.asarray(target)
+
+                seq = jnp.concat([arr, target])
+                seq = jnp.pad(
+                    seq,
+                    (0, self.args.seqlen - seq.shape[0]),
+                    constant_values=self.eot_token_id,
+                )
+
+                pad_mask = jnp.where(seq == self.eot_token_id, 0, 1)
+                key = jax.random.PRNGKey(0)
+
+                if self.args.baseline:
+                    logits = self.model(seq, pad_mask, False, key)
+                else:
+                    logits = self.model(
+                        seq,
+                        self.args.max_iters,
+                        jnp.ones_like(seq),
+                        False,
+                        False,
+                        key,
+                    )[0]
+
+                probs = jax.nn.log_softmax(logits, axis=-1)
+
+                breakpoint()
+                # select logprobs for the target token
+                target_log_probs = jnp.take_along_axis(
+                    probs, target[:, :, None], axis=-1
+                ).squeeze(-1)
+
+            def _loglikelihood_tokens(self, requests: list, **kwargs) -> list[tuple[float, bool]]:
+                breakpoint()
+                for request in requests:
+                    context, target = request[-2], request[-1]
+                    self._calc_ll(context, target, kwargs=kwargs)
+
+                ...
+
+
+            def loglikelihood_rolling(self, requests, disable_tqdm: bool = False) -> list[float]:
+                return super().loglikelihood_rolling(requests, disable_tqdm)
+
+            def generate_until(self, requests, disable_tqdm: bool = False) -> list[str]:
+                raise NotImplementedError 
+
+                return super().generate_until(requests, disable_tqdm)
+            
+            '''
+            def _loglikelihood(self, requests: list[Instance]):
                 res = []
 
-                for context, continuation in requests:
+                for request in requests:
+                    context, continuation = request.args
+
                     inp = self.encode_fn(context + continuation)
                     context_enc = self.encode_fn(context)
                     cont_enc = inp[len(context_enc) :]
@@ -201,20 +268,21 @@ class Evaluator:
 
                     res.append(self.decode_fn(generated[len(inp) :]))
                 return res
+            '''
 
-        lm_obj = ReActLM(
+        lm_obj = MyLM(
             model=model,
             encode_fn=self.encode_input,
             decode_fn=self.decode_fn,
             args=self.args,
         )
 
-        task_manager = lm_eval.tasks.TaskManager()
+        task_manager = TaskManager()
 
         results = lm_eval.simple_evaluate(
             model=lm_obj,
             tasks=[self.args.task],
-            num_fewshot=0,
+            num_fewshot=None,
             task_manager=task_manager,
         )
 
