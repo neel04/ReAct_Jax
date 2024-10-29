@@ -177,7 +177,16 @@ class Trainer:
             seq, label, pad_mask = strategy.shard_data((seq, label, pad_mask))
             seq, label, pad_mask = policy.cast_to_compute((seq, label, pad_mask))
 
-            acc, loss, ppl = self.compute_metrics(keys, model, is_baseline, seq, label, pad_mask, eval_iters, self.args.num_classes)
+            acc, loss, ppl = self.compute_metrics(
+                keys,
+                model,
+                is_baseline,
+                seq,
+                label,
+                pad_mask,
+                eval_iters,
+                self.args.num_classes,
+            )
 
             metrics_sum += jnp.array([acc, loss, ppl])
 

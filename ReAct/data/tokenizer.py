@@ -34,9 +34,11 @@ class Tok:
 
         self.tokenizer.add_special_tokens({"pad_token": "[PAD]"})
 
-    def encode(self, text: List[str] | str) -> Dict[str, List]:
+    def encode(self, text: List[str] | str, obey_maxlen: bool = True) -> Dict[str, List]:
+        maxlen = self.max_length if obey_maxlen else None
+
         return self.tokenizer(
-            text, padding="max_length", max_length=self.max_length, truncation=True
+            text, padding="max_length", max_length=maxlen, truncation=True
         )
 
     def decode(self, ids: Any) -> str:

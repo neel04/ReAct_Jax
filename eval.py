@@ -1,6 +1,6 @@
 import argparse
 import os
-from typing import Any 
+from typing import Any, List
 
 import equinox as eqx
 import jax
@@ -9,6 +9,7 @@ import lm_eval
 from jaxtyping import Array, PRNGKeyArray
 from lm_eval.api.model import TemplateLM
 from lm_eval.tasks import TaskManager
+from tqdm import tqdm
 
 from ReAct.data.owt import OpenWebTextDataset as OWT
 from ReAct.model.baseline import GPT
@@ -59,15 +60,18 @@ class Evaluator:
 
         return model
 
-    def encode_input(self, my_input: str) -> Array:
-        encoded = self.encode_fn(my_input)["input_ids"]
+    def encode_input(self, my_input: str, obey_maxlen: bool = True) -> Array:
+        encoded = self.encode_fn(my_input, obey_maxlen=obey_maxlen)["input_ids"]
         encoded = jnp.asarray([i for i in encoded if i != self.pad_token])
 
         return encoded
 
     def run_lm_evaluation(self):
         model = self.skeleton_model(self.args.baseline)
-        model = load_eqx_obj(self.args.checkpoint_path, model)
+        model = load_eqx_obj(
+            self.args.checkpoint_path,
+            model if self.args.baseline else eqx.filter(model, eqx.is_array),
+        )
 
         class MyLM(TemplateLM):
             def __init__(
@@ -89,186 +93,138 @@ class Evaluator:
                 return 50304
 
             def tok_encode(self, string: str, **kwargs) -> list[int]:
-                encoded: Array = self.encode_fn(string)
+                encoded: Array = self.encode_fn(string, obey_maxlen=False)
                 encoded = jnp.asarray([i for i in encoded if i != self.eot_token_id])
 
                 return encoded.tolist()
 
-            def _calc_ll(self, arr: Array, target: Array, **kwargs) -> Array:
-                arr, target = jnp.asarray(arr), jnp.asarray(target)
-
-                seq = jnp.concat([arr, target])
-                seq = jnp.pad(
-                    seq,
-                    (0, self.args.seqlen - seq.shape[0]),
-                    constant_values=self.eot_token_id,
-                )
-
+            def _calc_ll(
+                self, seq: Array, lengths: tuple[int, int], target: Array
+            ) -> Array:
+                arrlen, tgtlen = lengths
                 pad_mask = jnp.where(seq == self.eot_token_id, 0, 1)
                 key = jax.random.PRNGKey(0)
 
-                if self.args.baseline:
-                    logits = self.model(seq, pad_mask, False, key)
-                else:
-                    logits = self.model(
-                        seq,
-                        self.args.max_iters,
-                        jnp.ones_like(seq),
-                        False,
-                        False,
-                        key,
-                    )[0]
-
-                probs = jax.nn.log_softmax(logits, axis=-1)
-
-                breakpoint()
-                # select logprobs for the target token
-                target_log_probs = jnp.take_along_axis(
-                    probs, target[:, :, None], axis=-1
-                ).squeeze(-1)
-
-            def _loglikelihood_tokens(self, requests: list, **kwargs) -> list[tuple[float, bool]]:
-                breakpoint()
-                for request in requests:
-                    context, target = request[-2], request[-1]
-                    self._calc_ll(context, target, kwargs=kwargs)
-
-                ...
-
-
-            def loglikelihood_rolling(self, requests, disable_tqdm: bool = False) -> list[float]:
-                return super().loglikelihood_rolling(requests, disable_tqdm)
-
-            def generate_until(self, requests, disable_tqdm: bool = False) -> list[str]:
-                raise NotImplementedError 
-
-                return super().generate_until(requests, disable_tqdm)
-            
-            '''
-            def _loglikelihood(self, requests: list[Instance]):
-                res = []
-
-                for request in requests:
-                    context, continuation = request.args
-
-                    inp = self.encode_fn(context + continuation)
-                    context_enc = self.encode_fn(context)
-                    cont_enc = inp[len(context_enc) :]
-
-                    if len(inp) > self.args.seqlen:
-                        inp = inp[-self.args.seqlen :]
-                        context_enc = context_enc[-(self.args.seqlen - len(cont_enc)) :]
-
-                    pad_amount = self.args.seqlen - len(inp)
-                    inp = jnp.pad(
-                        jnp.array(inp),
-                        (0, pad_amount),
-                        constant_values=self.args.pad_token,
-                    )
-
-                    key = jax.random.PRNGKey(0)
-                    pad_mask = jnp.where(inp == self.args.pad_token, 0, 1)
-
+                def fwd(seq: Array, pad_mask: Array, key: PRNGKeyArray) -> Array:
                     if self.args.baseline:
-                        logits = self.model(
-                            inp[None, :], pad_mask[None, :], False, key
-                        )[0, : len(context_enc) + len(cont_enc) - 1]
+                        logits = self.model(seq, pad_mask, False, key)
                     else:
                         logits = self.model(
-                            inp[None, :],
+                            seq,
                             self.args.max_iters,
-                            pad_mask[None, :],
+                            jnp.ones_like(seq),
                             False,
                             False,
                             key,
-                        )[0][0, : len(context_enc) + len(cont_enc) - 1]
+                        )[0]
 
-                    log_probs = jax.nn.log_softmax(logits, axis=-1)
-                    cont_log_probs = (
-                        log_probs[len(context_enc) - 1 :]
-                        .at[jnp.arange(len(cont_enc)), jnp.array(cont_enc)]
-                        .get()
+                    return jax.nn.log_softmax(logits, axis=-1)
+
+                probs = fwd(seq, pad_mask, key)
+
+                target_log_probs = (
+                    probs[jnp.arange(arrlen, arrlen + tgtlen), target[:tgtlen]]
+                    * pad_mask[:tgtlen]
+                )
+
+                return target_log_probs.sum()
+
+            def _loglikelihood_tokens(
+                self, requests: List, **kwargs
+            ) -> list[tuple[float, bool]]:
+                output = []
+
+                for request in tqdm(requests):
+                    context, target = request[-2], request[-1]
+
+                    arr, target = (
+                        jnp.asarray(context).astype(int),
+                        jnp.asarray(target).astype(int),
+                    )
+                    arrlen, tgtlen = len(arr), len(target)
+
+                    seq = jnp.concat([arr, target])[-self.args.seqlen :]
+                    seq = jnp.pad(
+                        seq,
+                        (0, self.args.seqlen - seq.shape[0]),
+                        constant_values=self.eot_token_id,
                     )
 
-                    total_log_prob = cont_log_probs.sum()
-                    res.append((total_log_prob.item(), True))
-                return res
+                    ll = self._calc_ll(seq, (arrlen, tgtlen), target)
+                    output.append((ll.item(), 1))
 
-            def loglikelihood_rolling(self, requests):
-                res = []
-                for context, continuation in requests:
-                    inp = self.encode_fn(context + continuation)
-                    total_log_prob = 0.0
+                return output
 
-                    for i in range(len(context), len(inp)):
-                        window = inp[max(0, i - self.args.seqlen + 1) : i + 1]
-                        pad_amount = self.args.seqlen - len(window)
-                        window = jnp.pad(
-                            jnp.array(window),
-                            (pad_amount, 0),
-                            constant_values=self.args.pad_token,
+            def loglikelihood_rolling(
+                self, requests, disable_tqdm: bool = False
+            ) -> list[float]:
+                """
+                Compute rolling log-likelihood for each request by:
+                1. Breaking input into appropriate chunks based on max context length
+                2. Computing log-likelihood for each chunk with maximum possible context
+                3. Ensuring each token is predicted exactly once
+
+                Args:
+                    requests: List of request tuples containing (context,) strings
+                    disable_tqdm: Whether to disable progress bar
+
+                Returns:
+                    List of log-likelihood scores for each request
+                """
+                output = []
+
+                for request in tqdm(requests, disable=disable_tqdm):
+                    context = request.arguments[0]
+
+                    # Encode full context
+                    tokens = []
+
+                    for chunk in range((len(context) // 4096) + 1):
+                        tokens.extend(
+                            self.tok_encode(context[chunk * 4096 : (chunk + 1) * 4096])
                         )
 
-                        key = jax.random.PRNGKey(0)
-                        pad_mask = jnp.where(window == self.args.pad_token, 0, 1)
-                        if self.args.baseline:
-                            logits = self.model(
-                                window[None, :], pad_mask[None, :], False, key
-                            )[0, -1]
+                    tokens = jnp.asarray(tokens)
+
+                    # For longer contexts, process in chunks with maximum context
+                    total_ll = 0.0
+                    chunk_size = self.args.seqlen
+
+                    # Process full chunks first
+                    for i in range(len(tokens) // chunk_size + 1):
+                        # If context fits in one window, process it directly
+                        chunk = tokens[i * chunk_size : (i + 1) * chunk_size + 1]
+
+                        if len(chunk) < self.args.seqlen:
+                            # Pad sequence to model's expected length
+                            seq = jnp.pad(
+                                chunk,
+                                (0, self.args.seqlen - len(chunk) + 1),
+                                constant_values=self.eot_token_id,
+                            )
+                            # Calculate log-likelihood for the whole sequence
+                            ll = self._calc_ll(
+                                seq[:-1],
+                                (0, len(chunk)),
+                                jnp.roll(seq, -1)[:-1],
+                            )
+
+                            total_ll += ll.item()
                         else:
-                            logits = self.model(
-                                window[None, :],
-                                self.args.max_iters,
-                                pad_mask[None, :],
-                                False,
-                                False,
-                                key,
-                            )[0][0, -1]
-                        log_probs = jax.nn.log_softmax(logits, axis=-1)
-                        total_log_prob += log_probs[inp[i]].item()
+                            ll = self._calc_ll(
+                                chunk[:-1],
+                                (0, chunk_size),
+                                jnp.roll(chunk, -1)[:-1],
+                            )
 
-                    res.append((total_log_prob, True))
-                return res
+                            total_ll += ll.item()
 
-            def generate_until(self, requests):
-                res = []
-                for context, until in requests:
-                    inp = self.encode_fn(context)
-                    generated = inp.copy()
+                    output.append(total_ll)
 
-                    while not any(self.decode_fn(generated).endswith(u) for u in until):
-                        if len(generated) >= self.args.seqlen:
-                            break
+                return output
 
-                        window = generated[-self.args.seqlen :]
-                        pad_amount = self.args.seqlen - len(window)
-                        window = jnp.pad(
-                            jnp.array(window),
-                            (pad_amount, 0),
-                            constant_values=self.args.pad_token,
-                        )
-
-                        key = jax.random.PRNGKey(0)
-                        pad_mask = jnp.where(window == self.args.pad_token, 0, 1)
-                        if self.args.baseline:
-                            logits = self.model(
-                                window[None, :], pad_mask[None, :], False, key
-                            )[0, -1]
-                        else:
-                            logits = self.model(
-                                window[None, :],
-                                self.args.max_iters,
-                                pad_mask[None, :],
-                                False,
-                                False,
-                                key,
-                            )[0][0, -1]
-                        next_token = jax.random.categorical(key, logits).item()
-                        generated.append(next_token)
-
-                    res.append(self.decode_fn(generated[len(inp) :]))
-                return res
-            '''
+            def generate_until(self, requests, disable_tqdm: bool = False) -> list[str]:
+                raise NotImplementedError
 
         lm_obj = MyLM(
             model=model,
@@ -286,7 +242,7 @@ class Evaluator:
             task_manager=task_manager,
         )
 
-        return results
+        return results['results'] # type: ignore
 
 
 if __name__ == "__main__":

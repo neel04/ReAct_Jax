@@ -2,9 +2,18 @@ import os
 import jax
 import optuna
 import platform
+import subprocess
 
 if platform.processor() != "arm":
-    jax.distributed.initialize()  # don't run on apple sillicon
+    try:
+        subprocess.check_output("nvidia-smi")
+        print("Nvidia GPU detected!")
+        jax.distributed.initialize(
+            coordinator_address="127.0.0.1:1234", num_processes=1, process_id=0
+        )
+    except Exception:
+        print("No GPU - assuming TPU.")
+        jax.distributed.initialize()  # don't run on apple sillicon
 
 from wandb import Artifact
 from jax import config

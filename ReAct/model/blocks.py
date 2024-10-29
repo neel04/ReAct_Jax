@@ -213,7 +213,7 @@ class AttentionBlock(eqx.Module):
 
         x = jax.vmap(self.ln1)(inp)
 
-        inp = self.sharding.shard_model(inp)
+        inp, x = self.sharding.shard_model((inp, x))
 
         inp += self.attn_gate(
             query=x,
