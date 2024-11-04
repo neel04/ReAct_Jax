@@ -24,7 +24,7 @@ class NewGELU(eqx.Module):
         c = math.sqrt(2.0 / math.pi)
         a = 0.044715
 
-        x = self.sharding.shard_model(x)
+        x = self.sharding.shard_cast(x)
 
         output = 0.5 * x * (1.0 + jax.nn.tanh(c * (x + a * jnp.power(x, 3.0))))
 
@@ -77,7 +77,7 @@ class LinearProj(eqx.Module):
     ) -> Array:
         _mask = jnp.ones_like(self.weight) if mask is None else mask
 
-        arr, _mask = self.sharding.shard_model((arr, _mask))
+        arr, _mask = self.sharding.shard_cast((arr, _mask))
 
         output = self.sharding.shard_model(
             arr @ (self.weight * _mask.astype(arr.dtype)) + self.bias
@@ -112,7 +112,7 @@ class MLP(eqx.Module):
         self.dropout = eqx.nn.Dropout(p=p)
 
     def __call__(self, x: Array, enable_dropout: bool, key: PRNGKeyArray):
-        x = self.sharding.shard_model(x)
+        x = self.sharding.shard_cast(x)
 
         x = self.act(self.layer_1(x))
 
@@ -209,11 +209,11 @@ class AttentionBlock(eqx.Module):
     ) -> Float[Array, "seqlen in_dim"]:
 
         key_1, key_2 = jax.random.split(key, 2)
-        inp, input_arr, mask = self.sharding.shard_model((inp, input_arr, mask))
+        inp, input_arr, mask = self.sharding.shard_cast((inp, input_arr, mask))
 
         x = jax.vmap(self.ln1)(inp)
 
-        inp, x = self.sharding.shard_model((inp, x))
+        inp, x = self.sharding.shard_cast((inp, x))
 
         inp += self.attn_gate(
             query=x,

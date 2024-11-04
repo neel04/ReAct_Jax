@@ -19,7 +19,7 @@ class TinyStoriesDataset:
         self.pad_tok = 50257
         self.bsz = bsz
         self.max_length = max_length + 1
-        self.split = split
+        self.split = split if split != 'test' else 'validation'
 
         self.tok = Tok(vocab_dir=None, max_length=self.max_length) # vocab_dir is None = GPT2 tokenizer
 

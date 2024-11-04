@@ -83,7 +83,7 @@ def make_step(
     num_classes: int,
 ):
     dynamic_model = eqx.filter(model, eqx.is_inexact_array)
-    x, y, pad_mask = strategy.shard_data((x, y, pad_mask))
+    x, y, pad_mask = strategy.shard_cast((x, y, pad_mask))
     dynamic_model, model, opt_state = strategy.shard_model((dynamic_model, model, opt_state))
 
     @eqx.filter_value_and_grad
@@ -174,7 +174,7 @@ class Trainer:
 
         for _, batch in tqdm(enumerate(loader), total=len(loader), desc='Validating'):
             seq, label, pad_mask = jnp.asarray(batch['text'])
-            seq, label, pad_mask = strategy.shard_data((seq, label, pad_mask))
+            seq, label, pad_mask = strategy.shard_cast((seq, label, pad_mask))
             seq, label, pad_mask = policy.cast_to_compute((seq, label, pad_mask))
 
             acc, loss, ppl = self.compute_metrics(
@@ -337,7 +337,7 @@ class Trainer:
         """
         # sharding everything
         model = strategy.shard_model(model)
-        input_arr, label, pad_mask = strategy.shard_data((input_arr, label, pad_mask))
+        input_arr, label, pad_mask = strategy.shard_cast((input_arr, label, pad_mask))
 
         keys = keys[:input_arr.shape[0], ...] # take a batch_size sized slice of the keys
 
@@ -396,7 +396,7 @@ class Trainer:
                 step += step_done  # for multiple epochs
 
                 seq, label, pad_mask = jnp.asarray(batch["text"])
-                seq, label, pad_mask = strategy.shard_data((seq, label, pad_mask))
+                seq, label, pad_mask = strategy.shard_cast((seq, label, pad_mask))
                 seq, label, pad_mask = policy.cast_to_compute((seq, label, pad_mask))
 
                 loss, model, opt_state, grads, updates = make_step(

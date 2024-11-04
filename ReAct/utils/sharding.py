@@ -33,7 +33,8 @@ class Sharding(ABC):
 
     def shard_cast(self, tree: PyTree) -> PyTree:
         """
-        Return the casted & sharded version of the PyTree. Uses `policy.cast_to_compute`
+        Return the casted & sharded version of the PyTree. Uses `policy.cast_to_compute`.
+        Applied `shard_data` policy.
         """
         assert (
             self.policy is not None

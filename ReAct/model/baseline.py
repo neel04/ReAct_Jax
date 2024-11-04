@@ -41,9 +41,9 @@ class VanillaModule(eqx.Module):
             self.sharding, seqlen, n_heads, drop_rate, bottleneck, k
         )
 
-        self.attention_blocks = [
-            eqx.filter(make_attn(k), eqx.is_array_like) for k in keys
-        ]
+        self.attention_blocks = eqx.filter(
+            eqx.filter_vmap(make_attn)(keys), eqx.is_array_like
+        )
 
     @staticmethod
     def make_layer(strategy: Sharding, seqlen: int, n_heads: int, drop_rate: float, bottleneck: int, key: PRNGKeyArray) -> AttentionBlock:
@@ -58,20 +58,29 @@ class VanillaModule(eqx.Module):
     ) -> Array:
         
         input_arr, pad_mask = self.sharding.shard_cast((input_arr, pad_mask))
-        
-        def f(input_arr: Array, block: PyTree):
-            input_arr = self.sharding.shard_cast(input_arr)
 
-            output = block(input_arr, input_arr, pad_mask, enable_dropout, key)
+        dynamic_part, static_part = eqx.partition(
+            self.attention_blocks,
+            eqx.is_array_like,
+            is_leaf=lambda x: isinstance(x, eqx.nn.Dropout),
+        )
+
+        def scan_f(carry: Array, _dy_blck: PyTree):
+            _input_arr = self.sharding.shard_cast(carry)
+
+            block = eqx.combine(_dy_blck, static_part)
+            output = block(_input_arr, _input_arr, pad_mask, enable_dropout, key)
 
             return self.sharding.shard_cast(output), None
 
-        out = input_arr
+        final_output, _ = eqx.internal.scan(
+            f=scan_f,
+            init=input_arr,
+            xs=dynamic_part,
+            kind="checkpointed"
+        )
 
-        for block in self.attention_blocks:
-            out, _ = f(out, block)
-        
-        return policy.cast_to_output(out)
+        return policy.cast_to_output(final_output)
         
 class GPT(eqx.Module):
     """
