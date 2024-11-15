@@ -5,7 +5,7 @@ BRANCH="dev"
 TRAIN_ARGS="--save_dir ./ReAct/outputs/ --dataset tinystories --group debug \
 --num_blocks 4 --width 512 --n_heads 8 --epochs 1 --num_classes 50304 \
 --log_interval 750 --save_interval 10000 --seqlen 512 \
---max_iters 3 --batch_size 512 \
+--max_iters 3 --batch_size 256 --accum_steps 2 \
 --strategy ddp --model_axis 1 \
 --warmup_steps 180 --lr 2e-3 \
 --beta_1 0.9 --beta_2 0.99 \
@@ -18,7 +18,6 @@ export HF_TOKEN=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
 export HF_HOME=/workspace/junk/
 export HF_DATASETS_CACHE=/workspace/junk/
 export JAX_TRACEBACK_FILTERING=off
-export XLA_PYTHON_CLIENT_PREALLOCATE=false
 
 # Change to workspace directory
 mkdir -p /workspace/junk/
@@ -48,7 +47,7 @@ if [ ! -f "$FLAG_FILE" ]; then
     # Install dependencies
     uv pip install -U "jax[cuda12]"
     uv pip install -q transformers datasets scalax tokenizers wandb einops tqdm jaxtyping optax optuna equinox rich
-    uv pip install -U tensorboard-plugin-profile optuna-integration lm-eval nvitop
+    uv pip install -U tensorflow tensorboard-plugin-profile optuna-integration lm-eval nvitop pdbpp
     uv pip install git+https://github.com/deepmind/jmp
     uv pip install git+https://github.com/Findus23/jax-array-info.git
     # ------------------

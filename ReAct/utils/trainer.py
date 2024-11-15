@@ -41,7 +41,6 @@ policy = Policy(compute_dtype=half, param_dtype=half, output_dtype=half)
 ce_loss = cross_entropy_with_logits
 ce_loss.defvjp(_cross_entropy_with_logits_fwd, _cross_entropy_with_logits_bwd)
 
-@eqx.filter_jit
 def iters_fwd(
     model: React, input_arr: Array, pad_mask: Array, iters_to_do: int, key: PRNGKeyArray
 ) -> Array:
@@ -57,7 +56,6 @@ def iters_fwd(
 
     return output
 
-@eqx.filter_jit
 def vanilla_fwd(
     model: GPT, input_arr: Array, pad_mask: Array, iters_to_do: int, key: PRNGKeyArray
 ) -> Array:
@@ -211,12 +209,15 @@ class Trainer:
         # optimizer with weight decay
         optim = optax.chain(
             optax.adaptive_grad_clip(self.args.grad_clip),
-            optax.adamw(
-                learning_rate=self.schedule_fn,
-                weight_decay=self.args.weight_decay,
-                b1=self.args.beta_1,
-                b2=self.args.beta_2,
-                nesterov=self.args.nesterov
+            optax.MultiSteps(
+                optax.adamw(
+                    learning_rate=self.schedule_fn,
+                    weight_decay=self.args.weight_decay,
+                    b1=self.args.beta_1,
+                    b2=self.args.beta_2,
+                    nesterov=self.args.nesterov,
+                ),
+                every_k_schedule=self.args.accum_steps,
             ),
         )
 

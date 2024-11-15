@@ -176,6 +176,13 @@ def parse_args() -> Namespace:
         help="Tune hyperparameters using wandb sweep. Default: False",
     )
 
+    parser.add_argument(
+        "--accum_steps",
+        type=int,
+        default=1,
+        help="Number of steps to accumulate gradients over. Default: 1",
+    )
+
     args = parser.parse_args()
     return args
 

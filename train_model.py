@@ -9,7 +9,7 @@ if platform.processor() != "arm":
         subprocess.check_output("nvidia-smi")
         print("Nvidia GPU detected!")
         jax.distributed.initialize(
-            coordinator_address="127.0.0.1:1234", num_processes=1, process_id=0
+            coordinator_address="127.0.0.1:4312", num_processes=1, process_id=0
         )
     except Exception:
         print("No GPU - assuming TPU.")

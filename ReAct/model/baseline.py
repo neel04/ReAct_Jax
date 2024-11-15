@@ -73,11 +73,11 @@ class VanillaModule(eqx.Module):
 
             return self.sharding.shard_cast(output), None
 
-        final_output, _ = eqx.internal.scan(
+        final_output, _ = jax.lax.scan(
             f=scan_f,
             init=input_arr,
             xs=dynamic_part,
-            kind="checkpointed"
+            unroll=2
         )
 
         return policy.cast_to_output(final_output)
