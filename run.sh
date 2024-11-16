@@ -18,7 +18,9 @@ export HF_TOKEN=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
 export HF_HOME=/workspace/junk/
 export HF_DATASETS_CACHE=/workspace/junk/
 export JAX_TRACEBACK_FILTERING=off
-export XLA_PYTHON_CLIENT_MEM_FRACTION=.90
+export XLA_PYTHON_CLIENT_MEM_FRACTION=.95
+export XLA_GPU_TRITON_GEMM_ANY=true
+export XLA_GPU_ENABLE_TRITON_SOFTMAX_FUSION=true
 
 # Change to workspace directory
 mkdir -p /workspace/junk/
@@ -47,10 +49,10 @@ if [ ! -f "$FLAG_FILE" ]; then
 
     # Install dependencies
     uv pip install -U "jax[cuda12]"
-    uv pip install -q wandb transformers datasets scalax tokenizers einops tqdm jaxtyping optax optuna equinox rich
-    uv pip install -U 'tensorflow<2.1.0' tensorboard-plugin-profile optuna-integration[wandb] lm-eval nvitop pdbpp
-    uv pip install git+https://github.com/deepmind/jmp
-    uv pip install git+https://github.com/Findus23/jax-array-info.git
+    uv pip install -q transformers datasets scalax tokenizers einops tqdm jaxtyping optax optuna equinox rich
+    uv pip install -q optuna-integration wandb lm-eval nvitop pdbpp
+    uv pip install -q git+https://github.com/deepmind/jmp
+    uv pip install -q git+https://github.com/Findus23/jax-array-info.git
     # ------------------
     # Create the flag file
     touch "$FLAG_FILE"
