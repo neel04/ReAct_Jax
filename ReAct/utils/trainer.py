@@ -9,7 +9,6 @@ import optax
 import optuna
 from jaxtyping import Array, Int, PRNGKeyArray, PyTree
 from jmp import Policy
-from torch.utils.data import DataLoader
 from tqdm.auto import tqdm
 
 import wandb
@@ -160,7 +159,7 @@ class Trainer:
         self,
         model: Union[React, GPT],
         is_baseline: bool,
-        loader: DataLoader,
+        loader: Any,
         eval_iters: int,
         keys: PRNGKeyArray,
     ):

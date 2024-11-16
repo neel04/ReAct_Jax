@@ -18,6 +18,7 @@ export HF_TOKEN=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
 export HF_HOME=/workspace/junk/
 export HF_DATASETS_CACHE=/workspace/junk/
 export JAX_TRACEBACK_FILTERING=off
+export XLA_PYTHON_CLIENT_MEM_FRACTION=.90
 
 # Change to workspace directory
 mkdir -p /workspace/junk/
@@ -46,8 +47,8 @@ if [ ! -f "$FLAG_FILE" ]; then
 
     # Install dependencies
     uv pip install -U "jax[cuda12]"
-    uv pip install -q transformers datasets scalax tokenizers wandb einops tqdm jaxtyping optax optuna equinox rich
-    uv pip install -U tensorflow tensorboard-plugin-profile optuna-integration lm-eval nvitop pdbpp
+    uv pip install -q wandb transformers datasets scalax tokenizers einops tqdm jaxtyping optax optuna equinox rich
+    uv pip install -U 'tensorflow<2.1.0' tensorboard-plugin-profile optuna-integration[wandb] lm-eval nvitop pdbpp
     uv pip install git+https://github.com/deepmind/jmp
     uv pip install git+https://github.com/Findus23/jax-array-info.git
     # ------------------
@@ -59,5 +60,5 @@ fi
 
 echo "Executing train_model.py"
 source main_env/bin/activate
-python3 ReAct_Jax/train_model.py $TRAIN_ARGS
+XLA_FLAGS="--xla_gpu_triton_gemm_any=true --xla_gpu_enable_triton_softmax_fusion=true" python3 ReAct_Jax/train_model.py $TRAIN_ARGS
 echo "Finished training!"
