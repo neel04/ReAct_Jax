@@ -31,9 +31,10 @@ from ReAct.utils.trainer import Trainer
 def main(key: PRNGKeyArray):
     args = parse_args()
 
-    config.update('jax_threefry_partitionable', True) # for parallelization
+    config.update("jax_threefry_partitionable", True)  # for parallelization
     config.update("jax_default_matmul_precision", "bfloat16")
-    
+    config.update("jax_softmax_custom_jvp", True)
+
     # Enter debugging mode, disabling JIT
     if args.debug:
         config.update("jax_debug_nans", True)

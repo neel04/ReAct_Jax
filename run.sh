@@ -3,9 +3,9 @@ BRANCH="dev"
 
 # arguments for train_model.py
 TRAIN_ARGS="--save_dir ./ReAct/outputs/ --dataset tinystories --group debug \
---num_blocks 4 --width 512 --n_heads 8 --epochs 1 --num_classes 50304 \
+--num_blocks 8 --width 1536 --n_heads 8 --epochs 1 --num_classes 50304 \
 --log_interval 750 --save_interval 10000 --seqlen 512 \
---max_iters 3 --batch_size 256 --accum_steps 2 \
+--max_iters 3 --batch_size 64 --accum_steps 8 \
 --strategy ddp --model_axis 1 \
 --warmup_steps 180 --lr 2e-3 \
 --beta_1 0.9 --beta_2 0.99 \
