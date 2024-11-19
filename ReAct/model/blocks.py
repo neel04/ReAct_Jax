@@ -213,8 +213,6 @@ class AttentionBlock(eqx.Module):
 
         x = jax.vmap(self.ln1)(inp)
 
-        inp, x = self.sharding.shard_cast((inp, x))
-
         inp += self.attn_gate(
             query=x,
             key_=input_arr,

@@ -74,7 +74,7 @@ def main(key: PRNGKeyArray):
         args.group = 'Sweeps_base' if args.baseline else f'Sweeps_{args.max_iters}i'
 
         jax.experimental.multihost_utils.sync_global_devices('Sync up all nodes.') # type: ignore
-        trainloader = train_dataset.create_dataloader(':20%')
+        trainloader = train_dataset.create_dataloader(':2%')
 
         jax.experimental.multihost_utils.sync_global_devices('Sync up all nodes.')  # type: ignore
         valloader = val_dataset.create_dataloader('-1%:')
