@@ -2,7 +2,7 @@
 BRANCH="dev"
 
 # arguments for train_model.py
-TRAIN_ARGS="--save_dir ./ReAct/outputs/ --dataset tinystories --group debug \
+TRAIN_ARGS="--save_dir ./ReAct/outputs/ --dataset owt --group debug \
 --num_blocks 8 --width 1536 --n_heads 8 --epochs 1 --num_classes 50304 \
 --log_interval 750 --save_interval 10000 --seqlen 512 \
 --max_iters 3 --batch_size 64 --accum_steps 8 \
@@ -62,5 +62,5 @@ fi
 
 echo "Executing train_model.py"
 source main_env/bin/activate
-XLA_FLAGS="--xla_gpu_triton_gemm_any=true --xla_gpu_enable_triton_softmax_fusion=true" python3 ReAct_Jax/train_model.py $TRAIN_ARGS
+XLA_FLAGS="--xla_gpu_triton_gemm_any=true --xla_gpu_enable_triton_softmax_fusion=true --xla_gpu_enable_triton_hopper=true" python3 ReAct_Jax/train_model.py $TRAIN_ARGS
 echo "Finished training!"
