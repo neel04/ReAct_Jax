@@ -183,6 +183,13 @@ def parse_args() -> Namespace:
         help="Number of steps to accumulate gradients over. Default: 1",
     )
 
+    parser.add_argument(
+        "--profile",
+        action="store_true",
+        default=False,
+        help="Enable TensorBoard profiling. Default: False",
+    )
+
     args = parser.parse_args()
     return args
 

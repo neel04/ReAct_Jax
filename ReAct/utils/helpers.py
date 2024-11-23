@@ -9,6 +9,25 @@ import jax.numpy as jnp
 from jax_array_info import sharding_info
 from jaxtyping import Array, PRNGKeyArray, PyTree
 
+class Profiler:
+    def __init__(
+        self, activate_profiler: bool = False, logdir: str = "./profiles/"
+    ) -> None:
+        self.activate_profiler = activate_profiler
+        self.logdir = logdir
+
+    def start_prof(self) -> None:
+        if self.activate_profiler:
+            print(f'Started TensorBoard Profiler at: {self.logdir}')
+            jax.profiler.start_trace(self.logdir)
+
+    def stop_prof(self, output: Any) -> None:
+        if self.activate_profiler:
+            output = output.block_until_ready() # wait for output
+            jax.profiler.stop_trace()
+            print(f'Stopped Profiler at: {self.logdir}')
+
+        exit()
 
 def convert_flops(params: int) -> str:
     if params == 0:

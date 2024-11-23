@@ -17,6 +17,7 @@ from ReAct.model.baseline import GPT
 from ReAct.model.blocks import LinearProj
 from ReAct.model.react import React
 from ReAct.utils.helpers import (
+    Profiler,
     calc_performance_metrics,
     count_params,
     get_leaves,
@@ -376,6 +377,7 @@ class Trainer:
     def train(self, trial: Optional[Any] = None) -> float:
         step_done, epoch_done, val_loss = 0, 0, 999.9
         
+        prof = Profiler(self.args.profile) 
         opt_state, model = self.init_model(self.key)
         optim, _, _ = self.set_optim_and_scheduler(model)
         filter_spec = self.get_filterspec(model)
@@ -386,12 +388,13 @@ class Trainer:
         print(f'Model: {model}')
         
         for epoch in range(epoch_done, self.args.epochs):
-            # init empty metrics
-            epoch_key = jnp.array([epoch, epoch + 1]).astype(jnp.uint32)
             train_acc, train_loss, train_ppl = [], [], []
 
+            epoch_key = jnp.array([epoch, epoch + 1]).astype(jnp.uint32)
             keys = jax.random.split(epoch_key, self.args.batch_size)
-            
+
+            prof.start_prof()
+                            
             for step, batch in tqdm(enumerate(self.trainloader), total=self.dataset_length, desc=f'Epoch {epoch}'):
                 step += step_done  # for multiple epochs
 
@@ -411,6 +414,8 @@ class Trainer:
                     optim=optim,
                     num_classes=self.args.num_classes,
                 )
+
+                prof.stop_prof(loss) # end trace if profiled
 
                 if step % 100 == 0:
                     accuracy, loss, perplexity = self.compute_metrics(keys, model, self.args.baseline, seq, label, pad_mask, self.args.max_iters, self.args.num_classes)
