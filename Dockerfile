@@ -20,7 +20,7 @@ RUN pip3 install -q transformers datasets scalax tokenizers icecream wandb einop
 RUN pip3 install -U optuna-integration plotly lm-eval pdbpp
 RUN pip3 install git+https://github.com/deepmind/jmp
 RUN pip3 install git+https://github.com/Findus23/jax-array-info.git
-RUN pip3 install -q tensorflow tensorboard-plugin-profile "cloud-tpu-profiler>=2.3.0"
+RUN pip3 install -q tensorboard-plugin-profile "cloud-tpu-profiler>=2.3.0"
 
 WORKDIR /ReAct_Jax
 
