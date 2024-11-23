@@ -414,7 +414,7 @@ class Trainer:
                     num_classes=self.args.num_classes,
                 )
 
-                prof.stop_prof(loss, step) # end trace if profiled
+                loss: Array = prof.stop_prof(loss, step) # end trace if profiled
 
                 if step % 100 == 0:
                     accuracy, loss, perplexity = self.compute_metrics(keys, model, self.args.baseline, seq, label, pad_mask, self.args.max_iters, self.args.num_classes)

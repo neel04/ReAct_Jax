@@ -23,7 +23,7 @@ class Profiler:
                 print(f'Started TensorBoard Profiler at: {self.logdir}')
                 jax.profiler.start_trace(self.logdir)
 
-    def stop_prof(self, output: Any, step: int) -> None:
+    def stop_prof(self, output: Array, step: int) -> Array:
         if step == self.warmup_steps:
             if self.activate_profiler:
                 output = output.block_until_ready() # wait for output
@@ -31,6 +31,8 @@ class Profiler:
                 print(f'Stopped Profiler at: {self.logdir}')
 
             self.activate_profiler = False
+
+        return output
 
 def convert_flops(params: int) -> str:
     if params == 0:
