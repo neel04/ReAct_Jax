@@ -53,6 +53,7 @@ if [ ! -f "$FLAG_FILE" ]; then
     uv pip install -q optuna-integration wandb lm-eval nvitop pdbpp
     uv pip install -q git+https://github.com/deepmind/jmp
     uv pip install -q git+https://github.com/Findus23/jax-array-info.git
+    uv pip install -q tensorflow tensorboard-plugin-profile "cloud-tpu-profiler>=2.3.0"
     # ------------------
     # Create the flag file
     touch "$FLAG_FILE"

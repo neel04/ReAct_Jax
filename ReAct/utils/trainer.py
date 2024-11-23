@@ -393,10 +393,9 @@ class Trainer:
             epoch_key = jnp.array([epoch, epoch + 1]).astype(jnp.uint32)
             keys = jax.random.split(epoch_key, self.args.batch_size)
 
-            prof.start_prof()
-                            
             for step, batch in tqdm(enumerate(self.trainloader), total=self.dataset_length, desc=f'Epoch {epoch}'):
                 step += step_done  # for multiple epochs
+                prof.start_prof(step)
 
                 seq, label, pad_mask = jnp.asarray(batch["text"])
                 seq, label, pad_mask = strategy.shard_cast((seq, label, pad_mask))
@@ -415,7 +414,7 @@ class Trainer:
                     num_classes=self.args.num_classes,
                 )
 
-                prof.stop_prof(loss) # end trace if profiled
+                prof.stop_prof(loss, step) # end trace if profiled
 
                 if step % 100 == 0:
                     accuracy, loss, perplexity = self.compute_metrics(keys, model, self.args.baseline, seq, label, pad_mask, self.args.max_iters, self.args.num_classes)
