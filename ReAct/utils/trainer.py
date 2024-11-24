@@ -67,7 +67,7 @@ def _compute_softmax_cross_entropy_loss(pred_y: Array, y_one_hot: Array) -> Arra
 
     return loss.mean()
 
-@eqx.filter_jit(donate='all-except-first')
+@eqx.filter_jit
 def make_step(
     keys: PRNGKeyArray,
     model: Union[React, GPT],
@@ -321,7 +321,7 @@ class Trainer:
 
         return model, opt_state, step, epoch
 
-    @eqx.filter_jit(donate="all-except-first")
+    @eqx.filter_jit
     def compute_metrics(
         self,
         keys: PRNGKeyArray,
@@ -414,10 +414,19 @@ class Trainer:
                     num_classes=self.args.num_classes,
                 )
 
-                loss: Array = prof.stop_prof(loss, step) # end trace if profiled
+                loss = prof.stop_prof(loss, step)  # end trace if profiled
 
                 if step % 100 == 0:
-                    accuracy, loss, perplexity = self.compute_metrics(keys, model, self.args.baseline, seq, label, pad_mask, self.args.max_iters, self.args.num_classes)
+                    accuracy, loss, perplexity = self.compute_metrics(
+                        keys=keys,
+                        model=model,
+                        is_baseline=self.args.baseline,
+                        input_arr=seq,
+                        label=label,
+                        pad_mask=pad_mask,
+                        eval_iters=self.args.max_iters,
+                        num_classes=self.args.num_classes,
+                    )
 
                     train_acc.append(accuracy)
                     train_loss.append(loss)
