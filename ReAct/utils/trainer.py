@@ -9,6 +9,7 @@ import optax
 import optuna
 from jaxtyping import Array, Int, PRNGKeyArray, PyTree
 from jmp import Policy
+from optax._src.base import GradientTransformation
 from tqdm.auto import tqdm
 
 import wandb
@@ -20,7 +21,6 @@ from ReAct.utils.helpers import (
     Profiler,
     calc_performance_metrics,
     count_params,
-    get_leaves,
     get_weights,
     load_eqx_obj,
     megatron_init,
@@ -77,7 +77,7 @@ def make_step(
     y: Array,
     pad_mask: Array,
     iters_to_do: int,
-    optim: Callable,
+    optim: GradientTransformation,
     num_classes: int,
 ):
     dynamic_model = eqx.filter(model, eqx.is_inexact_array)
@@ -86,7 +86,7 @@ def make_step(
 
     @eqx.filter_value_and_grad
     def compute_loss(
-        model: Union[React, GPT],
+        model: React | GPT,
         x: Array,
         y: Array,
         pad_mask: Array,
@@ -125,7 +125,7 @@ def make_step(
     # shard the updated state as well
     model, opt_state = strategy.shard_model((model, opt_state))
 
-    return loss, model, opt_state, grads, updates
+    return loss, model, opt_state
 
 
 class Trainer:
@@ -193,7 +193,10 @@ class Trainer:
 
         return (cum_acc, cum_loss, cum_ppl), seq[0]  # type: ignore
 
-    def set_optim_and_scheduler(self, model: eqx.Module) -> Tuple[Callable, PyTree, eqx.Module]:
+    def set_optim_and_scheduler(
+        self, model: eqx.Module
+    ) -> Tuple[GradientTransformation, PyTree, eqx.Module]:
+
         assert model is not None, 'Model is not initialized'
 
         total_steps = self.args.epochs * self.dataset_length
@@ -401,7 +404,7 @@ class Trainer:
                 seq, label, pad_mask = strategy.shard_cast((seq, label, pad_mask))
                 seq, label, pad_mask = policy.cast_to_compute((seq, label, pad_mask))
 
-                loss, model, opt_state, grads, updates = make_step(
+                loss, model, opt_state = make_step(
                     keys=keys,
                     model=model,
                     opt_state=opt_state,
@@ -465,13 +468,6 @@ class Trainer:
                         keys,
                     )
 
-                    # Flattten the PyTrees
-                    grads, updates, weights = (
-                        get_leaves(grads),
-                        get_leaves(updates),
-                        get_leaves(model),
-                    )
-
                     self.wandb_logger.log(
                         {
                             "Train/acc": cum_train_acc,
@@ -480,9 +476,6 @@ class Trainer:
                             "Val/acc": val_acc,
                             "Val/loss": val_loss,
                             "Val/ppl": val_ppl,
-                            "Gradients": wandb.Histogram(grads, num_bins=64),
-                            "Updates": wandb.Histogram(updates, num_bins=64),
-                            "Weights": wandb.Histogram(weights, num_bins=64),
                         },
                         step=step,
                     )
