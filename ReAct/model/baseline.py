@@ -77,7 +77,7 @@ class VanillaModule(eqx.Module):
             f=scan_f,
             init=input_arr,
             xs=dynamic_part,
-            unroll=True
+            unroll=3
         )
 
         return policy.cast_to_output(final_output)
