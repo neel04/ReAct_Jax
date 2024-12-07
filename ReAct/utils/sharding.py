@@ -1,7 +1,7 @@
 import os
 from abc import ABC, abstractmethod
 from dataclasses import fields
-from typing import Annotated, Any, Tuple
+from typing import Annotated, Any, Tuple, TypeVar
 
 import equinox as eqx
 import jax
@@ -13,6 +13,9 @@ from jaxtyping import Array, PyTree
 from jmp import Policy
 
 from ReAct.utils.helpers import get_spec_on_larger_dim, viz_obj
+
+T = TypeVar("T")
+
 
 class Sharding(ABC):
     def __init__(self, model_axis: int = 1) -> None:
@@ -31,7 +34,7 @@ class Sharding(ABC):
     @abstractmethod
     def shard_one_hot(self, tree: PyTree) -> PyTree: ...
 
-    def shard_cast(self, tree: PyTree) -> PyTree:
+    def shard_cast(self, tree: T) -> T:
         """
         Return the casted & sharded version of the PyTree. Uses `policy.cast_to_compute`.
         Applied `shard_data` policy.

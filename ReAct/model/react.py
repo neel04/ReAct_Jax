@@ -49,9 +49,9 @@ class RecurrentModule(eqx.Module):
             bottleneck * 2, bottleneck, key=keys[0], strategy=self.sharding
         )
 
-        self.attention_layers = [
-            eqx.filter(make_attn(k), eqx.is_array_like) for k in keys
-        ]
+        self.attention_layers = eqx.filter(
+            eqx.filter_vmap(make_attn)(keys), eqx.is_array_like
+        )
 
     @staticmethod
     def make_layer(strategy: Sharding, seqlen: int, n_heads: int, drop_rate: float, bottleneck: int, key: PRNGKeyArray) -> AttentionBlock:
@@ -67,27 +67,29 @@ class RecurrentModule(eqx.Module):
 
         keys = jax.random.split(key, self.num_layers)
 
-        x, pad_mask = policy.cast_to_compute((x, pad_mask))  # (seqlen, bottleneck)
-
         x = self.reshape_gate(x)  # downsample the concatenated array
 
-        def f(input_tup: Tuple[Array, int], block: PyTree) -> Tuple[Tuple[Array, int], Array]:
-            x, idx = input_tup
+        dynamic_part, static_part = eqx.partition(
+            self.attention_layers,
+            eqx.is_array_like,
+            is_leaf=lambda x: isinstance(x, eqx.nn.Dropout),
+        )
 
-            x = block(x, x, pad_mask, enable_dropout, keys[idx])
+        x = self.sharding.shard_cast(x)
 
+        def scan_fn(carry: Tuple[Array, int], blck: PyTree) -> Tuple[PyTree, Array]:
+            x, idx = carry
+            block, key = eqx.combine(blck, static_part), keys[idx]
+
+            x = block(x, x, pad_mask, enable_dropout, key)
             x = jax.vmap(self.post_ln)(x)
-
-            x = policy.cast_to_compute(x)  # casting to bf16
+            x = policy.cast_to_compute(x)
 
             return (x, idx + 1), x
 
-        out = (x, 0)
+        outputs, _ = jax.lax.scan(scan_fn, (x, 0), dynamic_part, unroll=3)
 
-        for block in self.attention_layers:
-            out, _ = f(out, block)
-
-        return policy.cast_to_output(out[0])
+        return policy.cast_to_output(outputs[0])
 
 
 class React(eqx.Module):
