@@ -21,6 +21,7 @@ from ReAct.utils.helpers import (
     Profiler,
     calc_performance_metrics,
     count_params,
+    get_leaves,
     get_weights,
     load_eqx_obj,
     megatron_init,
@@ -41,6 +42,7 @@ policy = Policy(compute_dtype=half, param_dtype=half, output_dtype=half)
 ce_loss = cross_entropy_with_logits
 ce_loss.defvjp(_cross_entropy_with_logits_fwd, _cross_entropy_with_logits_bwd)
 
+@eqx.filter_jit
 def iters_fwd(
     model: React, input_arr: Array, pad_mask: Array, iters_to_do: int, key: PRNGKeyArray
 ) -> Array:
@@ -56,6 +58,7 @@ def iters_fwd(
 
     return output
 
+@eqx.filter_jit
 def vanilla_fwd(
     model: GPT, input_arr: Array, pad_mask: Array, iters_to_do: int, key: PRNGKeyArray
 ) -> Array:
@@ -67,7 +70,7 @@ def _compute_softmax_cross_entropy_loss(pred_y: Array, y_one_hot: Array) -> Arra
 
     return loss.mean()
 
-@eqx.filter_jit
+@eqx.filter_jit(donate='all-except-first')
 def make_step(
     keys: PRNGKeyArray,
     model: Union[React, GPT],
@@ -94,23 +97,23 @@ def make_step(
         num_classes: int,
         keys: PRNGKeyArray,
     ) -> Array:
-        '''
+        """
         Computes the loss of the model w.r.t the input.
-        '''
-        if model.__name__ == 'ReAct':
+        """
+        if model.__name__ == "ReAct":
             forward = iters_fwd
         else:
             forward = vanilla_fwd
 
-        pred_y = strategy.shard_cast(
-            jax.vmap(forward, in_axes=(None, 0, 0, None, 0))(
-                model, x, pad_mask, iters_to_do, keys
-            )
+        pred_y = jax.vmap(forward, in_axes=(None, 0, 0, None, 0))(
+            model, x, pad_mask, iters_to_do, keys
         )  # (batch_size, seqlen, num_classes)
 
-        y_one_hot = strategy.shard_one_hot(
-            jax.nn.one_hot(y, num_classes=num_classes)
-        ) # (batch_size, seqlen, num_classes)
+        y_one_hot = jax.nn.one_hot(
+            y, num_classes=num_classes
+        )  # (batch_size, seqlen, num_classes)
+
+        pred_y, y_one_hot = strategy.shard_one_hot((pred_y, y_one_hot))
 
         loss = _compute_softmax_cross_entropy_loss(pred_y, y_one_hot)
 
@@ -125,7 +128,7 @@ def make_step(
     # shard the updated state as well
     model, opt_state = strategy.shard_model((model, opt_state))
 
-    return loss, model, opt_state
+    return loss, model, opt_state, grads, updates
 
 
 class Trainer:
@@ -141,6 +144,7 @@ class Trainer:
 
         global strategy
         strategy = get_strategy(args.strategy, args.model_axis)
+        strategy._policy = policy # register the policy
 
         self.decode_fn = decode_fn # decode the ids to text
         self.text_data: list = []
@@ -211,7 +215,7 @@ class Trainer:
 
         # optimizer with weight decay
         optim = optax.chain(
-            optax.adaptive_grad_clip(self.args.grad_clip),
+            optax.clip_by_block_rms(self.args.grad_clip),
             optax.MultiSteps(
                 optax.adamw(
                     learning_rate=self.schedule_fn,
@@ -379,17 +383,19 @@ class Trainer:
 
     def train(self, trial: Optional[Any] = None) -> float:
         step_done, epoch_done, val_loss = 0, 0, 999.9
-        
-        prof = Profiler(self.args.profile) 
+
+        prof = Profiler(self.args.profile)
         opt_state, model = self.init_model(self.key)
         optim, _, _ = self.set_optim_and_scheduler(model)
         filter_spec = self.get_filterspec(model)
 
         if self.args.resume is not False:
-            model, opt_state, step_done, epoch_done = self.resume_training(model, opt_state)
+            model, opt_state, step_done, epoch_done = self.resume_training(
+                model, opt_state
+            )
 
-        print(f'Model: {model}')
-        
+        print(f"Model: {model}")
+
         for epoch in range(epoch_done, self.args.epochs):
             train_acc, train_loss, train_ppl = [], [], []
 
@@ -404,7 +410,7 @@ class Trainer:
                 seq, label, pad_mask = strategy.shard_cast((seq, label, pad_mask))
                 seq, label, pad_mask = policy.cast_to_compute((seq, label, pad_mask))
 
-                loss, model, opt_state = make_step(
+                loss, model, opt_state, grads, updates = make_step(
                     keys=keys,
                     model=model,
                     opt_state=opt_state,
@@ -443,11 +449,11 @@ class Trainer:
                             'Train/Lr': self.schedule_fn(epoch + 1 * step).item(),
                             'Train/tokens': step * self.args.batch_size * self.args.seqlen,
                         },
-                        step=step
+                        step=step,
                     )
-                    
+
                     if jnp.isnan(loss):
-                        self.my_logger.warning(f'\nLoss is NaN at step {step}')
+                        self.my_logger.warning(f"\nLoss is NaN at step {step}")
                         return loss
 
                 if step % self.args.log_interval == 0 and len(train_acc) > 0:
@@ -468,6 +474,13 @@ class Trainer:
                         keys,
                     )
 
+                    # Flattten the PyTrees
+                    _grads, _updates, _weights = (
+                        get_leaves(grads),
+                        get_leaves(updates),
+                        get_leaves(model),
+                    )
+
                     self.wandb_logger.log(
                         {
                             "Train/acc": cum_train_acc,
@@ -476,6 +489,9 @@ class Trainer:
                             "Val/acc": val_acc,
                             "Val/loss": val_loss,
                             "Val/ppl": val_ppl,
+                            "Gradients": wandb.Histogram(_grads, num_bins=64),
+                            "Updates": wandb.Histogram(_updates, num_bins=64),
+                            "Weights": wandb.Histogram(_weights, num_bins=64),
                         },
                         step=step,
                     )
@@ -487,29 +503,43 @@ class Trainer:
                     sample_x, val_sample_x = seq[0][:16], val_sample[:16]
 
                     self.my_logger.info(f"epoch={epoch}, step={step}, loss={loss}")
-                    self.my_logger.info(f"Validation accuracy: {val_acc} | using {self.args.max_iters} iterations")
-                    self.my_logger.info(f"Cumulative Training accuracy: {cum_train_acc}\n")
+                    self.my_logger.info(
+                        f"Validation accuracy: {val_acc} | using {self.args.max_iters} iterations"
+                    )
+                    self.my_logger.info(
+                        f"Cumulative Training accuracy: {cum_train_acc}\n"
+                    )
 
-                    self.generate_from_model(model, sample_x, metadata={"type": "train", "step": step}, max_new_tokens=64)
-                    self.generate_from_model(model, val_sample_x, metadata={"type": "val", "step": step}, max_new_tokens=64)
+                    self.generate_from_model(
+                        model,
+                        sample_x,
+                        metadata={"type": "train", "step": step},
+                        max_new_tokens=64,
+                    )
+                    self.generate_from_model(
+                        model,
+                        val_sample_x,
+                        metadata={"type": "val", "step": step},
+                        max_new_tokens=64,
+                    )
 
-                    jax.experimental.multihost_utils.sync_global_devices("Sync up all nodes after inference.") # type: ignore
+                    jax.experimental.multihost_utils.sync_global_devices("Sync up all nodes after inference.")  # type: ignore
 
                 if not self.args.tune_hyperparams and (step + 1) % self.args.save_interval == 0:
                     filepath = f"{self.args.save_dir}model_{epoch}_{step}.eqx"
 
                     save_eqx_obj(self.args.save_dir, filepath, (model, opt_state))
-                    
+
                     self.my_logger.info(f"Model saved at {filepath}")
                     self.wandb_logger.save(filepath)
 
-            step_done = step
-            self.optuna_log(trial, (val_loss, step))
-            
+            step_done = step  # type: ignore
+            self.optuna_log(trial, (val_loss, step))  # type: ignore
+
             print(f"Epoch {epoch} done!")
 
-        self.wandb_logger.finish() # Cleanup
-        
+        self.wandb_logger.finish()
+
         return val_loss
 
     def generate_from_model(

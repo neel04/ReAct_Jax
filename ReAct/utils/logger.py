@@ -4,7 +4,7 @@ import wandb
 import logging
 
 from argparse import Namespace
-from typing import Callable, Optional
+from typing import Any, Callable, Optional
 
 class UnifiedLogger:
     '''
@@ -33,8 +33,8 @@ class UnifiedLogger:
 
         return logger
 
-    def wandb_logger(self, args: Namespace):
-        key = os.environ.get('WANDB_API_KEY')
+    def wandb_logger(self, args: Any):
+        key = os.environ.get("WANDB_API_KEY")
         wandb.login(key=key)
 
         if args.resume:
@@ -44,17 +44,24 @@ class UnifiedLogger:
         else:
             wandb_id = None
 
-        wandb.init(project='ReAct_Jax',
-                   config=args,
-                   group=args.group,
-                   mode='online' if jax.process_index() == 0 and args.exp_logging else 'offline',
-                   resume='allow',
-                   id=wandb_id,
-                   reinit=True)
+        wandb.init(
+            project="ReAct_Jax",
+            config=args,
+            group=args.group,
+            mode="online"
+            if jax.process_index() == 0 and args.exp_logging
+            else "offline",
+            resume="allow",
+            id=wandb_id,
+            reinit=True,
+        )
 
         wandb.run.log_code(
             "../",
-            include_fn=lambda path: path.endswith(".py") or path.endswith(".ipynb") or path.endswith(".sh"))
+            include_fn=lambda path: path.endswith(".py")
+            or path.endswith(".ipynb")
+            or path.endswith(".sh"),
+        )
 
         return wandb
 
@@ -95,12 +102,3 @@ class UnifiedLogger:
         )
 
         return sweep_id
-
-if __name__ == '__main__':
-    my_logger = UnifiedLogger(level='INFO').logger
-
-    my_logger.debug('debug message')
-    my_logger.info('info message')
-    my_logger.warning('warn message')
-    my_logger.error('error message')
-    my_logger.critical('critical message')

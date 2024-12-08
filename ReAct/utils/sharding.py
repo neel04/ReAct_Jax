@@ -20,8 +20,17 @@ T = TypeVar("T")
 class Sharding(ABC):
     def __init__(self, model_axis: int = 1) -> None:
         self.model_axis: int = model_axis
-        self.policy: Policy | None = None
+        self._policy: Policy | None = None
 
+    @property
+    def get_policy(self):
+        assert self._policy is not None, 'No policy registered.'
+        return self._policy
+
+    @get_policy.setter
+    def set_policy(self, policy: Policy):
+        self._policy = policy
+    
     @abstractmethod
     def get_mesh(self) -> Mesh: ...
 
@@ -39,14 +48,13 @@ class Sharding(ABC):
         Return the casted & sharded version of the PyTree. Uses `policy.cast_to_compute`.
         Applied `shard_data` policy.
         """
-        assert (
-            self.policy is not None
-        ), "No policy registered for sharding. Use `filter_shard` instead of `shard_cast`"
+        return self.get_policy.cast_to_compute((self.shard_data(tree)))
 
-        return self.policy.cast_to_compute((self.shard_data(tree)))
+    def shard_model_cast(self, model: PyTree) -> PyTree:
+        return self.get_policy.cast_to_param(self.shard_model(model))
 
-    def set_policy(self, policy: Policy) -> None:
-        self.policy = policy
+    def cast(self, tree: T) -> T:
+        return self.get_policy.cast_to_compute(tree)
 
     def get_devices(self):
         return mesh_utils.create_device_mesh(
@@ -89,17 +97,17 @@ class DDPSharding(Sharding):
         super().__init__(model_axis)
         self.mesh = self.get_mesh()
 
-    def get_mesh(self):
-        return Mesh(self.get_devices(), axis_names=("data", "model"))
+    def get_mesh(self) -> Mesh:
+        return Mesh(self.get_devices().reshape(-1), axis_names=("data"))
 
     def shard_data(self, tree: PyTree | Array) -> PyTree | Array:
         return eqx.filter_shard(tree, NamedSharding(self.mesh, P("data")))
 
-    def shard_model(self, tree: PyTree) -> PyTree:
-        return jtu.tree_map_with_path(self.ddp_sharding, tree)
+    def shard_model(self, tree: T) -> T:
+        return tree
 
     def shard_one_hot(self, tree: PyTree) -> PyTree:
-        return self.shard_data(tree)
+        return tree
 
     def ddp_sharding(
         self, kp: Annotated[str, "DataclassInstance"], leaf: PyTree

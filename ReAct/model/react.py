@@ -75,7 +75,6 @@ class RecurrentModule(eqx.Module):
             is_leaf=lambda x: isinstance(x, eqx.nn.Dropout),
         )
 
-        x = self.sharding.shard_cast(x)
 
         def scan_fn(carry: Tuple[Array, int], blck: PyTree) -> Tuple[PyTree, Array]:
             x, idx = carry
@@ -153,19 +152,13 @@ class React(eqx.Module):
         key: PRNGKeyArray,
     ) -> Array:
         
-        input_arr, interim_thought, mask = self.sharding.shard_cast((input_arr, interim_thought, mask))
-
         def body_fun(latent: Array, idx: int) -> Tuple[Array, Array]:
-            latent = self.sharding.shard_cast(latent)
-
             latent = jnp.concatenate([input_arr, latent], axis=-1) 
 
             latent = self.main_block(latent, mask, enable_dropout, key)  # (seqlen, width)
 
             latent = jax.vmap(self.post_ln)(latent)  # Post-LN for stability
 
-            latent = self.sharding.shard_cast(latent)
-            
             return latent, latent
 
         output, _ = eqx.internal.scan(
@@ -189,7 +182,6 @@ class React(eqx.Module):
         key: PRNGKeyArray = jax.random.PRNGKey(0),
     ) -> Tuple[Array, Array]:
 
-        input_arr: Array = self.sharding.shard_cast(input_arr)
         embed_fn = lambda x: self.embed_ln(self.embed_layer(x))
 
         if prev_thought:
@@ -199,8 +191,6 @@ class React(eqx.Module):
         else:
             input_arr = jax.vmap(embed_fn)(input_arr)  # (batch, seqlen, bottleneck)
             interim_thought = input_arr.copy()  # has to be a copy of the embedded + normed array
-
-        input_arr, interim_thought = self.sharding.shard_cast((input_arr, interim_thought))
 
         output = self.iterate_for_steps(interim_thought, input_arr, pad_mask, iters_to_do, is_training, key)  # (batch, seqlen, bottleneck)
 

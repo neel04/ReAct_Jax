@@ -33,7 +33,6 @@ def main(key: PRNGKeyArray):
 
     config.update("jax_threefry_partitionable", True)  # for parallelization
     config.update("jax_default_matmul_precision", "bfloat16")
-    config.update("jax_softmax_custom_jvp", True)
 
     # Enter debugging mode, disabling JIT
     if args.debug:
@@ -104,8 +103,7 @@ def main(key: PRNGKeyArray):
             "project": "ReAct_Jax",
             "config": args,
             "anonymous": "allow",
-            "entity": "neel",
-            "magic": True,
+            "entity": "neel"
         }
 
         trainer_kwargs = {
@@ -177,7 +175,6 @@ def kickoff_optuna(trial, **trainer_kwargs):
     args.beta_1 = trial.suggest_categorical("beta_1", [0.8, 0.85, 0.9, 0.95, 0.98, 0.99])
     args.beta_2 = trial.suggest_categorical("beta_2", [0.85, 0.9, 0.95, 0.98, 0.99, 0.999])
     args.nesterov = trial.suggest_categorical("nesterov", [True, False])
-    args.grad_clip = trial.suggest_float("grad_clip", 0.5, 2.0, step=0.1)
 
     args = trainer_kwargs['args']
 

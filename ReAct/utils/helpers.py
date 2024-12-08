@@ -1,13 +1,14 @@
 import math
 import os
 from logging import Logger
-from typing import Annotated, Any, Callable, List, Optional, Tuple, Union
+from typing import Annotated, Any, Callable, List, Optional, Sequence, Tuple, Union
 
 import equinox as eqx
 import jax
 import jax.numpy as jnp
 from jax_array_info import sharding_info
 from jaxtyping import Array, PRNGKeyArray, PyTree
+
 
 class Profiler:
     def __init__(
@@ -182,7 +183,7 @@ def save_eqx_obj(save_dir: str, filename: str, obj: tuple):
 
     eqx.tree_serialise_leaves(filename, obj)
 
-def get_leaves(x: PyTree) -> Array:
+def get_leaves(x: PyTree) -> Sequence:
     return jax.flatten_util.ravel_pytree(
         jax.tree_util.tree_flatten(x, eqx.is_array)[0]
     )[0]

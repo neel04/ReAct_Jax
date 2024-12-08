@@ -41,9 +41,7 @@ class VanillaModule(eqx.Module):
             self.sharding, seqlen, n_heads, drop_rate, bottleneck, k
         )
 
-        self.attention_blocks = eqx.filter(
-            eqx.filter_vmap(make_attn)(keys), eqx.is_array_like
-        )
+        self.attention_blocks = [eqx.filter(make_attn(k), eqx.is_array_like) for k in keys]
 
     @staticmethod
     def make_layer(strategy: Sharding, seqlen: int, n_heads: int, drop_rate: float, bottleneck: int, key: PRNGKeyArray) -> AttentionBlock:
@@ -57,30 +55,19 @@ class VanillaModule(eqx.Module):
         key: Optional[PRNGKeyArray] = None,
     ) -> Array:
         
-        input_arr, pad_mask = self.sharding.shard_cast((input_arr, pad_mask))
+        input_arr, pad_mask = self.sharding.cast((input_arr, pad_mask))
 
-        dynamic_part, static_part = eqx.partition(
-            self.attention_blocks,
-            eqx.is_array_like,
-            is_leaf=lambda x: isinstance(x, eqx.nn.Dropout),
-        )
+        def scan_f(carry: Array, block: PyTree):
+            output: Array = block(carry, carry, pad_mask, enable_dropout, key)
+            output  = self.sharding.cast(output)
+            return output, None
 
-        def scan_f(carry: Array, _dy_blck: PyTree):
-            _input_arr = self.sharding.shard_cast(carry)
+        output = input_arr
 
-            block = eqx.combine(_dy_blck, static_part)
-            output = block(_input_arr, _input_arr, pad_mask, enable_dropout, key)
+        for i in self.attention_blocks:
+            output, _ = scan_f(output, i) 
 
-            return self.sharding.shard_cast(output), None
-
-        final_output, _ = jax.lax.scan(
-            f=scan_f,
-            init=input_arr,
-            xs=dynamic_part,
-            unroll=3
-        )
-
-        return policy.cast_to_output(final_output)
+        return output
         
 class GPT(eqx.Module):
     """
@@ -92,7 +79,6 @@ class GPT(eqx.Module):
     sharding: Sharding = eqx.field(static=True)
     embed_layer: eqx.nn.Embedding
     embed_ln: eqx.nn.LayerNorm
-    unemb_ln: eqx.nn.LayerNorm
     main_block: VanillaModule
     out_head: LinearProj
 
@@ -116,7 +102,6 @@ class GPT(eqx.Module):
         ) * ((2 / (5 * width)) ** 0.5)
 
         self.embed_ln = eqx.nn.LayerNorm(width)
-        self.unemb_ln = eqx.nn.LayerNorm(width)
         self.embed_layer = eqx.nn.Embedding(weight=embed_weights)
 
         self.main_block = VanillaModule(
@@ -138,14 +123,11 @@ class GPT(eqx.Module):
         self, input_arr: Array, pad_mask: Array, enable_dropout: bool, key: PRNGKeyArray
     ) -> Array:
 
-        input_arr = self.sharding.shard_cast(input_arr)
         embed_fn = lambda x: self.embed_ln(self.embed_layer(x))
 
+        input_arr, pad_mask = self.sharding.cast((input_arr, pad_mask))
         input_arr = jax.vmap(embed_fn)(input_arr)  # (batch, seqlen, bottleneck)
-        input_arr, pad_mask = self.sharding.shard_cast((input_arr, pad_mask))
 
         output = self.main_block(input_arr, pad_mask, enable_dropout, key)
-        output = self.sharding.shard_cast(output)
-        output = jax.vmap(self.unemb_ln)(output)
 
         return self.out_head(output)

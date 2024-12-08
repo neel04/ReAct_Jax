@@ -24,11 +24,9 @@ class NewGELU(eqx.Module):
         c = math.sqrt(2.0 / math.pi)
         a = 0.044715
 
-        x = self.sharding.shard_cast(x)
-
         output = 0.5 * x * (1.0 + jax.nn.tanh(c * (x + a * jnp.power(x, 3.0))))
 
-        return self.sharding.shard_model(output)
+        return output
 
 
 class LinearProj(eqx.Module):
@@ -60,10 +58,9 @@ class LinearProj(eqx.Module):
 
         lim = 1 / math.sqrt(input_dim)
 
-        self.weight = self.sharding.shard_model(
-            jax.random.uniform(wkey, (input_dim, output_dim), minval=-lim, maxval=lim)
-            * math.sqrt(1 / (3 * input_dim))
-        )
+        self.weight = jax.random.uniform(
+            wkey, (input_dim, output_dim), minval=-lim, maxval=lim
+        ) * math.sqrt(1 / (3 * input_dim))
 
         if use_bias:
             self.bias = jax.random.uniform(bkey, (output_dim,), minval=-lim, maxval=lim)
@@ -75,15 +72,15 @@ class LinearProj(eqx.Module):
         arr: Float[Array, "batch in_dim"],
         mask: Optional[Array] = None,
     ) -> Array:
+
+        arr, mask = self.sharding.shard_model((arr, mask)) 
+
         _mask = jnp.ones_like(self.weight) if mask is None else mask
 
-        arr, _mask = self.sharding.shard_cast((arr, _mask))
-
-        output = self.sharding.shard_model(
+        return self.sharding.shard_model(
             arr @ (self.weight * _mask.astype(arr.dtype)) + self.bias
         )
 
-        return output
 
 class MLP(eqx.Module):
     """A simple MLP - w/ Dropout"""
@@ -112,7 +109,7 @@ class MLP(eqx.Module):
         self.dropout = eqx.nn.Dropout(p=p)
 
     def __call__(self, x: Array, enable_dropout: bool, key: PRNGKeyArray):
-        x = self.sharding.shard_cast(x)
+        x = self.sharding.shard_model(x)
 
         x = self.act(self.layer_1(x))
 
@@ -209,7 +206,8 @@ class AttentionBlock(eqx.Module):
     ) -> Float[Array, "seqlen in_dim"]:
 
         key_1, key_2 = jax.random.split(key, 2)
-        inp, input_arr, mask = self.sharding.shard_cast((inp, input_arr, mask))
+
+        inp, input_arr, mask = self.sharding.shard_model((inp, input_arr, mask))
 
         x = jax.vmap(self.ln1)(inp)
 
