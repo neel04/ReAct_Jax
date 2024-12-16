@@ -176,6 +176,15 @@ def get_weights(m: PyTree, layer: PyTree):
         if is_linear(x)
     ]
 
+def get_hist(tree: PyTree, num_bins: int = 64) -> Any:
+    """
+    Compute histogram, handling for NaNs safely.
+    Returns: Tuple[Array, Array] but wandbs typehinting covereage is so ass.
+    """
+    return jnp.histogram(
+        tree, bins=num_bins, range=(jnp.nanmin(tree), jnp.nanmax(tree))
+    )
+
 
 def save_eqx_obj(save_dir: str, filename: str, obj: tuple):
     if not os.path.exists(save_dir):
