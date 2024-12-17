@@ -1,4 +1,6 @@
 # Byte-compiled / optimized / DLL files
+**.log
+*.log
 __pycache__/
 *.py[cod]
 *$py.class
@@ -162,6 +164,8 @@ cython_debug/
 # vscode
 .vscode/
 .DS_Store
+*DS_Store
+**DS_Store
 *.eqx
 **wandb
 *.wandb
@@ -169,3 +173,6 @@ cython_debug/
 *cached_data
 *pyrightconfig.json
 *compilation_cache*
+typings/
+devlog.md
+lm-evaluation-harness

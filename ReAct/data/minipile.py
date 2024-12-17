@@ -97,13 +97,13 @@ class MiniPileDataset:
         
         return dataset
 
-    def create_dataloader(self, slice: str = '100%'):
+    def create_dataloader(self, slice: str = ':99%'):
         data_path = Path(f'./cached_data/minipile_{self.split}.data')
 
         try:
             dataset = load_dataset(
                 f"Neel-Gupta/minipile-processed_{self.bsz}",
-                split=f"{self.split}[:{slice}]",
+                split=f"{self.split}[{slice}]",
                 verification_mode="no_checks",
                 keep_in_memory=True,
                 num_proc=None,
@@ -125,7 +125,7 @@ class MiniPileDataset:
 
                 dataset = load_dataset(
                     "JeanKaddour/minipile",
-                    split=f"{self.split}[:{slice}]",
+                    split=f"{self.split}[{slice}]",
                     verification_mode='no_checks',
                     keep_in_memory=True,
                     num_proc=None,
