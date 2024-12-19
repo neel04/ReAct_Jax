@@ -136,8 +136,8 @@ def parse_args() -> Namespace:
         "--exp_logging",
         action="store_const",
         const="online",
-        default="disabled",
-        help="Enable experiment logging in the cloud. Default: disabled",
+        default="offline",
+        help="Enable experiment logging in the cloud. Default: offline",
     )
 
     parser.add_argument(

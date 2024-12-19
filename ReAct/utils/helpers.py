@@ -14,7 +14,7 @@ class Profiler:
     def __init__(
         self, activate_profiler: bool = True, logdir: str = "./profiles/"
     ) -> None:
-        self.warmup_steps = 20
+        self.warmup_steps = 50
         self.activate_profiler = activate_profiler
         self.logdir = logdir
 

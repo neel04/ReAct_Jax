@@ -176,9 +176,9 @@ class Trainer:
         num_batches = len(loader)
 
         for _, batch in tqdm(enumerate(loader), total=len(loader), desc='Validating'):
-            seq, label, pad_mask = jnp.asarray(batch['text'])
-            seq, label, pad_mask = strategy.shard_cast((seq, label, pad_mask))
-            seq, label, pad_mask = policy.cast_to_compute((seq, label, pad_mask))
+            _seq, _label, _pad_mask = jnp.asarray(batch['text'])
+            _seq, _label, _pad_mask = policy.cast_to_compute((_seq, _label, _pad_mask))
+            seq, label, pad_mask = strategy.shard_cast((_seq, _label, _pad_mask))
 
             acc, loss, ppl = self.compute_metrics(
                 keys,
@@ -196,7 +196,7 @@ class Trainer:
         # Compute cumulatives
         cum_acc, cum_loss, cum_ppl = metrics_sum / num_batches
 
-        return (cum_acc, cum_loss, cum_ppl), seq[0]  # type: ignore
+        return (cum_acc, cum_loss, cum_ppl), _seq[0]  # type: ignore
 
     def set_optim_and_scheduler(
         self, model: eqx.Module
@@ -407,9 +407,9 @@ class Trainer:
                 step += step_done  # for multiple epochs
                 prof.start_prof(step)
 
-                seq, label, pad_mask = jnp.asarray(batch["text"])
-                seq, label, pad_mask = strategy.shard_cast((seq, label, pad_mask))
-                seq, label, pad_mask = policy.cast_to_compute((seq, label, pad_mask))
+                _seq, _label, _pad_mask = jnp.asarray(batch["text"])
+                _seq, _label, _pad_mask = policy.cast_to_compute((_seq, _label, _pad_mask))
+                seq, label, pad_mask = strategy.shard_cast((_seq, _label, _pad_mask))
 
                 loss, model, opt_state, grads, updates = make_step(
                     keys=keys,
@@ -501,7 +501,7 @@ class Trainer:
                     self.optuna_log(trial, (val_loss, step))
 
                     ## Visualize one sample and model prediction
-                    sample_x, val_sample_x = seq[0][:16], val_sample[:16]
+                    sample_x, val_sample_x = _seq[0][:16], val_sample[:16]
 
                     self.my_logger.info(f"epoch={epoch}, step={step}, loss={loss}")
                     self.my_logger.info(
