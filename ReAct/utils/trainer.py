@@ -71,7 +71,7 @@ def _compute_softmax_cross_entropy_loss(pred_y: Array, y_one_hot: Array) -> Arra
 
     return loss.mean()
 
-@eqx.filter_jit(donate='all-except-first')
+@eqx.filter_jit
 def make_step(
     keys: PRNGKeyArray,
     model: Union[React, GPT],
