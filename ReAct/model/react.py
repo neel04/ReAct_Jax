@@ -77,11 +77,11 @@ class RecurrentModule(eqx.Module):
 
         x, pad_mask = self.sharding.cast((x,pad_mask))
 
-        def scan_fn(carry: Tuple[Array, int], blck: PyTree) -> Tuple[PyTree, Array]:
+        def scan_fn(carry: Tuple[Array, int], blck: PyTree) -> Tuple[Tuple[Array, int], Array]:
             x, idx = carry
-            block, key = eqx.combine(blck, static_part), keys[idx]
 
-            x = block(x, x, pad_mask, enable_dropout, key)
+            block = eqx.combine(blck, static_part)
+            x = block(x, x, pad_mask, enable_dropout, keys[idx])
             x = jax.vmap(self.post_ln)(x)
             x = self.sharding.cast(x)
 
@@ -106,6 +106,7 @@ class React(eqx.Module):
     embed_ln: eqx.nn.LayerNorm
     main_block: RecurrentModule
     post_ln: eqx.nn.LayerNorm
+    unemb_ln: eqx.nn.LayerNorm
     out_head: LinearProj
 
     def __init__(
@@ -138,6 +139,7 @@ class React(eqx.Module):
         )
 
         self.post_ln = eqx.nn.LayerNorm(width)
+        self.unemb_ln = eqx.nn.LayerNorm(width)
         self.out_head = LinearProj(width, vocab_size, key=key3, strategy=self.sharding)
 
     @eqx.filter_jit
@@ -151,12 +153,14 @@ class React(eqx.Module):
         key: PRNGKeyArray,
     ) -> Array:
         
+        keys = jax.random.split(key, iters_to_do)
+
         interim_thought, input_arr = self.sharding.cast((interim_thought, input_arr))
         
         def body_fun(latent: Array, idx: int) -> Tuple[Array, Array]:
             latent = jnp.concatenate([input_arr, latent], axis=-1) 
 
-            latent = self.main_block(latent, mask, enable_dropout, key)  # (seqlen, width)
+            latent = self.main_block(latent, mask, enable_dropout, keys[idx])  # (seqlen, width)
 
             latent = jax.vmap(self.post_ln)(latent)  # Post-LN for stability
 
@@ -198,5 +202,7 @@ class React(eqx.Module):
         output = self.iterate_for_steps(
             interim_thought, input_arr, pad_mask, iters_to_do, is_training, key
         )  # (batch, seqlen, bottleneck)
+
+        output = jax.vmap(self.unemb_ln)(output)
 
         return self.out_head(output), output
