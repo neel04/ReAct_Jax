@@ -3,14 +3,10 @@ from typing import Any, List, Tuple
 import equinox as eqx
 import jax
 import jax.numpy as jnp
+
 from jaxtyping import Array, PRNGKeyArray, PyTree
-from jmp import Policy
-
 from ReAct.utils.sharding import Sharding
-
 from .blocks import AttentionBlock, LinearProj
-
-policy = Policy(compute_dtype=jnp.bfloat16, param_dtype=jnp.float32, output_dtype=jnp.bfloat16)
 
 # ruff: noqa: E402, E731
 
@@ -67,6 +63,8 @@ class RecurrentModule(eqx.Module):
 
         keys = jax.random.split(key, self.num_layers)
 
+        x, pad_mask = self.sharding.cast((x, pad_mask))
+
         x = self.reshape_gate(x)  # downsample the concatenated array
 
         dynamic_part, static_part = eqx.partition(
@@ -75,7 +73,7 @@ class RecurrentModule(eqx.Module):
             is_leaf=lambda x: isinstance(x, eqx.nn.Dropout),
         )
 
-        x, pad_mask = self.sharding.cast((x,pad_mask))
+        x, pad_mask = self.sharding.cast((x, pad_mask))
 
         def scan_fn(carry: Tuple[Array, int], blck: PyTree) -> Tuple[Tuple[Array, int], Array]:
             x, idx = carry
@@ -87,9 +85,9 @@ class RecurrentModule(eqx.Module):
 
             return (x, idx + 1), x
 
-        outputs, _ = jax.lax.scan(scan_fn, (x, 0), dynamic_part, unroll=3)
+        outputs, _ = jax.lax.scan(scan_fn, (x, 0), dynamic_part, unroll=True)
 
-        return policy.cast_to_output(outputs[0])
+        return self.sharding.cast(outputs[0])
 
 
 class React(eqx.Module):
@@ -155,7 +153,7 @@ class React(eqx.Module):
         
         keys = jax.random.split(key, iters_to_do)
 
-        interim_thought, input_arr = self.sharding.cast((interim_thought, input_arr))
+        interim_thought, input_arr, mask = self.sharding.cast((interim_thought, input_arr, mask))
         
         def body_fun(latent: Array, idx: int) -> Tuple[Array, Array]:
             latent = jnp.concatenate([input_arr, latent], axis=-1) 
@@ -198,6 +196,8 @@ class React(eqx.Module):
         else:
             input_arr = jax.vmap(embed_fn)(input_arr)  # (batch, seqlen, bottleneck)
             interim_thought = input_arr.copy()  # has to be a copy of the embedded + normed array
+
+        input_arr, interim_thought = self.sharding.cast((input_arr, interim_thought))
 
         output = self.iterate_for_steps(
             interim_thought, input_arr, pad_mask, iters_to_do, is_training, key

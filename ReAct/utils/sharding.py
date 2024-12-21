@@ -23,12 +23,13 @@ class Sharding(ABC):
         self._policy: Policy | None = None
 
     @property
-    def get_policy(self):
+    def policy(self) -> Policy:
         assert self._policy is not None, 'No policy registered.'
         return self._policy
 
-    @get_policy.setter
+    @policy.setter
     def set_policy(self, policy: Policy):
+        assert isinstance(policy, Policy), 'Incorrect policy type.'
         self._policy = policy
     
     @abstractmethod
@@ -43,18 +44,18 @@ class Sharding(ABC):
     @abstractmethod
     def shard_one_hot(self, tree: PyTree) -> PyTree: ...
 
-    def shard_cast(self, tree: T) -> T:
+    def shard_cast(self, tree: PyTree) -> PyTree:
         """
         Return the casted & sharded version of the PyTree. Uses `policy.cast_to_compute`.
         Applied `shard_data` policy.
         """
-        return self.get_policy.cast_to_compute((self.shard_data(tree)))
+        return self.policy.cast_to_compute((self.shard_data(tree)))
 
-    def shard_model_cast(self, model: PyTree) -> PyTree:
-        return self.get_policy.cast_to_param(self.shard_model(model))
+    def shard_model_cast(self, model: T) -> T:
+        return self.policy.cast_to_param(self.shard_model(model))
 
     def cast(self, tree: T) -> T:
-        return self.get_policy.cast_to_compute(tree)
+        return self.policy.cast_to_compute(tree)
 
     def get_devices(self):
         return mesh_utils.create_device_mesh(
@@ -68,7 +69,7 @@ class Sharding(ABC):
         return tuple(map(get_val, tgt))
 
     def __call__(self, policy: Policy):
-        self.policy = policy
+        self._policy = policy
         return self
 
 def get_strategy(strategy: str | Sharding, *args) -> Sharding: 

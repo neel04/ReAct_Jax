@@ -9,7 +9,7 @@ from jmp import Policy
 
 from ReAct.utils.sharding import Sharding, get_strategy
 
-policy = Policy(compute_dtype=jnp.bfloat16, param_dtype=jnp.float32, output_dtype=jnp.bfloat16)
+policy = Policy(compute_dtype=jnp.bfloat16, param_dtype=jnp.bfloat16, output_dtype=jnp.bfloat16)
 
 # ruff: noqa: F722
 
@@ -24,9 +24,11 @@ class NewGELU(eqx.Module):
         c = math.sqrt(2.0 / math.pi)
         a = 0.044715
 
+        x = self.sharding.shard_model_cast(x)
+        
         output = 0.5 * x * (1.0 + jax.nn.tanh(c * (x + a * jnp.power(x, 3.0))))
 
-        return output
+        return self.sharding.shard_model_cast(output)
 
 
 class LinearProj(eqx.Module):
@@ -67,17 +69,18 @@ class LinearProj(eqx.Module):
         else:
             self.bias = jnp.zeros((output_dim,))
 
+    @eqx.filter_jit
     def __call__(
         self,
         arr: Float[Array, "batch in_dim"],
         mask: Optional[Array] = None,
     ) -> Array:
 
-        arr, mask = self.sharding.shard_model((arr, mask)) 
+        arr, mask = self.sharding.shard_model_cast((arr, mask)) 
 
         _mask = jnp.ones_like(self.weight) if mask is None else mask
 
-        return self.sharding.shard_model(
+        return self.sharding.shard_model_cast(
             arr @ (self.weight * _mask.astype(arr.dtype)) + self.bias
         )
 
@@ -102,24 +105,28 @@ class MLP(eqx.Module):
         key1, key2 = jax.random.split(key, 2)
 
         self.sharding = strategy(policy)
-        self.layer_1 = LinearProj(input_dim, output_dim * 4, key=key1, strategy=strategy)
-        self.layer_2 = LinearProj(output_dim * 4, output_dim, key=key2, strategy=strategy)
+        
+        self.layer_1 = LinearProj(
+            input_dim, output_dim * 4, key=key1, strategy=strategy
+        )
+        self.layer_2 = LinearProj(
+            output_dim * 4, output_dim, key=key2, strategy=strategy
+        )
         self.act = NewGELU(strategy)
 
         self.dropout = eqx.nn.Dropout(p=p)
 
+    @eqx.filter_jit
     def __call__(self, x: Array, enable_dropout: bool, key: PRNGKeyArray):
-        x = self.sharding.shard_model(x)
+        x = self.sharding.shard_model_cast(x)
 
         x = self.act(self.layer_1(x))
-
-        x = self.sharding.shard_model(x)
 
         x = self.layer_2(x)
 
         output = self.dropout(x, key=key, inference=enable_dropout)
 
-        return self.sharding.shard_model(self.act(output))
+        return self.sharding.shard_model_cast(self.act(output))
 
 
 class AttentionBlock(eqx.Module):
@@ -196,6 +203,7 @@ class AttentionBlock(eqx.Module):
 
         return mask
 
+    @eqx.filter_jit
     def __call__(
         self,
         inp: Float[Array, "seqlen in_dim"],
@@ -207,7 +215,7 @@ class AttentionBlock(eqx.Module):
 
         key_1, key_2 = jax.random.split(key, 2)
 
-        inp, input_arr, mask = self.sharding.shard_model((inp, input_arr, mask))
+        inp, input_arr, mask = self.sharding.shard_model_cast((inp, input_arr, mask))
 
         x = jax.vmap(self.ln1)(inp)
 
@@ -223,11 +231,9 @@ class AttentionBlock(eqx.Module):
 
         x = jax.vmap(self.ln2)(inp)
 
-        inp, x = self.sharding.shard_model((inp, x))
-
         inp += self.mlp(x, enable_dropout=True, key=key_2)
 
-        return self.sharding.shard_model(inp)
+        return self.sharding.shard_model_cast(inp)
 
 class Lerp(eqx.Module):
     alpha: Array
@@ -235,6 +241,7 @@ class Lerp(eqx.Module):
     def __init__(self, alpha: float = 0.5):
         self.alpha = jnp.array([alpha])
 
+    @eqx.filter_jit
     def __call__(self, x: Array, y: Array) -> Array:
         x, y = policy.cast_to_compute((x, y))
 

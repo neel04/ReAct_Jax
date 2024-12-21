@@ -84,10 +84,11 @@ def make_step(
     optim: GradientTransformation,
     num_classes: int,
 ):
-    dynamic_model = eqx.filter(model, eqx.is_inexact_array)
     x, y, pad_mask = strategy.shard_cast((x, y, pad_mask))
-    dynamic_model, model, opt_state = strategy.shard_model((dynamic_model, model, opt_state))
+    model, opt_state = strategy.shard_model((model, opt_state))
+    dynamic_model = eqx.filter(model, eqx.is_inexact_array)
 
+    @eqx.filter_jit
     @eqx.filter_value_and_grad
     def compute_loss(
         model: React | GPT,
@@ -114,14 +115,12 @@ def make_step(
             y, num_classes=num_classes
         )  # (batch_size, seqlen, num_classes)
 
-        pred_y, y_one_hot = strategy.shard_one_hot((pred_y, y_one_hot))
-
         loss = _compute_softmax_cross_entropy_loss(pred_y, y_one_hot)
 
         return loss
 
     loss, grads = compute_loss(model, x, y, pad_mask, iters_to_do, num_classes, keys)
-    grads = strategy.shard_model(policy.cast_to_compute(grads))  # cast to bfloat16
+    grads = strategy.shard_model_cast(grads)  # cast to bfloat16
     updates, opt_state = optim.update(grads, opt_state, dynamic_model)
     updates = strategy.shard_model(updates)
     model = eqx.apply_updates(model, updates)
@@ -176,9 +175,9 @@ class Trainer:
         num_batches = len(loader)
 
         for _, batch in tqdm(enumerate(loader), total=len(loader), desc='Validating'):
-            _seq, _label, _pad_mask = jnp.asarray(batch['text'])
-            _seq, _label, _pad_mask = policy.cast_to_compute((_seq, _label, _pad_mask))
-            seq, label, pad_mask = strategy.shard_cast((_seq, _label, _pad_mask))
+            seq, label, pad_mask = jnp.asarray(batch['text'])
+            seq, label, pad_mask = policy.cast_to_compute((seq, label, pad_mask))
+            seq, label, pad_mask = strategy.shard_cast((seq, label, pad_mask))
 
             acc, loss, ppl = self.compute_metrics(
                 keys,
@@ -196,7 +195,7 @@ class Trainer:
         # Compute cumulatives
         cum_acc, cum_loss, cum_ppl = metrics_sum / num_batches
 
-        return (cum_acc, cum_loss, cum_ppl), _seq[0]  # type: ignore
+        return (cum_acc, cum_loss, cum_ppl), seq[0]  # type: ignore
 
     def set_optim_and_scheduler(
         self, model: eqx.Module
@@ -216,7 +215,7 @@ class Trainer:
 
         # optimizer with weight decay
         optim = optax.chain(
-            optax.clip_by_block_rms(self.args.grad_clip),
+            optax.adaptive_grad_clip(self.args.grad_clip),
             optax.MultiSteps(
                 optax.adamw(
                     learning_rate=self.schedule_fn,
@@ -297,7 +296,7 @@ class Trainer:
         calc_performance_metrics(self.args, self.my_logger)  # logs via logger
 
         return opt_state, model
-    
+
     def resume_training(
         self, model: PyTree, opt_state: eqx.Module
     ) -> tuple[PyTree, PyTree, int, int]:
@@ -368,7 +367,7 @@ class Trainer:
         perplexity = jnp.exp(loss)
 
         return accuracy, loss, perplexity
-    
+
     def optuna_log(self, trial: Optional[Any], metrics: Tuple[float, int]):
         '''
         Logs the metrics to the optuna trial
@@ -378,7 +377,7 @@ class Trainer:
         if trial is not None:
             trial.report(loss, step=progress)
             self.my_logger.info(f"\nReported metric: {loss} @ {progress} to optuna.")
-            
+
             if trial.should_prune():
                 raise optuna.exceptions.TrialPruned()
 
@@ -407,9 +406,9 @@ class Trainer:
                 step += step_done  # for multiple epochs
                 prof.start_prof(step)
 
-                _seq, _label, _pad_mask = jnp.asarray(batch["text"])
-                _seq, _label, _pad_mask = policy.cast_to_compute((_seq, _label, _pad_mask))
-                seq, label, pad_mask = strategy.shard_cast((_seq, _label, _pad_mask))
+                seq, label, pad_mask = jnp.asarray(batch["text"])
+                seq, label, pad_mask = policy.cast_to_compute((seq, label, pad_mask))
+                seq, label, pad_mask = strategy.shard_cast((seq, label, pad_mask))
 
                 loss, model, opt_state, grads, updates = make_step(
                     keys=keys,
@@ -446,9 +445,9 @@ class Trainer:
 
                     self.wandb_logger.log(
                         {
-                            'Train/loss': loss,
-                            'Train/Lr': self.schedule_fn(epoch + 1 * step).item(),
-                            'Train/tokens': step * self.args.batch_size * self.args.seqlen,
+                            "Train/loss": loss,
+                            "Train/Lr": self.schedule_fn(epoch + 1 * step).item(),  # type: ignore
+                            "Train/tokens": step * self.args.batch_size * self.args.seqlen,
                         },
                         step=step,
                     )
@@ -476,7 +475,7 @@ class Trainer:
                     )
 
                     # Flattten the PyTrees
-                    _grads, _updates, _weights = (
+                    grads, updates, _weights = (
                         get_leaves(grads),
                         get_leaves(updates),
                         get_leaves(model),
@@ -490,8 +489,8 @@ class Trainer:
                             "Val/acc": val_acc,
                             "Val/loss": val_loss,
                             "Val/ppl": val_ppl,
-                            "Gradients": wandb.Histogram(np_histogram=get_hist(_grads)),
-                            "Updates": wandb.Histogram(np_histogram=get_hist(_updates)),
+                            "Gradients": wandb.Histogram(np_histogram=get_hist(grads)),
+                            "Updates": wandb.Histogram(np_histogram=get_hist(updates)),
                             "Weights": wandb.Histogram(np_histogram=get_hist(_weights)),
                         },
                         step=step,
@@ -501,7 +500,7 @@ class Trainer:
                     self.optuna_log(trial, (val_loss, step))
 
                     ## Visualize one sample and model prediction
-                    sample_x, val_sample_x = _seq[0][:16], val_sample[:16]
+                    sample_x, val_sample_x = seq[0][:16], val_sample[:16]
 
                     self.my_logger.info(f"epoch={epoch}, step={step}, loss={loss}")
                     self.my_logger.info(
@@ -524,7 +523,11 @@ class Trainer:
                         max_new_tokens=64,
                     )
 
-                    jax.experimental.multihost_utils.sync_global_devices("Sync up all nodes after inference.")  # type: ignore
+                    del _weights  # ensure no copies remain.
+
+                    jax.experimental.multihost_utils.sync_global_devices(  # type: ignore
+                        "Sync up all nodes after inference."
+                    )
 
                 if not self.args.tune_hyperparams and (step + 1) % self.args.save_interval == 0:
                     filepath = f"{self.args.save_dir}model_{epoch}_{step}.eqx"
