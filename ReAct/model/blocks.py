@@ -248,3 +248,26 @@ class Lerp(eqx.Module):
         output = self.alpha * x + (1 - self.alpha) * y
 
         return policy.cast_to_output(output)
+
+class ModdedEmbedding(eqx.Module):
+    '''
+    Using `jnp.take` instead of indexing like in equinoxs impl.
+    '''
+    sharding: Sharding = eqx.field(static=True)
+    weight: Array
+
+    def __init__(
+        self,
+        num_embeddings: int,
+        embed_dim: int,
+        key: PRNGKeyArray,
+        strategy: Sharding
+    ):
+        self.sharding = strategy(policy)
+
+        self.weight = jax.random.normal(
+            key, (num_embeddings, embed_dim), dtype=jnp.float32
+        ) * ((2 / (5 * embed_dim)) ** 0.5)
+
+    def __call__(self, x: Array) -> Array:
+        return jnp.take(self.weight, x, axis=0)

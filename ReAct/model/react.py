@@ -3,10 +3,11 @@ from typing import Any, List, Tuple
 import equinox as eqx
 import jax
 import jax.numpy as jnp
-
 from jaxtyping import Array, PRNGKeyArray, PyTree
+
 from ReAct.utils.sharding import Sharding
-from .blocks import AttentionBlock, LinearProj
+
+from .blocks import AttentionBlock, LinearProj, ModdedEmbedding
 
 # ruff: noqa: E402, E731
 
@@ -100,7 +101,7 @@ class React(eqx.Module):
     max_iters: int = eqx.field(static=True)
     width: int = eqx.field(static=True)
     
-    embed_layer: eqx.nn.Embedding
+    embed_layer: ModdedEmbedding
     embed_ln: eqx.nn.LayerNorm
     main_block: RecurrentModule
     post_ln: eqx.nn.LayerNorm
@@ -125,13 +126,8 @@ class React(eqx.Module):
         self.max_iters = max_iters
         self.width = width
 
-        # Custom initialization for the Embedding Layer
-        embed_weights: Array = jax.random.normal(
-            key1, (vocab_size, width), dtype=jnp.float32
-        ) * ((2 / (5 * width)) ** 0.5)
-
         self.embed_ln = eqx.nn.LayerNorm(width)
-        self.embed_layer = eqx.nn.Embedding(weight=embed_weights)
+        self.embed_layer = ModdedEmbedding(vocab_size, width, key1, strategy)
         self.main_block = RecurrentModule(
             seqlen, drop_rate, n_heads, num_blocks, width, key2, self.sharding
         )
