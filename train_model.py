@@ -59,13 +59,13 @@ def main(key: PRNGKeyArray):
     # ========= Training/Hypertuning =========
     init_hyperparams = [
         {
-            "lr": 6e-4,
+            "lr": 2e-4,
             "drop_rate": 0.01,
-            "weight_decay": 1e-5,
+            "weight_decay": 2e-4,
             "warmup_steps": 200,
-            "beta_1": 0.9,
+            "beta_1": 0.8,
             "beta_2": 0.9,
-            "nesterov": True,
+            "nesterov": False,
         }
     ]
 
@@ -172,8 +172,10 @@ def kickoff_optuna(trial, **trainer_kwargs):
     args.warmup_steps = trial.suggest_int("warmup_steps", 0, 500, step=50)
 
     # Optimizer hyperparams
-    args.beta_1 = trial.suggest_categorical("beta_1", [0.8, 0.85, 0.9, 0.95, 0.98, 0.99])
-    args.beta_2 = trial.suggest_categorical("beta_2", [0.85, 0.9, 0.95, 0.98, 0.99, 0.999])
+    args.beta_1 = trial.suggest_categorical(
+        "beta_1", [0.2, 0.4, 0.6, 0.7, 0.8, 0.85, 0.9, 0.95, 0.98, 0.99]
+    )
+    args.beta_2 = trial.suggest_categorical("beta_2", [0.7, 0.8, 0.85, 0.9, 0.95])
     args.nesterov = trial.suggest_categorical("nesterov", [True, False])
 
     args = trainer_kwargs['args']
