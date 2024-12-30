@@ -474,13 +474,6 @@ class Trainer:
                         keys,
                     )
 
-                    # Flattten the PyTrees
-                    grads, updates, _weights = (
-                        get_leaves(grads),
-                        get_leaves(updates),
-                        get_leaves(model),
-                    )
-
                     self.wandb_logger.log(
                         {
                             "Train/acc": cum_train_acc,
@@ -491,7 +484,7 @@ class Trainer:
                             "Val/ppl": val_ppl,
                             "Gradients": wandb.Histogram(np_histogram=get_hist(grads)),
                             "Updates": wandb.Histogram(np_histogram=get_hist(updates)),
-                            "Weights": wandb.Histogram(np_histogram=get_hist(_weights)),
+                            "Weights": wandb.Histogram(np_histogram=get_hist(model)),
                         },
                         step=step,
                     )
@@ -522,8 +515,6 @@ class Trainer:
                         metadata={"type": "val", "step": step},
                         max_new_tokens=64,
                     )
-
-                    del _weights  # ensure no copies remain.
 
                     jax.experimental.multihost_utils.sync_global_devices(  # type: ignore
                         "Sync up all nodes after inference."

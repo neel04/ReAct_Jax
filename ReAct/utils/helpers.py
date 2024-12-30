@@ -1,7 +1,7 @@
 import math
 import os
 from logging import Logger
-from typing import Annotated, Any, Callable, List, Optional, Sequence, Tuple, Union
+from typing import Annotated, Any, Callable, List, Optional, Tuple, TypeVar, Union
 
 import equinox as eqx
 import jax
@@ -9,6 +9,7 @@ import jax.numpy as jnp
 from jax_array_info import sharding_info
 from jaxtyping import Array, PRNGKeyArray, PyTree
 
+T = TypeVar('T')
 
 class Profiler:
     def __init__(
@@ -176,13 +177,16 @@ def get_weights(m: PyTree, layer: PyTree):
         if is_linear(x)
     ]
 
+@eqx.filter_jit
 def get_hist(tree: PyTree, num_bins: int = 64) -> Any:
     """
     Compute histogram, handling for NaNs safely.
     Returns: Tuple[Array, Array] but wandbs typehinting covereage is so ass.
     """
+    leaves = get_leaves(tree)
+    
     return jnp.histogram(
-        tree, bins=num_bins, range=(jnp.nanmin(tree), jnp.nanmax(tree))
+        leaves, bins=num_bins, range=(jnp.nanmin(leaves), jnp.nanmax(leaves))
     )
 
 
@@ -192,7 +196,7 @@ def save_eqx_obj(save_dir: str, filename: str, obj: tuple):
 
     eqx.tree_serialise_leaves(filename, obj)
 
-def get_leaves(x: PyTree) -> Sequence:
+def get_leaves(x: T) -> T:
     return jax.flatten_util.ravel_pytree(
         jax.tree_util.tree_flatten(x, eqx.is_array)[0]
     )[0]
