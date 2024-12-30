@@ -4,13 +4,10 @@ import equinox as eqx
 import jax
 import jax.numpy as jnp
 from jaxtyping import Array, PRNGKeyArray, PyTree
-from jmp import Policy
 
 from ReAct.utils.sharding import Sharding
 
-from .blocks import AttentionBlock, LinearProj
-
-policy = Policy(compute_dtype=jnp.bfloat16, param_dtype=jnp.float32, output_dtype=jnp.bfloat16)
+from .blocks import AttentionBlock, LinearProj, ModdedEmbedding
 
 # ruff: noqa: E402, E731
 
@@ -67,6 +64,8 @@ class RecurrentModule(eqx.Module):
 
         keys = jax.random.split(key, self.num_layers)
 
+        x, pad_mask = self.sharding.cast((x, pad_mask))
+
         x = self.reshape_gate(x)  # downsample the concatenated array
 
         dynamic_part, static_part = eqx.partition(
@@ -75,20 +74,21 @@ class RecurrentModule(eqx.Module):
             is_leaf=lambda x: isinstance(x, eqx.nn.Dropout),
         )
 
+        x, pad_mask = self.sharding.cast((x, pad_mask))
 
-        def scan_fn(carry: Tuple[Array, int], blck: PyTree) -> Tuple[PyTree, Array]:
+        def scan_fn(carry: Tuple[Array, int], blck: PyTree) -> Tuple[Tuple[Array, int], Array]:
             x, idx = carry
-            block, key = eqx.combine(blck, static_part), keys[idx]
 
-            x = block(x, x, pad_mask, enable_dropout, key)
+            block = eqx.combine(blck, static_part)
+            x = block(x, x, pad_mask, enable_dropout, keys[idx])
             x = jax.vmap(self.post_ln)(x)
-            x = policy.cast_to_compute(x)
+            x = self.sharding.cast(x)
 
             return (x, idx + 1), x
 
-        outputs, _ = jax.lax.scan(scan_fn, (x, 0), dynamic_part, unroll=3)
+        outputs, _ = jax.lax.scan(scan_fn, (x, 0), dynamic_part, unroll=True)
 
-        return policy.cast_to_output(outputs[0])
+        return self.sharding.cast(outputs[0])
 
 
 class React(eqx.Module):
@@ -101,7 +101,7 @@ class React(eqx.Module):
     max_iters: int = eqx.field(static=True)
     width: int = eqx.field(static=True)
     
-    embed_layer: eqx.nn.Embedding
+    embed_layer: ModdedEmbedding
     embed_ln: eqx.nn.LayerNorm
     main_block: RecurrentModule
     post_ln: eqx.nn.LayerNorm
@@ -126,13 +126,8 @@ class React(eqx.Module):
         self.max_iters = max_iters
         self.width = width
 
-        # Custom initialization for the Embedding Layer
-        embed_weights: Array = jax.random.normal(
-            key1, (vocab_size, width), dtype=jnp.float32
-        ) * ((2 / (5 * width)) ** 0.5)
-
         self.embed_ln = eqx.nn.LayerNorm(width)
-        self.embed_layer = eqx.nn.Embedding(weight=embed_weights)
+        self.embed_layer = ModdedEmbedding(vocab_size, width, key1, strategy)
         self.main_block = RecurrentModule(
             seqlen, drop_rate, n_heads, num_blocks, width, key2, self.sharding
         )
@@ -152,19 +147,25 @@ class React(eqx.Module):
         key: PRNGKeyArray,
     ) -> Array:
         
+        keys = jax.random.split(key, iters_to_do)
+
+        interim_thought, input_arr, mask = self.sharding.cast((interim_thought, input_arr, mask))
+        
         def body_fun(latent: Array, idx: int) -> Tuple[Array, Array]:
             latent = jnp.concatenate([input_arr, latent], axis=-1) 
 
-            latent = self.main_block(latent, mask, enable_dropout, key)  # (seqlen, width)
+            latent = self.main_block(latent, mask, enable_dropout, keys[idx])  # (seqlen, width)
 
             latent = jax.vmap(self.post_ln)(latent)  # Post-LN for stability
+
+            latent = self.sharding.cast(latent)
 
             return latent, latent
 
         output, _ = eqx.internal.scan(
             f=body_fun,
             init=interim_thought,
-            xs=jnp.arange(iters_to_do),
+            xs=jnp.arange(iters_to_do), # type: ignore
             kind="checkpointed",
             checkpoints=iters_to_do,
         )
@@ -192,7 +193,11 @@ class React(eqx.Module):
             input_arr = jax.vmap(embed_fn)(input_arr)  # (batch, seqlen, bottleneck)
             interim_thought = input_arr.copy()  # has to be a copy of the embedded + normed array
 
-        output = self.iterate_for_steps(interim_thought, input_arr, pad_mask, iters_to_do, is_training, key)  # (batch, seqlen, bottleneck)
+        input_arr, interim_thought = self.sharding.cast((input_arr, interim_thought))
+
+        output = self.iterate_for_steps(
+            interim_thought, input_arr, pad_mask, iters_to_do, is_training, key
+        )  # (batch, seqlen, bottleneck)
 
         output = jax.vmap(self.unemb_ln)(output)
 

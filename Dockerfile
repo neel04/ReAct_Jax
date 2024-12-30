@@ -26,3 +26,4 @@ WORKDIR /ReAct_Jax
 
 # Set the entry point to bash 
 ENTRYPOINT ["/bin/bash"]
+

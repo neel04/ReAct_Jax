@@ -58,8 +58,10 @@ class VanillaModule(eqx.Module):
         input_arr, pad_mask = self.sharding.cast((input_arr, pad_mask))
 
         def scan_f(carry: Array, block: PyTree):
+            carry  = self.sharding.cast(carry)
             output: Array = block(carry, carry, pad_mask, enable_dropout, key)
             output  = self.sharding.cast(output)
+            
             return output, None
 
         output = input_arr
@@ -67,7 +69,7 @@ class VanillaModule(eqx.Module):
         for i in self.attention_blocks:
             output, _ = scan_f(output, i) 
 
-        return output
+        return self.sharding.shard_model_cast(output)
         
 class GPT(eqx.Module):
     """
@@ -126,7 +128,10 @@ class GPT(eqx.Module):
         embed_fn = lambda x: self.embed_ln(self.embed_layer(x))
 
         input_arr, pad_mask = self.sharding.cast((input_arr, pad_mask))
+
         input_arr = jax.vmap(embed_fn)(input_arr)  # (batch, seqlen, bottleneck)
+
+        input_arr, pad_mask = self.sharding.cast((input_arr, pad_mask))
 
         output = self.main_block(input_arr, pad_mask, enable_dropout, key)
 
