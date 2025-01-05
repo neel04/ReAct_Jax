@@ -66,7 +66,16 @@ def main(key: PRNGKeyArray):
             "beta_1": 0.9,
             "beta_2": 0.9,
             "nesterov": True,
-        }
+        },
+        {
+            "lr": 2e-4,
+            "drop_rate": 0.00,
+            "weight_decay": 3e-5,
+            "warmup_steps": 400,
+            "beta_1": 0.85,
+            "beta_2": 0.9,
+            "nesterov": True,
+        },
     ]
 
     if args.tune_hyperparams:
@@ -92,10 +101,10 @@ def main(key: PRNGKeyArray):
                 consider_endpoints=True,
                 multivariate=True,
                 warn_independent_sampling=True,
-                n_startup_trials=5,
+                n_startup_trials=10,
             ),
             pruner=optuna.pruners.PercentilePruner(
-                percentile=25.0, n_startup_trials=5, n_min_trials=5, n_warmup_steps=750
+                percentile=25.0, n_startup_trials=5, n_min_trials=5, n_warmup_steps=1500
             ),
         )
 
@@ -166,10 +175,10 @@ def kickoff_optuna(trial, **trainer_kwargs):
     args.epochs = 1
 
     # Regularization hyperparams
-    args.lr = trial.suggest_float("lr", 1e-6, 1e-2)
+    args.lr = trial.suggest_float("lr", 1e-6, 1e-3, log=True)
     args.drop_rate = trial.suggest_float("drop_rate", 0.0, 0.03, step=0.01)
     args.weight_decay = trial.suggest_float("weight_decay", 1e-6, 1e-2)
-    args.warmup_steps = trial.suggest_int("warmup_steps", 0, 500, step=50)
+    args.warmup_steps = trial.suggest_int("warmup_steps", 0, 1000, step=100)
 
     # Optimizer hyperparams
     args.beta_1 = trial.suggest_categorical("beta_1", [0.8, 0.85, 0.9, 0.95, 0.98, 0.99])
