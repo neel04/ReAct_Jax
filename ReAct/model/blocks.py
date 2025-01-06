@@ -1,5 +1,5 @@
 import math
-from typing import Any, Optional 
+from typing import Optional 
 
 import equinox as eqx
 import jax
@@ -32,7 +32,7 @@ class NewGELU(eqx.Module):
 
 
 class LinearProj(eqx.Module):
-    bias: Optional[jax.Array]
+    bias: jax.Array
     weight: jax.Array
 
     sharding: Sharding = eqx.field(static=True, converter=get_strategy)
@@ -46,14 +46,16 @@ class LinearProj(eqx.Module):
         output_dim: int,
         key: PRNGKeyArray,
         use_bias = True,
-        strategy: Sharding | Any = None
+        strategy: Sharding | None = None
     ):
-        assert (
-            input_dim >= 1 or output_dim >= 1
-        ), f"input_dim: {input_dim} | output_dim: {output_dim} are too small"
+        assert input_dim >= 1 or output_dim >= 1, (
+            f"input_dim: {input_dim} | output_dim: {output_dim} are too small"
+        )
+        assert strategy is not None, "No strategy provided."
+
         wkey, bkey = jax.random.split(key, 2)
 
-        self.sharding = strategy(policy) 
+        self.sharding = strategy(policy)
         self.input_dim = input_dim
         self.output_dim = output_dim
         self.use_bias = use_bias
@@ -101,16 +103,17 @@ class MLP(eqx.Module):
         p: float,
         key: PRNGKeyArray,
         strategy: Sharding,
+        ff_mult: int = 4
     ):
         key1, key2 = jax.random.split(key, 2)
 
         self.sharding = strategy(policy)
         
         self.layer_1 = LinearProj(
-            input_dim, output_dim * 4, key=key1, strategy=strategy
+            input_dim, output_dim * ff_mult, key=key1, strategy=strategy
         )
         self.layer_2 = LinearProj(
-            output_dim * 4, output_dim, key=key2, strategy=strategy
+            output_dim * ff_mult, output_dim, key=key2, strategy=strategy
         )
         self.act = NewGELU(strategy)
 
@@ -128,6 +131,29 @@ class MLP(eqx.Module):
 
         return self.sharding.shard_model_cast(self.act(output))
 
+class CopyGate(eqx.Module):
+    """
+    Copy Gate adapted from Csordas et al.
+    """
+
+    sharding: Sharding = eqx.field(static=True)
+    gating_layer: MLP
+
+    def __init__(
+        self, d_model: int, drop_rate: float, key: PRNGKeyArray, strategy: Sharding
+    ):
+        self.sharding = strategy(policy)
+        self.gating_layer = MLP(d_model, d_model, drop_rate, key, strategy, ff_mult=2)
+
+        # Set biases to -3 to ensure no update at the start
+        self.gating_layer = eqx.tree_at(
+            lambda m: m.layer_2.bias,
+            self.gating_layer,
+            replace_fn=lambda arr: jnp.full(arr.shape, -3.0),
+        )
+
+    def __call__(self, input: Array, enable_dropout: bool, key: PRNGKeyArray) -> Array:
+        return jax.nn.tanh(self.gating_layer(input, enable_dropout, key))
 
 class AttentionBlock(eqx.Module):
     """Basic Block for LiteAttention"""
@@ -141,6 +167,7 @@ class AttentionBlock(eqx.Module):
     rope_embed: eqx.nn.RotaryPositionalEmbedding
     ln1: eqx.nn.LayerNorm
     ln2: eqx.nn.LayerNorm
+    copy_gate: CopyGate
     mlp: MLP
 
     def __init__(
@@ -152,7 +179,7 @@ class AttentionBlock(eqx.Module):
         key: PRNGKeyArray,
         strategy: Sharding,
     ):
-        key1, key2 = jax.random.split(key, 2)
+        key1, key2, key3 = jax.random.split(key, 3)
 
         self.sharding = strategy(policy)
 
@@ -178,6 +205,7 @@ class AttentionBlock(eqx.Module):
         self.ln1 = eqx.nn.LayerNorm(self.in_dim)
         self.ln2 = eqx.nn.LayerNorm(self.in_dim)
 
+        self.copy_gate = CopyGate(in_dim, drop_rate, key3, strategy)
         self.mlp = MLP(self.in_dim, self.in_dim, drop_rate, key2, strategy)
 
     def process_heads(
@@ -213,14 +241,12 @@ class AttentionBlock(eqx.Module):
         key: PRNGKeyArray,
     ) -> Float[Array, "seqlen in_dim"]:
 
-        key_1, key_2 = jax.random.split(key, 2)
+        key_1, key_2, key_3 = jax.random.split(key, 3)
 
         inp, input_arr, mask = self.sharding.shard_model_cast((inp, input_arr, mask))
 
-        x = jax.vmap(self.ln1)(inp)
-
-        inp += self.attn_gate(
-            query=x,
+        scores = inp + self.attn_gate(
+            query=inp,
             key_=input_arr,
             value=input_arr,
             mask=self._make_self_attention_mask(mask),
@@ -229,11 +255,17 @@ class AttentionBlock(eqx.Module):
             key=key_1,
         )
 
-        x = jax.vmap(self.ln2)(inp)
+        scores = jax.vmap(self.ln1)(scores)
 
-        inp += self.mlp(x, enable_dropout=True, key=key_2)
+        gate = self.copy_gate(scores, enable_dropout, key_2)
+        ff_out = jax.vmap(self.ln2)(self.mlp(scores, enable_dropout=True, key=key_3))
 
-        return self.sharding.shard_model_cast(inp)
+        # Here we carry over the input (inp)
+        # if the gate is closed. However, in future
+        # We can also carry over scores or some other repr.
+        out = gate * ff_out + (1 - gate) * inp
+
+        return self.sharding.shard_model_cast(out)
 
 class Lerp(eqx.Module):
     alpha: Array
@@ -251,7 +283,7 @@ class Lerp(eqx.Module):
 
 class ModdedEmbedding(eqx.Module):
     '''
-    Using `jnp.take` instead of indexing like in equinoxs impl.
+    Using `jnp.take` instead of naive indexing. Equinox issue #920
     '''
     sharding: Sharding = eqx.field(static=True)
     weight: Array
