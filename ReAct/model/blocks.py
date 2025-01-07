@@ -143,7 +143,7 @@ class CopyGate(eqx.Module):
         self, d_model: int, drop_rate: float, key: PRNGKeyArray, strategy: Sharding
     ):
         self.sharding = strategy(policy)
-        self.gating_layer = MLP(d_model, d_model, drop_rate, key, strategy, ff_mult=2)
+        self.gating_layer = MLP(d_model, d_model, drop_rate, key, strategy, ff_mult=1)
 
         # Set biases to -3 to ensure no update at the start
         self.gating_layer = eqx.tree_at(
