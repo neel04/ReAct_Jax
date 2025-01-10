@@ -28,6 +28,7 @@ from ReAct.utils.arg_parser import parse_args
 from ReAct.utils.logger import UnifiedLogger
 from ReAct.utils.trainer import Trainer
 
+
 def main(key: PRNGKeyArray):
     args = parse_args()
 
@@ -42,19 +43,20 @@ def main(key: PRNGKeyArray):
 
     # ========= Data =========
     match args.dataset.lower():
-        case 'tinystories':
+        case "tinystories":
             dataset = TinyStoriesDataset
-        case 'owt':
+        case "owt":
             dataset = OpenWebTextDataset
-        case 'minipile':
+        case "minipile":
             dataset = MiniPileDataset
-        case 'github':
+        case "github":
             dataset = GithubCodeDataset
         case _:
-            raise ValueError(f"Unsupported dataset '{args.dataset}'. Supported datasets are 'tinystories', 'owt', 'minipile', 'github'.")
+            raise ValueError(
+                f"Unsupported dataset '{args.dataset}'. Supported datasets are 'tinystories', 'owt', 'minipile', 'github'."
+            )
 
-    train_dataset = dataset(split='train', max_length=args.seqlen, bsz=args.batch_size)
-    val_dataset = dataset(split='test', max_length=args.seqlen, bsz=args.batch_size)
+    dataset = dataset(seqlen=args.seqlen, batch_size=args.batch_size)
 
     # ========= Training/Hypertuning =========
     init_hyperparams = [
@@ -79,16 +81,20 @@ def main(key: PRNGKeyArray):
     ]
 
     if args.tune_hyperparams:
-        args.group = 'Sweeps_base' if args.baseline else f'Sweeps_{args.max_iters}i'
+        args.group = "Sweeps_base" if args.baseline else f"Sweeps_{args.max_iters}i"
 
-        jax.experimental.multihost_utils.sync_global_devices('Sync up all nodes.') # type: ignore
-        trainloader = train_dataset.create_dataloader(':10%')
+        jax.experimental.multihost_utils.sync_global_devices("Sync up all nodes.")  # type: ignore
+        trainloader = dataset.create_dataloader(
+            split="train", slice=":10%", upload_to_hub=False
+        )
 
-        jax.experimental.multihost_utils.sync_global_devices('Sync up all nodes.')  # type: ignore
-        valloader = val_dataset.create_dataloader('-1%:')
+        jax.experimental.multihost_utils.sync_global_devices("Sync up all nodes.")  # type: ignore
+        valloader = dataset.create_dataloader(
+            split="val", slice=":10%", upload_to_hub=False
+        )
 
         # Create optuna hypertununing study
-        storage = f'sqlite:///chkp_{args.max_iters}i_{args.num_blocks}L_{args.width}.db'
+        storage = f"sqlite:///chkp_{args.max_iters}i_{args.num_blocks}L_{args.width}.db"
 
         study = optuna.create_study(
             study_name=f"Sweeps_{args.max_iters}i_{args.num_blocks}L_{args.width}",
@@ -112,20 +118,18 @@ def main(key: PRNGKeyArray):
             "project": "ReAct_Jax",
             "config": args,
             "anonymous": "allow",
-            "entity": "neel"
+            "entity": "neel",
         }
 
         trainer_kwargs = {
             "args": args,
             "loaders": (trainloader, valloader),
-            "decode_fn": train_dataset.tok.decode,
-            "key": key
+            "decode_fn": dataset.tok.decode,
+            "key": key,
         }
 
         wandbc = WeightsAndBiasesCallback(
-            metric_name='Val/loss',
-            wandb_kwargs=wandb_kwargs,
-            as_multirun=True
+            metric_name="Val/loss", wandb_kwargs=wandb_kwargs, as_multirun=True
         )
 
         # enqueue a few handpicked hyperparams for trials
@@ -140,16 +144,16 @@ def main(key: PRNGKeyArray):
 
         fig = optuna.visualization.plot_optimization_history(study)
         fig.write_html("optuna_plot.html")
-        
+
         print(f"Best trial: {study.best_trial}")
-        print(f'\nValue: {study.best_trial.value}\nParams: {study.best_trial.params}\n')
+        print(f"\nValue: {study.best_trial.value}\nParams: {study.best_trial.params}\n")
 
     else:
         jax.experimental.multihost_utils.sync_global_devices("Sync up all nodes.")  # type: ignore
-        trainloader = train_dataset.create_dataloader(":99%")
-        
-        jax.experimental.multihost_utils.sync_global_devices('Sync up all nodes.')  # type: ignore
-        valloader = val_dataset.create_dataloader("-1%:")
+        trainloader = dataset.create_dataloader(split="train", upload_to_hub=True)
+
+        jax.experimental.multihost_utils.sync_global_devices("Sync up all nodes.")  # type: ignore
+        valloader = dataset.create_dataloader(split="test", upload_to_hub=True)
 
         logger = UnifiedLogger(args, level="DEBUG")
         my_logger, wandb_logger = logger.my_logger(), logger.wandb_logger(args)
@@ -158,7 +162,7 @@ def main(key: PRNGKeyArray):
             args,
             logger=(my_logger, wandb_logger),
             loaders=(trainloader, valloader),
-            decode_fn=train_dataset.tok.decode,
+            decode_fn=dataset.tok.decode,
             key=key,
         )
 
@@ -166,11 +170,12 @@ def main(key: PRNGKeyArray):
         my_logger.info(f"# of hosts: {jax.process_count()}")
         my_logger.info(f"Host id: {jax.process_index()}")
 
-        with jax.spmd_mode('allow_all'):
+        with jax.spmd_mode("allow_all"):
             trainer.train()
 
+
 def kickoff_optuna(trial, **trainer_kwargs):
-    args = trainer_kwargs['args']
+    args = trainer_kwargs["args"]
 
     args.epochs = 1
 
@@ -181,19 +186,25 @@ def kickoff_optuna(trial, **trainer_kwargs):
     args.warmup_steps = trial.suggest_int("warmup_steps", 0, 1000, step=100)
 
     # Optimizer hyperparams
-    args.beta_1 = trial.suggest_categorical("beta_1", [0.8, 0.85, 0.9, 0.95, 0.98, 0.99])
-    args.beta_2 = trial.suggest_categorical("beta_2", [0.85, 0.9, 0.95, 0.98, 0.99, 0.999])
+    args.beta_1 = trial.suggest_categorical(
+        "beta_1", [0.8, 0.85, 0.9, 0.95, 0.98, 0.99]
+    )
+    args.beta_2 = trial.suggest_categorical(
+        "beta_2", [0.85, 0.9, 0.95, 0.98, 0.99, 0.999]
+    )
     args.nesterov = trial.suggest_categorical("nesterov", [True, False])
 
-    args = trainer_kwargs['args']
+    args = trainer_kwargs["args"]
 
     # ========= Logging ========
-    logger = UnifiedLogger(args, level='DEBUG')
+    logger = UnifiedLogger(args, level="DEBUG")
     my_logger, wandb_logger = logger.my_logger(), logger.wandb_logger(args)
 
     # Store the optuna checkpoint progress
     optuna_chkp_path = f"chkp_{args.max_iters}i_{args.num_blocks}L_{args.width}.db"
-    artifact_name = f"Sweeps_{args.max_iters}i" if not args.baseline else "Sweeps_baseline"
+    artifact_name = (
+        f"Sweeps_{args.max_iters}i" if not args.baseline else "Sweeps_baseline"
+    )
 
     if os.path.isfile(optuna_chkp_path):
         artifact = Artifact(name=artifact_name, type="OptunaCheckpoint")
@@ -205,20 +216,21 @@ def kickoff_optuna(trial, **trainer_kwargs):
 
         artifact.save()
 
-    trainer_kwargs['logger'] = (my_logger, wandb_logger)
+    trainer_kwargs["logger"] = (my_logger, wandb_logger)
 
     trainer = Trainer(**trainer_kwargs)
-    
+
     my_logger.info(f"# of all devices: {jax.device_count()}")
     my_logger.info(f"# of hosts: {jax.process_count()}")
     my_logger.info(f"Host id: {jax.process_index()}")
 
-    with jax.spmd_mode('allow_all'):
+    with jax.spmd_mode("allow_all"):
         output = trainer.train(trial)
-    
+
     return jax.numpy.nan_to_num(output, nan=9e9)
 
-if __name__ == '__main__':
+
+if __name__ == "__main__":
     key = jax.random.PRNGKey(69)
     main(key)
     exit(0)

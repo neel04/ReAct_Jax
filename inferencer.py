@@ -6,7 +6,7 @@ import jax
 import jax.numpy as jnp
 from jaxtyping import Array, PRNGKeyArray
 
-from ReAct.data.owt import OpenWebTextDataset as OWT
+from ReAct.data.tokenizer import Tok
 from ReAct.model.baseline import GPT
 from ReAct.model.react import React
 from ReAct.utils.arg_parser import get_inference_args
@@ -14,16 +14,17 @@ from ReAct.utils.helpers import count_params, load_eqx_obj
 from ReAct.utils.logger import UnifiedLogger
 from ReAct.utils.sharding import get_strategy
 
+
 class Inferencer:
     def __init__(self, args: argparse.Namespace, key: PRNGKeyArray):
         self.pad_token = 50257
         self.key = key
         self.args = args
 
-        dummy_dataset = OWT(split="train")
+        tok = Tok(vocab_dir=None, max_length=512)
 
-        self.decode_fn = dummy_dataset.tok.decode
-        self.encode_fn = dummy_dataset.tok.encode
+        self.decode_fn = tok.decode
+        self.encode_fn = tok.encode
 
         self.strategy = get_strategy(self.args.strategy)
 
