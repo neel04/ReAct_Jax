@@ -187,10 +187,10 @@ def kickoff_optuna(trial, **trainer_kwargs):
 
     # Optimizer hyperparams
     args.beta_1 = trial.suggest_categorical(
-        "beta_1", [0.8, 0.85, 0.9, 0.95, 0.98, 0.99]
+        "beta_1", [0.5, 0.6, 0.65, 0.7, 0.75, 0.8, 0.85, 0.9, 0.95, 0.98, 0.99]
     )
     args.beta_2 = trial.suggest_categorical(
-        "beta_2", [0.85, 0.9, 0.95, 0.98, 0.99, 0.999]
+        "beta_2", [0.5, 0.6, 0.65, 0.7, 0.75, 0.8, 0.85, 0.9, 0.95, 0.98, 0.99, 0.999]
     )
     args.nesterov = trial.suggest_categorical("nesterov", [True, False])
 
