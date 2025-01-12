@@ -8,7 +8,7 @@ from jmp import Policy
 
 from ReAct.utils.sharding import Sharding
 
-from .blocks import AttentionBlock, LinearProj
+from .blocks import NDRAttentionBlock, LinearProj
 
 policy = Policy(compute_dtype=jnp.bfloat16, param_dtype=jnp.float32, output_dtype=jnp.bfloat16)
 
@@ -21,7 +21,7 @@ class VanillaModule(eqx.Module):
     '''
 
     sharding: Sharding = eqx.field(static=True)
-    attention_blocks: PyTree[AttentionBlock]
+    attention_blocks: PyTree[NDRAttentionBlock]
     
     def __init__(
         self,
@@ -44,8 +44,8 @@ class VanillaModule(eqx.Module):
         self.attention_blocks = [eqx.filter(make_attn(k), eqx.is_array_like) for k in keys]
 
     @staticmethod
-    def make_layer(strategy: Sharding, seqlen: int, n_heads: int, drop_rate: float, bottleneck: int, key: PRNGKeyArray) -> AttentionBlock:
-        return AttentionBlock(seqlen, n_heads, drop_rate, bottleneck, key, strategy)
+    def make_layer(strategy: Sharding, seqlen: int, n_heads: int, drop_rate: float, bottleneck: int, key: PRNGKeyArray) -> NDRAttentionBlock:
+        return NDRAttentionBlock(seqlen, n_heads, drop_rate, bottleneck, key, strategy)
 
     def __call__(
         self,
