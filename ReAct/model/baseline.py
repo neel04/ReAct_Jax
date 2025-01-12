@@ -4,25 +4,22 @@ import equinox as eqx
 import jax
 import jax.numpy as jnp
 from jaxtyping import Array, PRNGKeyArray, PyTree
-from jmp import Policy
 
 from ReAct.utils.sharding import Sharding
 
-from .blocks import NDRAttentionBlock, LinearProj
-
-policy = Policy(compute_dtype=jnp.bfloat16, param_dtype=jnp.float32, output_dtype=jnp.bfloat16)
+from .blocks import AttentionBlock, LinearProj
 
 # ruff: noqa: E402, E731
 
 class VanillaModule(eqx.Module):
-    '''
+    """
     Main block of the GPT model where you just compute
     all the attention blocks sequentially
-    '''
+    """
 
     sharding: Sharding = eqx.field(static=True)
-    attention_blocks: PyTree[NDRAttentionBlock]
-    
+    attention_blocks: PyTree[AttentionBlock]
+
     def __init__(
         self,
         seqlen: int,
@@ -31,9 +28,8 @@ class VanillaModule(eqx.Module):
         drop_rate: float,
         num_blocks: int,
         key: PRNGKeyArray,
-        strategy: Sharding
+        strategy: Sharding,
     ):
-        
         self.sharding = strategy
         keys = jax.random.split(key, num_blocks)
 
@@ -41,11 +37,20 @@ class VanillaModule(eqx.Module):
             self.sharding, seqlen, n_heads, drop_rate, bottleneck, k
         )
 
-        self.attention_blocks = [eqx.filter(make_attn(k), eqx.is_array_like) for k in keys]
+        self.attention_blocks = [
+            eqx.filter(make_attn(k), eqx.is_array_like) for k in keys
+        ]
 
     @staticmethod
-    def make_layer(strategy: Sharding, seqlen: int, n_heads: int, drop_rate: float, bottleneck: int, key: PRNGKeyArray) -> NDRAttentionBlock:
-        return NDRAttentionBlock(seqlen, n_heads, drop_rate, bottleneck, key, strategy)
+    def make_layer(
+        strategy: Sharding,
+        seqlen: int,
+        n_heads: int,
+        drop_rate: float,
+        bottleneck: int,
+        key: PRNGKeyArray,
+    ) -> AttentionBlock:
+        return AttentionBlock(seqlen, n_heads, drop_rate, bottleneck, key, strategy)
 
     def __call__(
         self,
@@ -54,23 +59,22 @@ class VanillaModule(eqx.Module):
         enable_dropout: bool = True,
         key: Optional[PRNGKeyArray] = None,
     ) -> Array:
-        
         input_arr, pad_mask = self.sharding.cast((input_arr, pad_mask))
 
         def scan_f(carry: Array, block: PyTree):
-            carry  = self.sharding.cast(carry)
+            carry = self.sharding.cast(carry)
             output: Array = block(carry, carry, pad_mask, enable_dropout, key)
-            output  = self.sharding.cast(output)
-            
+            output = self.sharding.cast(output)
+
             return output, None
 
         output = input_arr
 
         for i in self.attention_blocks:
-            output, _ = scan_f(output, i) 
+            output, _ = scan_f(output, i)
 
         return self.sharding.shard_model_cast(output)
-        
+
 class GPT(eqx.Module):
     """
     Vanilla Transformer model
@@ -124,7 +128,6 @@ class GPT(eqx.Module):
     def __call__(
         self, input_arr: Array, pad_mask: Array, enable_dropout: bool, key: PRNGKeyArray
     ) -> Array:
-
         embed_fn = lambda x: self.embed_ln(self.embed_layer(x))
 
         input_arr, pad_mask = self.sharding.cast((input_arr, pad_mask))
