@@ -207,9 +207,7 @@ class React(eqx.Module):
             input_arr = jax.vmap(embed_fn)(input_arr)  # (batch, seqlen, bottleneck)
         else:
             input_arr = jax.vmap(embed_fn)(input_arr)  # (batch, seqlen, bottleneck)
-            interim_thought = (
-                input_arr.copy()
-            )  # has to be a copy of the embedded + normed array
+            interim_thought = input_arr.copy()   # has to be a copy of the embedded + normed array
 
         input_arr, interim_thought = self.sharding.cast((input_arr, interim_thought))
 

@@ -153,7 +153,7 @@ class CopyGate(eqx.Module):
         )
 
     def __call__(self, input: Array, enable_dropout: bool, key: PRNGKeyArray) -> Array:
-        return jax.nn.tanh(self.gating_layer(input, enable_dropout, key))
+        return jax.nn.sigmoid(self.gating_layer(input, enable_dropout, key))
 
 class NDRAttentionBlock(eqx.Module):
     """CopyGated Augmented block inspired by Csordas et al."""
