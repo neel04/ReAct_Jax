@@ -258,7 +258,7 @@ class NDRAttentionBlock(eqx.Module):
         scores = jax.vmap(self.ln1)(scores)
 
         gate = self.copy_gate(scores, enable_dropout, key_2)
-        ff_out = jax.vmap(self.ln2)(self.mlp(scores, enable_dropout=True, key=key_3))
+        ff_out = jax.nn.tanh(self.mlp(scores, enable_dropout=True, key=key_3))
 
         # Here we carry over the input (inp)
         # if the gate is closed. However, in future

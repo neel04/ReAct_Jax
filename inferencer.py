@@ -26,7 +26,7 @@ class Inferencer:
         self.decode_fn = tok.decode
         self.encode_fn = tok.encode
 
-        self.strategy = get_strategy(self.args.strategy)
+        self.strategy = get_strategy('ddp')
 
     def skeleton_model(self, is_baseline: bool) -> GPT | React:
         if not is_baseline:
