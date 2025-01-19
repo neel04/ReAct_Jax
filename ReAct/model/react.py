@@ -56,7 +56,8 @@ class RecurrentModule(eqx.Module):
 
     def __call__(
         self,
-        x: Array,
+        prev_latent: Array,
+        input_arr: Array,
         pad_mask: Array,
         enable_dropout: bool,
         key: PRNGKeyArray,
@@ -64,9 +65,11 @@ class RecurrentModule(eqx.Module):
 
         keys = jax.random.split(key, self.num_layers)
 
-        x, pad_mask = self.sharding.cast((x, pad_mask))
+        input_arr = jnp.concatenate([prev_latent, input_arr], axis=-1)
 
-        x = self.reshape_gate(x)  # downsample the concatenated array
+        input_arr, pad_mask = self.sharding.cast((input_arr, pad_mask))
+
+        input_arr = self.reshape_gate(input_arr)  # downsample the concatenated array
 
         dynamic_part, static_part = eqx.partition(
             self.attention_layers,
@@ -74,19 +77,19 @@ class RecurrentModule(eqx.Module):
             is_leaf=lambda x: isinstance(x, eqx.nn.Dropout),
         )
 
-        x, pad_mask = self.sharding.cast((x, pad_mask))
+        input_arr, pad_mask = self.sharding.cast((input_arr, pad_mask))
 
         def scan_fn(carry: Tuple[Array, int], blck: PyTree) -> Tuple[Tuple[Array, int], Array]:
             x, idx = carry
 
             block = eqx.combine(blck, static_part)
-            x = block(x, x, pad_mask, enable_dropout, keys[idx])
+            x = block(x, x, prev_latent, pad_mask, enable_dropout, keys[idx])
             x = jax.vmap(self.post_ln)(x)
             x = self.sharding.cast(x)
 
             return (x, idx + 1), x
 
-        outputs, _ = jax.lax.scan(scan_fn, (x, 0), dynamic_part, unroll=True)
+        outputs, _ = jax.lax.scan(scan_fn, (input_arr, 0), dynamic_part, unroll=True)
 
         return self.sharding.cast(outputs[0])
 
@@ -152,9 +155,9 @@ class React(eqx.Module):
         interim_thought, input_arr, mask = self.sharding.cast((interim_thought, input_arr, mask))
         
         def body_fun(latent: Array, idx: int) -> Tuple[Array, Array]:
-            latent = jnp.concatenate([input_arr, latent], axis=-1) 
-
-            latent = self.main_block(latent, mask, enable_dropout, keys[idx])  # (seqlen, width)
+            latent = self.main_block(
+                latent, input_arr, mask, enable_dropout, keys[idx]
+            )  # (seqlen, width)
 
             latent = jax.vmap(self.post_ln)(latent)  # Post-LN for stability
 

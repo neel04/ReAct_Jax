@@ -235,7 +235,8 @@ class NDRAttentionBlock(eqx.Module):
     def __call__(
         self,
         inp: Float[Array, "seqlen in_dim"],
-        input_arr: Array,
+        xattn_arr: Array,
+        prev_latent: Array,
         mask: Array,
         enable_dropout: bool,
         key: PRNGKeyArray,
@@ -243,12 +244,12 @@ class NDRAttentionBlock(eqx.Module):
 
         key_1, key_2, key_3 = jax.random.split(key, 3)
 
-        inp, input_arr, mask = self.sharding.shard_model_cast((inp, input_arr, mask))
+        inp, xattn_arr, mask = self.sharding.shard_model_cast((inp, xattn_arr, mask))
 
         scores = inp + self.attn_gate(
             query=inp,
-            key_=input_arr,
-            value=input_arr,
+            key_=xattn_arr,
+            value=xattn_arr,
             mask=self._make_self_attention_mask(mask),
             inference=enable_dropout,
             process_heads=self.process_heads,
@@ -263,7 +264,7 @@ class NDRAttentionBlock(eqx.Module):
         # Here we carry over the input (inp)
         # if the gate is closed. However, in future
         # We can also carry over scores or some other repr.
-        out = gate * ff_out + (1 - gate) * inp
+        out = gate * ff_out + (1 - gate) * prev_latent
 
         return self.sharding.shard_model_cast(out)
 
