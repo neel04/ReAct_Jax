@@ -7,7 +7,7 @@ from jaxtyping import Array, PRNGKeyArray, PyTree
 
 from ReAct.utils.sharding import Sharding
 
-from .blocks import NDRAttentionBlock, LinearProj, ModdedEmbedding
+from .blocks import AttentionBlock, LinearProj, ModdedEmbedding
 
 # ruff: noqa: E402, E731
 
@@ -51,8 +51,8 @@ class RecurrentModule(eqx.Module):
         )
 
     @staticmethod
-    def make_layer(strategy: Sharding, seqlen: int, n_heads: int, drop_rate: float, bottleneck: int, key: PRNGKeyArray) -> NDRAttentionBlock:
-        return NDRAttentionBlock(seqlen, n_heads, drop_rate, bottleneck, key, strategy)
+    def make_layer(strategy: Sharding, seqlen: int, n_heads: int, drop_rate: float, bottleneck: int, key: PRNGKeyArray) -> AttentionBlock:
+        return AttentionBlock(seqlen, n_heads, drop_rate, bottleneck, key, strategy)
 
     def __call__(
         self,
