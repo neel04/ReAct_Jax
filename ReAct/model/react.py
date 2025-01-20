@@ -83,7 +83,7 @@ class RecurrentModule(eqx.Module):
             x, idx = carry
 
             block = eqx.combine(blck, static_part)
-            x = block(x, x, prev_latent, pad_mask, enable_dropout, keys[idx])
+            x = block(x, x, pad_mask, enable_dropout, keys[idx])
             x = jax.vmap(self.post_ln)(x)
             x = self.sharding.cast(x)
 
