@@ -235,8 +235,7 @@ class NDRAttentionBlock(eqx.Module):
     def __call__(
         self,
         inp: Float[Array, "seqlen in_dim"],
-        xattn_arr: Array,
-        prev_latent: Array,
+        passthrough: Float[Array, "seqlen in_dim"],
         mask: Array,
         enable_dropout: bool,
         key: PRNGKeyArray,
@@ -244,12 +243,12 @@ class NDRAttentionBlock(eqx.Module):
 
         key_1, key_2, key_3 = jax.random.split(key, 3)
 
-        inp, xattn_arr, mask = self.sharding.shard_model_cast((inp, xattn_arr, mask))
+        inp, mask = self.sharding.shard_model_cast((inp, mask))
 
         scores = inp + self.attn_gate(
             query=inp,
-            key_=xattn_arr,
-            value=xattn_arr,
+            key_=inp,
+            value=inp,
             mask=self._make_self_attention_mask(mask),
             inference=enable_dropout,
             process_heads=self.process_heads,
@@ -261,10 +260,10 @@ class NDRAttentionBlock(eqx.Module):
         gate = self.copy_gate(scores, enable_dropout, key_2)
         ff_out = jax.nn.tanh(self.mlp(scores, enable_dropout=True, key=key_3))
 
-        # Here we carry over the input (inp)
+        # Here we carry over the `passthrough`
         # if the gate is closed. However, in future
         # We can also carry over scores or some other repr.
-        out = gate * ff_out + (1 - gate) * prev_latent
+        out = gate * ff_out + (1 - gate) * passthrough
 
         return self.sharding.shard_model_cast(out)
 
@@ -346,7 +345,7 @@ class AttentionBlock(eqx.Module):
     def __call__(
         self,
         inp: Float[Array, "seqlen in_dim"],
-        input_arr: Array,
+        passthrough: None, # for API compatibility
         mask: Array,
         enable_dropout: bool,
         key: PRNGKeyArray,
@@ -354,14 +353,14 @@ class AttentionBlock(eqx.Module):
 
         key_1, key_2 = jax.random.split(key, 2)
 
-        inp, input_arr, mask = self.sharding.shard_model_cast((inp, input_arr, mask))
+        inp, mask = self.sharding.shard_model_cast((inp, mask))
 
         x = jax.vmap(self.ln1)(inp)
 
         inp += self.attn_gate(
             query=x,
-            key_=input_arr,
-            value=input_arr,
+            key_=inp,
+            value=inp,
             mask=self._make_self_attention_mask(mask),
             inference=enable_dropout,
             process_heads=self.process_heads,

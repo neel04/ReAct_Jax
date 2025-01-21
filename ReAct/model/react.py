@@ -7,7 +7,7 @@ from jaxtyping import Array, PRNGKeyArray, PyTree
 
 from ReAct.utils.sharding import Sharding
 
-from .blocks import AttentionBlock, LinearProj, ModdedEmbedding
+from .blocks import LinearProj, ModdedEmbedding, NDRAttentionBlock
 
 # ruff: noqa: E402, E731
 
@@ -51,8 +51,15 @@ class RecurrentModule(eqx.Module):
         )
 
     @staticmethod
-    def make_layer(strategy: Sharding, seqlen: int, n_heads: int, drop_rate: float, bottleneck: int, key: PRNGKeyArray) -> AttentionBlock:
-        return AttentionBlock(seqlen, n_heads, drop_rate, bottleneck, key, strategy)
+    def make_layer(
+        strategy: Sharding,
+        seqlen: int,
+        n_heads: int,
+        drop_rate: float,
+        bottleneck: int,
+        key: PRNGKeyArray,
+    ) -> NDRAttentionBlock:
+        return NDRAttentionBlock(seqlen, n_heads, drop_rate, bottleneck, key, strategy)
 
     def __call__(
         self,
@@ -65,31 +72,37 @@ class RecurrentModule(eqx.Module):
 
         keys = jax.random.split(key, self.num_layers)
 
-        input_arr = jnp.concatenate([prev_latent, input_arr], axis=-1)
-
-        input_arr, pad_mask = self.sharding.cast((input_arr, pad_mask))
-
-        input_arr = self.reshape_gate(input_arr)  # downsample the concatenated array
-
         dynamic_part, static_part = eqx.partition(
             self.attention_layers,
             eqx.is_array_like,
             is_leaf=lambda x: isinstance(x, eqx.nn.Dropout),
         )
 
-        input_arr, pad_mask = self.sharding.cast((input_arr, pad_mask))
+        x = jnp.concatenate([prev_latent, input_arr], axis=-1)
 
-        def scan_fn(carry: Tuple[Array, int], blck: PyTree) -> Tuple[Tuple[Array, int], Array]:
+        x = self.reshape_gate(x)  # downsample the concatenated array
+
+        x, pad_mask = self.sharding.cast((x, pad_mask))
+
+        passthrough = (
+            prev_latent
+            if isinstance(self.attention_layers, NDRAttentionBlock)
+            else None
+        )
+
+        def scan_fn(
+            carry: Tuple[Array, int], blck: PyTree
+        ) -> Tuple[Tuple[Array, int], Array]:
             x, idx = carry
 
-            block = eqx.combine(blck, static_part)
-            x = block(x, x, pad_mask, enable_dropout, keys[idx])
+            layer = eqx.combine(blck, static_part)
+            x = layer(x, passthrough, pad_mask, enable_dropout, keys[idx])
             x = jax.vmap(self.post_ln)(x)
             x = self.sharding.cast(x)
 
             return (x, idx + 1), x
 
-        outputs, _ = jax.lax.scan(scan_fn, (input_arr, 0), dynamic_part, unroll=True)
+        outputs, _ = jax.lax.scan(scan_fn, (x, 0), dynamic_part, unroll=True)
 
         return self.sharding.cast(outputs[0])
 
