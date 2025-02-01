@@ -70,13 +70,13 @@ def main(key: PRNGKeyArray):
             "nesterov": True,
         },
         {
-            "lr": 2e-4,
-            "drop_rate": 0.00,
-            "weight_decay": 3e-5,
-            "warmup_steps": 400,
-            "beta_1": 0.85,
+            "lr": 9e-4,
+            "drop_rate": 0.01,
+            "weight_decay": 4e-4,
+            "warmup_steps": 1000,
+            "beta_1": 0.65,
             "beta_2": 0.9,
-            "nesterov": True,
+            "nesterov": False,
         },
     ]
 
