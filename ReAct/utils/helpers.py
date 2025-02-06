@@ -209,20 +209,28 @@ def broad_to_bsz(arr: Array, shape: tuple) -> Array:
     return jnp.broadcast_to(arr, shape)
 
 
-def count_params(model: Union[Annotated[str, 'GPT'], Annotated[str, 'React']]) -> None:
-    def params_fn(model):
+def count_params(model: Annotated[str, "GPT"] | Annotated[str, "React"]) -> None:
+    def params_fn(model: PyTree):
         return sum(
             x.size for x in jax.tree_util.tree_leaves(eqx.filter(model, eqx.is_array))
         )
 
-    num_params, non_embed_params = params_fn(model), params_fn(model.main_block)
+    num_params, non_embed_params = (
+        params_fn(model),
+        params_fn(model.main_block),
+    )
 
     num_params /= 1_000_000
     non_embed_params /= 1_000_000
 
+    if hasattr(model.main_block, "unshared_layers"):
+        unshared_params = params_fn(model.main_block.unshared_layers) / 1_000_000
+        print(f"\nUnshared Parameters: {unshared_params}M")
+
     print(
-        f"\nModel # of parameters: {num_params:.2f}M\n# of recurrent parameters: {non_embed_params:.2f}M\n"
+        f"Model # of parameters: {num_params:.2f}M\n# of recurrent parameters: {non_embed_params:.2f}M\n"
     )
+
 
 def get_rand_nums(
     key: PRNGKeyArray,

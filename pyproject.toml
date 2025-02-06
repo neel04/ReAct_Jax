@@ -27,6 +27,9 @@ dependencies = [
     "tensorboard-plugin-profile>=2.18.0",
     "cloud-tpu-profiler>=2.3.0",
     "wandb==0.18.7",
+    "ruff>=0.9.4",
+    "basedpyright>=1.26.0",
+    "jupyter>=1.1.1",
 ]
 
 [tool.uv.sources]

@@ -1,5 +1,5 @@
 import math
-from typing import Optional 
+from typing import Callable, Dict, Generic, Tuple, TypeVar, Union
 
 import equinox as eqx
 import jax
@@ -12,6 +12,8 @@ from ReAct.utils.sharding import Sharding, get_strategy
 policy = Policy(compute_dtype=jnp.bfloat16, param_dtype=jnp.bfloat16, output_dtype=jnp.bfloat16)
 
 # ruff: noqa: F722
+
+L = TypeVar('L', bound='LinearProj')
 
 class NewGELU(eqx.Module):
     sharding: Sharding = eqx.field(static=True)
@@ -75,7 +77,7 @@ class LinearProj(eqx.Module):
     def __call__(
         self,
         arr: Float[Array, "batch in_dim"],
-        mask: Optional[Array] = None,
+        mask: Array | None = None,
     ) -> Array:
 
         arr, mask = self.sharding.shard_model_cast((arr, mask)) 
@@ -409,3 +411,47 @@ class ModdedEmbedding(eqx.Module):
 
     def __call__(self, x: Array) -> Array:
         return jnp.take(self.weight, x, axis=0)
+
+class UnsharedBlock(eqx.Module, Generic[L]):
+    """
+    Wrapper class to explicitly manage named layers that aren't
+    shared between iterations.
+    """
+
+    max_iters: int
+    layers: Dict[str, Tuple[L, ...]]
+
+    def __init__(
+        self,
+        layers: Dict[str, Callable[[PRNGKeyArray], L]],
+        max_iters: int,
+        key: PRNGKeyArray,
+    ):
+        keys = jax.random.split(key, max_iters)
+
+        # Initialize a separate instance of each 'named layer' for each iteration
+        self.layers = {
+            name: tuple(layer_init(keys[i]) for i in range(max_iters))
+            for name, layer_init in layers.items()
+        }
+        self.max_iters = max_iters
+
+    def apply_layer(
+        self, name: str, iteration_index: Union[int, Array], x: Array
+    ) -> Array:
+        """Apply the layer for a specific iteration to input x."""
+        if name not in self.layers:
+            raise KeyError(f"No layer named '{name}'")
+
+        layers = self.layers[name]
+
+        # Use lax.switch to select the appropriate layer without indexing with tracer
+        def apply_fn(i):
+            def layer_apply(x):
+                return layers[i](x)
+
+            return layer_apply
+
+        branches = tuple(apply_fn(i) for i in range(len(layers)))
+
+        return jax.lax.switch(iteration_index, branches, x)

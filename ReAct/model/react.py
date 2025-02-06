@@ -1,3 +1,4 @@
+from functools import partial
 from typing import Any, List, Tuple
 
 import equinox as eqx
@@ -7,7 +8,7 @@ from jaxtyping import Array, PRNGKeyArray, PyTree
 
 from ReAct.utils.sharding import Sharding
 
-from .blocks import LinearProj, ModdedEmbedding, NDRAttentionBlock
+from .blocks import LinearProj, ModdedEmbedding, NDRAttentionBlock, UnsharedBlock
 
 # ruff: noqa: E402, E731
 
@@ -20,7 +21,7 @@ class RecurrentModule(eqx.Module):
 
     attention_layers: List[PyTree]
     post_ln: eqx.nn.LayerNorm
-    reshape_gate: LinearProj
+    unshared_layers: UnsharedBlock[LinearProj]
 
     def __init__(
         self,
@@ -29,6 +30,7 @@ class RecurrentModule(eqx.Module):
         n_heads: int,
         num_layers: int,
         bottleneck: int,
+        max_iters: int,
         key: PRNGKeyArray,
         strategy: Sharding
     ):
@@ -42,8 +44,18 @@ class RecurrentModule(eqx.Module):
         )
 
         self.post_ln = eqx.nn.LayerNorm(bottleneck)
-        self.reshape_gate = LinearProj(
-            bottleneck * 2, bottleneck, key=keys[0], strategy=self.sharding
+
+        self.unshared_layers = UnsharedBlock(
+            layers={
+                "reshape_gate": partial(
+                    LinearProj,
+                    bottleneck * 2,
+                    bottleneck,
+                    strategy=self.sharding,
+                )
+            },
+            max_iters=max_iters,
+            key=key,
         )
 
         self.attention_layers = eqx.filter(
@@ -67,6 +79,7 @@ class RecurrentModule(eqx.Module):
         input_arr: Array,
         pad_mask: Array,
         enable_dropout: bool,
+        iteration_index: int,
         key: PRNGKeyArray,
     ) -> Array:
 
@@ -80,7 +93,7 @@ class RecurrentModule(eqx.Module):
 
         x = jnp.concatenate([prev_latent, input_arr], axis=-1)
 
-        x = self.reshape_gate(x)  # downsample the concatenated array
+        x = self.unshared_layers.apply_layer('reshape_gate', iteration_index, x)  # downsample the concatenated array
 
         x, pad_mask = self.sharding.cast((x, pad_mask))
 
@@ -144,8 +157,16 @@ class React(eqx.Module):
 
         self.embed_ln = eqx.nn.LayerNorm(width)
         self.embed_layer = ModdedEmbedding(vocab_size, width, key1, strategy)
+        
         self.main_block = RecurrentModule(
-            seqlen, drop_rate, n_heads, num_blocks, width, key2, self.sharding
+            seqlen,
+            drop_rate,
+            n_heads,
+            num_blocks,
+            width,
+            max_iters,
+            key2,
+            self.sharding,
         )
 
         self.post_ln = eqx.nn.LayerNorm(width)
@@ -168,8 +189,14 @@ class React(eqx.Module):
         interim_thought, input_arr, mask = self.sharding.cast((interim_thought, input_arr, mask))
         
         def body_fun(latent: Array, idx: int) -> Tuple[Array, Array]:
+            
             latent = self.main_block(
-                latent, input_arr, mask, enable_dropout, keys[idx]
+                latent,
+                input_arr,
+                mask,
+                enable_dropout,
+                idx,
+                keys[idx],
             )  # (seqlen, width)
 
             latent = jax.vmap(self.post_ln)(latent)  # Post-LN for stability

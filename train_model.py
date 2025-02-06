@@ -34,6 +34,7 @@ def main(key: PRNGKeyArray):
 
     config.update("jax_threefry_partitionable", True)  # for parallelization
     config.update("jax_default_matmul_precision", "bfloat16")
+    config.update("jax_compilation_cache_dir", "/tmp/jax_cache")
 
     # Enter debugging mode, disabling JIT
     if args.debug:
