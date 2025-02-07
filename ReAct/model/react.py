@@ -8,7 +8,7 @@ from jaxtyping import Array, PRNGKeyArray, PyTree
 
 from ReAct.utils.sharding import Sharding
 
-from .blocks import LinearProj, ModdedEmbedding, NDRAttentionBlock, UnsharedBlock
+from .blocks import LinearProj, ModdedEmbedding, AttentionBlock, UnsharedBlock
 
 # ruff: noqa: E402, E731
 
@@ -70,8 +70,8 @@ class RecurrentModule(eqx.Module):
         drop_rate: float,
         bottleneck: int,
         key: PRNGKeyArray,
-    ) -> NDRAttentionBlock:
-        return NDRAttentionBlock(seqlen, n_heads, drop_rate, bottleneck, key, strategy)
+    ) -> AttentionBlock:
+        return AttentionBlock(seqlen, n_heads, drop_rate, bottleneck, key, strategy)
 
     def __call__(
         self,
@@ -99,7 +99,7 @@ class RecurrentModule(eqx.Module):
 
         passthrough = (
             prev_latent
-            if isinstance(self.attention_layers, NDRAttentionBlock)
+            if isinstance(self.attention_layers, AttentionBlock)
             else None
         )
 
@@ -189,7 +189,6 @@ class React(eqx.Module):
         interim_thought, input_arr, mask = self.sharding.cast((interim_thought, input_arr, mask))
         
         def body_fun(latent: Array, idx: int) -> Tuple[Array, Array]:
-            
             latent = self.main_block(
                 latent,
                 input_arr,

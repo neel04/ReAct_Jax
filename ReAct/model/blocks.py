@@ -1,5 +1,5 @@
 import math
-from typing import Callable, Dict, Generic, Tuple, TypeVar, Union
+from typing import Callable, Dict, Generic, Tuple, TypeVar
 
 import equinox as eqx
 import jax
@@ -436,9 +436,7 @@ class UnsharedBlock(eqx.Module, Generic[L]):
         }
         self.max_iters = max_iters
 
-    def apply_layer(
-        self, name: str, iteration_index: Union[int, Array], x: Array
-    ) -> Array:
+    def apply_layer(self, name: str, iteration_index: int | Array, x: Array) -> Array:
         """Apply the layer for a specific iteration to input x."""
         if name not in self.layers:
             raise KeyError(f"No layer named '{name}'")
