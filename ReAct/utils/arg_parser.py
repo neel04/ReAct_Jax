@@ -177,6 +177,13 @@ def parse_args() -> Namespace:
     )
 
     parser.add_argument(
+        "--sweep_metadata",
+        type=str,
+        default="",
+        help="Extra metadata for W&B Sweep Name. Always Prefix a `_`. Default: ''",
+    )
+
+    parser.add_argument(
         "--accum_steps",
         type=int,
         default=1,

@@ -83,6 +83,7 @@ def main(key: PRNGKeyArray):
 
     if args.tune_hyperparams:
         args.group = "Sweeps_base" if args.baseline else f"Sweeps_{args.max_iters}i"
+        args.group += args.sweep_metadata # add metadata on end
 
         jax.experimental.multihost_utils.sync_global_devices("Sync up all nodes.")  # type: ignore
         trainloader = dataset.create_dataloader(
@@ -95,10 +96,10 @@ def main(key: PRNGKeyArray):
         )
 
         # Create optuna hypertununing study
-        storage = f"sqlite:///chkp_{args.max_iters}i_{args.num_blocks}L_{args.width}.db"
+        storage = f"sqlite:///chkp_{args.max_iters}i_{args.num_blocks}L_{args.width}{args.sweep_metadata}.db"
 
         study = optuna.create_study(
-            study_name=f"Sweeps_{args.max_iters}i_{args.num_blocks}L_{args.width}",
+            study_name=f"Sweeps_{args.max_iters}i_{args.num_blocks}L_{args.width}{args.sweep_metadata}",
             direction="minimize",
             load_if_exists=True,
             storage=storage,
@@ -202,9 +203,12 @@ def kickoff_optuna(trial, **trainer_kwargs):
     my_logger, wandb_logger = logger.my_logger(), logger.wandb_logger(args)
 
     # Store the optuna checkpoint progress
-    optuna_chkp_path = f"chkp_{args.max_iters}i_{args.num_blocks}L_{args.width}.db"
+    optuna_chkp_path = f"chkp_{args.max_iters}i_{args.num_blocks}L_{args.width}{args.sweep_metadata}.db"
+
     artifact_name = (
-        f"Sweeps_{args.max_iters}i" if not args.baseline else "Sweeps_baseline"
+        f"Sweeps_{args.max_iters}i{args.sweep_metadata}"
+        if not args.baseline
+        else f"Sweeps_baseline{args.sweep_metadata}"
     )
 
     if os.path.isfile(optuna_chkp_path):
