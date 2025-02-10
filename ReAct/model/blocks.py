@@ -1,9 +1,11 @@
 import math
+from functools import partial
 from typing import Callable, Dict, Generic, Tuple, TypeVar
 
 import equinox as eqx
 import jax
 import jax.numpy as jnp
+from equinox.nn import LayerNorm
 from jaxtyping import Array, Float, Int, PRNGKeyArray
 from jmp import Policy
 
@@ -12,8 +14,6 @@ from ReAct.utils.sharding import Sharding, get_strategy
 policy = Policy(compute_dtype=jnp.bfloat16, param_dtype=jnp.bfloat16, output_dtype=jnp.bfloat16)
 
 # ruff: noqa: F722
-
-L = TypeVar('L', bound='LinearProj')
 
 class NewGELU(eqx.Module):
     sharding: Sharding = eqx.field(static=True)
@@ -412,6 +412,8 @@ class ModdedEmbedding(eqx.Module):
     def __call__(self, x: Array) -> Array:
         return jnp.take(self.weight, x, axis=0)
 
+L = TypeVar('L', bound=LinearProj | AttentionBlock | LayerNorm)
+
 class UnsharedBlock(eqx.Module, Generic[L]):
     """
     Wrapper class to explicitly manage named layers that aren't
@@ -423,20 +425,31 @@ class UnsharedBlock(eqx.Module, Generic[L]):
 
     def __init__(
         self,
-        layers: Dict[str, Callable[[PRNGKeyArray], L]],
+        layers: Dict[str, Callable[[PRNGKeyArray], L] | L],
         max_iters: int,
         key: PRNGKeyArray,
     ):
         keys = jax.random.split(key, max_iters)
 
-        # Initialize a separate instance of each 'named layer' for each iteration
         self.layers = {
-            name: tuple(layer_init(keys[i]) for i in range(max_iters))
+            name: tuple(self.init_layer(layer_init, keys, i) for i in range(max_iters))
             for name, layer_init in layers.items()
         }
         self.max_iters = max_iters
 
-    def apply_layer(self, name: str, iteration_index: int | Array, x: Array) -> Array:
+    def init_layer(self, layer: L | partial, keys: PRNGKeyArray, idx: int) -> L:
+        if isinstance(layer, partial):
+            return layer(keys[idx])
+
+        return layer
+        
+    def apply_layer(
+        self,
+        name: str,
+        iteration_index: int | Array,
+        args: Tuple,
+        modifier_fn: Callable = lambda x: x,
+    ) -> Array:
         """Apply the layer for a specific iteration to input x."""
         if name not in self.layers:
             raise KeyError(f"No layer named '{name}'")
@@ -444,12 +457,12 @@ class UnsharedBlock(eqx.Module, Generic[L]):
         layers = self.layers[name]
 
         # Use lax.switch to select the appropriate layer without indexing with tracer
-        def apply_fn(i):
-            def layer_apply(x):
-                return layers[i](x)
+        def apply_fn(i: int):
+            def layer_apply(x: Tuple) -> Array:
+                return modifier_fn(layers[i])(*x)
 
             return layer_apply
 
         branches = tuple(apply_fn(i) for i in range(len(layers)))
 
-        return jax.lax.switch(iteration_index, branches, x)
+        return jax.lax.switch(iteration_index, branches, args)

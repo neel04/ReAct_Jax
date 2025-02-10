@@ -4,11 +4,12 @@ from typing import Any, List, Tuple
 import equinox as eqx
 import jax
 import jax.numpy as jnp
+from equinox.nn import LayerNorm
 from jaxtyping import Array, PRNGKeyArray, PyTree
 
 from ReAct.utils.sharding import Sharding
 
-from .blocks import LinearProj, ModdedEmbedding, AttentionBlock, UnsharedBlock
+from .blocks import AttentionBlock, LinearProj, ModdedEmbedding, UnsharedBlock
 
 # ruff: noqa: E402, E731
 
@@ -21,7 +22,7 @@ class RecurrentModule(eqx.Module):
 
     attention_layers: List[PyTree]
     post_ln: eqx.nn.LayerNorm
-    unshared_layers: UnsharedBlock[LinearProj]
+    unshared_layers: UnsharedBlock[LinearProj | LayerNorm]
 
     def __init__(
         self,
@@ -52,7 +53,8 @@ class RecurrentModule(eqx.Module):
                     bottleneck * 2,
                     bottleneck,
                     strategy=self.sharding,
-                )
+                ),
+                'post_ln': LayerNorm(bottleneck)
             },
             max_iters=max_iters,
             key=key,
@@ -93,7 +95,9 @@ class RecurrentModule(eqx.Module):
 
         x = jnp.concatenate([prev_latent, input_arr], axis=-1)
 
-        x = self.unshared_layers.apply_layer('reshape_gate', iteration_index, x)  # downsample the concatenated array
+        x = self.unshared_layers.apply_layer(
+            "reshape_gate", iteration_index, (x,)
+        )  # downsample the concatenated array
 
         x, pad_mask = self.sharding.cast((x, pad_mask))
 
@@ -109,8 +113,10 @@ class RecurrentModule(eqx.Module):
             x, idx = carry
 
             layer = eqx.combine(blck, static_part)
+
             x = layer(x, passthrough, pad_mask, enable_dropout, keys[idx])
-            x = jax.vmap(self.post_ln)(x)
+            x = self.unshared_layers.apply_layer("post_ln", iteration_index, (x,), jax.vmap)
+
             x = self.sharding.cast(x)
 
             return (x, idx + 1), x
@@ -133,7 +139,6 @@ class React(eqx.Module):
     embed_layer: ModdedEmbedding
     embed_ln: eqx.nn.LayerNorm
     main_block: RecurrentModule
-    post_ln: eqx.nn.LayerNorm
     unemb_ln: eqx.nn.LayerNorm
     out_head: LinearProj
 
@@ -169,7 +174,6 @@ class React(eqx.Module):
             self.sharding,
         )
 
-        self.post_ln = eqx.nn.LayerNorm(width)
         self.unemb_ln = eqx.nn.LayerNorm(width)
         self.out_head = LinearProj(width, vocab_size, key=key3, strategy=self.sharding)
 
@@ -197,8 +201,6 @@ class React(eqx.Module):
                 idx,
                 keys[idx],
             )  # (seqlen, width)
-
-            latent = jax.vmap(self.post_ln)(latent)  # Post-LN for stability
 
             latent = self.sharding.cast(latent)
 
