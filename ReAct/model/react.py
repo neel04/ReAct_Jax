@@ -9,7 +9,12 @@ from jaxtyping import Array, PRNGKeyArray, PyTree
 
 from ReAct.utils.sharding import Sharding
 
-from .blocks import AttentionBlock, LinearProj, ModdedEmbedding, UnsharedBlock
+from .blocks import (
+    LinearProj,
+    ModdedEmbedding,
+    NDRAttentionBlock,
+    UnsharedBlock,
+)
 
 # ruff: noqa: E402, E731
 
@@ -41,7 +46,7 @@ class RecurrentModule(eqx.Module):
         keys = jax.random.split(key, num_layers)
 
         make_attn = lambda k: self.make_layer(
-            self.sharding, seqlen, n_heads, drop_rate, bottleneck, k
+            self.sharding, seqlen, n_heads, drop_rate, bottleneck, max_iters, k
         )
 
         self.post_ln = eqx.nn.LayerNorm(bottleneck)
@@ -71,9 +76,18 @@ class RecurrentModule(eqx.Module):
         n_heads: int,
         drop_rate: float,
         bottleneck: int,
+        max_iters: int,
         key: PRNGKeyArray,
-    ) -> AttentionBlock:
-        return AttentionBlock(seqlen, n_heads, drop_rate, bottleneck, key, strategy)
+    ) -> NDRAttentionBlock:
+        return NDRAttentionBlock(
+            seqlen,
+            n_heads,
+            drop_rate,
+            bottleneck,
+            max_iters=max_iters,
+            key=key,
+            strategy=strategy,
+        )
 
     def __call__(
         self,
@@ -101,9 +115,10 @@ class RecurrentModule(eqx.Module):
 
         x, pad_mask = self.sharding.cast((x, pad_mask))
 
+        # TODO: Ensure `NDRAttentionBlock` isn't changed to vanilla AttentionBlock
         passthrough = (
             prev_latent
-            if isinstance(self.attention_layers, AttentionBlock)
+            if isinstance(self.attention_layers, NDRAttentionBlock)
             else None
         )
 
@@ -114,7 +129,7 @@ class RecurrentModule(eqx.Module):
 
             layer = eqx.combine(blck, static_part)
 
-            x = layer(x, passthrough, pad_mask, enable_dropout, keys[idx])
+            x = layer(x, passthrough, iteration_index, pad_mask, enable_dropout, keys[idx])
             x = self.unshared_layers.apply_layer("post_ln", iteration_index, (x,), jax.vmap)
 
             x = self.sharding.cast(x)

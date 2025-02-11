@@ -133,142 +133,6 @@ class MLP(eqx.Module):
 
         return self.sharding.shard_model_cast(self.act(output))
 
-class CopyGate(eqx.Module):
-    """
-    Copy Gate adapted from Csordas et al.
-    """
-
-    sharding: Sharding = eqx.field(static=True)
-    gating_layer: MLP
-
-    def __init__(
-        self, d_model: int, drop_rate: float, key: PRNGKeyArray, strategy: Sharding
-    ):
-        self.sharding = strategy(policy)
-        self.gating_layer = MLP(d_model, d_model, drop_rate, key, strategy, ff_mult=1)
-
-        # Set biases to -3 to ensure no update at the start
-        self.gating_layer = eqx.tree_at(
-            lambda m: m.layer_2.bias,
-            self.gating_layer,
-            replace_fn=lambda arr: jnp.full(arr.shape, -3.0),
-        )
-
-    def __call__(self, input: Array, enable_dropout: bool, key: PRNGKeyArray) -> Array:
-        return jax.nn.sigmoid(self.gating_layer(input, enable_dropout, key))
-
-class NDRAttentionBlock(eqx.Module):
-    """CopyGated Augmented block inspired by Csordas et al."""
-
-    sharding: Sharding = eqx.field(static=True)
-    seqlen: int = eqx.field(static=True)
-    n_heads: int = eqx.field(static=True)
-    in_dim: int = eqx.field(static=True)
-
-    attn_gate: eqx.nn.MultiheadAttention
-    rope_embed: eqx.nn.RotaryPositionalEmbedding
-    ln1: eqx.nn.LayerNorm
-    ln2: eqx.nn.LayerNorm
-    copy_gate: CopyGate
-    mlp: MLP
-
-    def __init__(
-        self,
-        seqlen: int,
-        n_heads: int,
-        drop_rate: float,
-        in_dim: int,
-        key: PRNGKeyArray,
-        strategy: Sharding,
-    ):
-        key1, key2, key3 = jax.random.split(key, 3)
-
-        self.sharding = strategy(policy)
-
-        self.seqlen = seqlen
-        self.n_heads = n_heads
-        self.in_dim = in_dim
-
-        self.rope_embed = eqx.nn.RotaryPositionalEmbedding(
-            embedding_size=in_dim // n_heads
-        )
-
-        self.attn_gate = eqx.nn.MultiheadAttention(
-            num_heads=n_heads,
-            query_size=in_dim,
-            use_query_bias=True,
-            use_key_bias=True,
-            use_value_bias=True,
-            use_output_bias=True,
-            dropout_p=drop_rate,
-            key=key1,
-        )
-
-        self.ln1 = eqx.nn.LayerNorm(self.in_dim)
-        self.ln2 = eqx.nn.LayerNorm(self.in_dim)
-
-        self.copy_gate = CopyGate(in_dim, drop_rate, key3, strategy)
-        self.mlp = MLP(self.in_dim, self.in_dim, drop_rate, key2, strategy)
-
-    def process_heads(
-        self,
-        query_heads: Float[Array, "seq_length num_heads qk_size"],
-        key_heads: Float[Array, "seq_length num_heads qk_size"],
-        value_heads: Float[Array, "seq_length num_heads vo_size"],
-    ) -> tuple[
-        Float[Array, "seq_length num_heads qk_size"],
-        Float[Array, "seq_length num_heads qk_size"],
-        Float[Array, "seq_length num_heads vo_size"],
-    ]:
-        query_heads = jax.vmap(self.rope_embed, in_axes=1, out_axes=1)(query_heads)
-
-        key_heads = jax.vmap(self.rope_embed, in_axes=1, out_axes=1)(key_heads)
-
-        return query_heads, key_heads, value_heads
-
-    def _make_self_attention_mask(self, pad_mask: Int[Array, "seqlen"]) -> Array:
-        mask = jnp.ones((self.seqlen, self.seqlen))
-        mask = jnp.tril(mask)
-        mask = mask * pad_mask[:, None] * pad_mask[None, :]
-
-        return mask
-
-    @eqx.filter_jit
-    def __call__(
-        self,
-        inp: Float[Array, "seqlen in_dim"],
-        passthrough: Float[Array, "seqlen in_dim"],
-        mask: Array,
-        enable_dropout: bool,
-        key: PRNGKeyArray,
-    ) -> Float[Array, "seqlen in_dim"]:
-
-        key_1, key_2, key_3 = jax.random.split(key, 3)
-
-        inp, mask = self.sharding.shard_model_cast((inp, mask))
-
-        scores = inp + self.attn_gate(
-            query=inp,
-            key_=inp,
-            value=inp,
-            mask=self._make_self_attention_mask(mask),
-            inference=enable_dropout,
-            process_heads=self.process_heads,
-            key=key_1,
-        )
-
-        scores = jax.vmap(self.ln1)(scores)
-
-        gate = self.copy_gate(scores, enable_dropout, key_2)
-        ff_out = jax.nn.tanh(self.mlp(scores, enable_dropout=True, key=key_3))
-
-        # Here we carry over the `passthrough`
-        # if the gate is closed. However, in future
-        # We can also carry over scores or some other repr.
-        out = gate * ff_out + (1 - gate) * passthrough
-
-        return self.sharding.shard_model_cast(out)
-
 class AttentionBlock(eqx.Module):
     """Basic Block for LiteAttention. Uses Pre-LN from Xiong et al."""
 
@@ -375,44 +239,32 @@ class AttentionBlock(eqx.Module):
 
         return self.sharding.shard_model_cast(inp)
 
-class Lerp(eqx.Module):
-    alpha: Array
+class CopyGate(eqx.Module):
+    """
+    Copy Gate adapted from Csordas et al.
+    """
 
-    def __init__(self, alpha: float = 0.5):
-        self.alpha = jnp.array([alpha])
-
-    @eqx.filter_jit
-    def __call__(self, x: Array, y: Array) -> Array:
-        x, y = policy.cast_to_compute((x, y))
-
-        output = self.alpha * x + (1 - self.alpha) * y
-
-        return policy.cast_to_output(output)
-
-class ModdedEmbedding(eqx.Module):
-    '''
-    Using `jnp.take` instead of naive indexing. Equinox issue #920
-    '''
     sharding: Sharding = eqx.field(static=True)
-    weight: Array
+    gating_layer: MLP
 
     def __init__(
-        self,
-        num_embeddings: int,
-        embed_dim: int,
-        key: PRNGKeyArray,
-        strategy: Sharding
+        self, d_model: int, drop_rate: float, key: PRNGKeyArray, strategy: Sharding
     ):
         self.sharding = strategy(policy)
+        self.gating_layer = MLP(d_model, d_model, drop_rate, key, strategy, ff_mult=1)
 
-        self.weight = jax.random.normal(
-            key, (num_embeddings, embed_dim), dtype=jnp.float32
-        ) * ((2 / (5 * embed_dim)) ** 0.5)
+        # Set biases to -3 to ensure no update at the start
+        self.gating_layer = eqx.tree_at(
+            lambda m: m.layer_2.bias,
+            self.gating_layer,
+            replace_fn=lambda arr: jnp.full(arr.shape, -3.0),
+        )
 
-    def __call__(self, x: Array) -> Array:
-        return jnp.take(self.weight, x, axis=0)
+    def __call__(self, input: Array, key: PRNGKeyArray, enable_dropout: bool = True) -> Array:
+        return jax.nn.sigmoid(self.gating_layer(input, enable_dropout, key))
 
-L = TypeVar('L', bound=LinearProj | AttentionBlock | LayerNorm)
+
+L = TypeVar('L', bound=LinearProj | AttentionBlock | LayerNorm | CopyGate)
 
 class UnsharedBlock(eqx.Module, Generic[L]):
     """
@@ -420,7 +272,7 @@ class UnsharedBlock(eqx.Module, Generic[L]):
     shared between iterations.
     """
 
-    max_iters: int
+    max_iters: int = eqx.field(static=True)
     layers: Dict[str, Tuple[L, ...]]
 
     def __init__(
@@ -466,3 +318,166 @@ class UnsharedBlock(eqx.Module, Generic[L]):
         branches = tuple(apply_fn(i) for i in range(len(layers)))
 
         return jax.lax.switch(iteration_index, branches, args)
+
+class NDRAttentionBlock(eqx.Module):
+    """CopyGated Augmented block inspired by Csordas et al."""
+
+    sharding: Sharding = eqx.field(static=True)
+    seqlen: int = eqx.field(static=True)
+    n_heads: int = eqx.field(static=True)
+    in_dim: int = eqx.field(static=True)
+
+    attn_gate: eqx.nn.MultiheadAttention
+    rope_embed: eqx.nn.RotaryPositionalEmbedding
+    unshared_layers: UnsharedBlock[CopyGate | LayerNorm]
+    mlp: MLP
+
+    def __init__(
+        self,
+        seqlen: int,
+        n_heads: int,
+        drop_rate: float,
+        in_dim: int,
+        max_iters: int,
+        key: PRNGKeyArray,
+        strategy: Sharding,
+    ):
+        key1, key2, key3 = jax.random.split(key, 3)
+
+        self.sharding = strategy(policy)
+
+        self.seqlen = seqlen
+        self.n_heads = n_heads
+        self.in_dim = in_dim
+
+        self.rope_embed = eqx.nn.RotaryPositionalEmbedding(
+            embedding_size=in_dim // n_heads
+        )
+
+        self.attn_gate = eqx.nn.MultiheadAttention(
+            num_heads=n_heads,
+            query_size=in_dim,
+            use_query_bias=True,
+            use_key_bias=True,
+            use_value_bias=True,
+            use_output_bias=True,
+            dropout_p=drop_rate,
+            key=key1,
+        )
+
+        self.unshared_layers = UnsharedBlock(
+            layers={
+                "copy_gate": partial(
+                    CopyGate,
+                    in_dim,
+                    drop_rate,
+                    strategy=self.sharding,
+                ),
+                'ln1': LayerNorm(self.in_dim)
+            },
+            max_iters=max_iters,
+            key=key,
+        )
+
+        self.mlp = MLP(self.in_dim, self.in_dim, drop_rate, key2, strategy)
+
+    def process_heads(
+        self,
+        query_heads: Float[Array, "seq_length num_heads qk_size"],
+        key_heads: Float[Array, "seq_length num_heads qk_size"],
+        value_heads: Float[Array, "seq_length num_heads vo_size"],
+    ) -> tuple[
+        Float[Array, "seq_length num_heads qk_size"],
+        Float[Array, "seq_length num_heads qk_size"],
+        Float[Array, "seq_length num_heads vo_size"],
+    ]:
+        query_heads = jax.vmap(self.rope_embed, in_axes=1, out_axes=1)(query_heads)
+
+        key_heads = jax.vmap(self.rope_embed, in_axes=1, out_axes=1)(key_heads)
+
+        return query_heads, key_heads, value_heads
+
+    def _make_self_attention_mask(self, pad_mask: Int[Array, "seqlen"]) -> Array:
+        mask = jnp.ones((self.seqlen, self.seqlen))
+        mask = jnp.tril(mask)
+        mask = mask * pad_mask[:, None] * pad_mask[None, :]
+
+        return mask
+
+    def __call__(
+        self,
+        inp: Float[Array, "seqlen in_dim"],
+        passthrough: Float[Array, "seqlen in_dim"],
+        iteration_idx: int,
+        mask: Array,
+        enable_dropout: bool,
+        key: PRNGKeyArray,
+    ) -> Float[Array, "seqlen in_dim"]:
+
+        key_1, key_2, key_3 = jax.random.split(key, 3)
+
+        inp, mask = self.sharding.shard_model_cast((inp, mask))
+
+        scores = inp + self.attn_gate(
+            query=inp,
+            key_=inp,
+            value=inp,
+            mask=self._make_self_attention_mask(mask),
+            inference=enable_dropout,
+            process_heads=self.process_heads,
+            key=key_1,
+        )
+
+        scores = self.unshared_layers.apply_layer(
+            "ln1", iteration_idx, args=(scores,), modifier_fn=eqx.filter_vmap
+        )
+
+        gate = self.unshared_layers.apply_layer(
+            "copy_gate", iteration_idx, (scores, key_2)
+        )
+
+        ff_out = jax.nn.tanh(self.mlp(scores, enable_dropout=True, key=key_3))
+
+        # Here we carry over the `passthrough`
+        # if the gate is closed. However, in future
+        # We can also carry over scores or some other repr.
+        out = gate * ff_out + (1 - gate) * passthrough
+
+        return self.sharding.shard_model_cast(out)
+
+class Lerp(eqx.Module):
+    alpha: Array
+
+    def __init__(self, alpha: float = 0.5):
+        self.alpha = jnp.array([alpha])
+
+    @eqx.filter_jit
+    def __call__(self, x: Array, y: Array) -> Array:
+        x, y = policy.cast_to_compute((x, y))
+
+        output = self.alpha * x + (1 - self.alpha) * y
+
+        return policy.cast_to_output(output)
+
+class ModdedEmbedding(eqx.Module):
+    '''
+    Using `jnp.take` instead of naive indexing. Equinox issue #920
+    '''
+    sharding: Sharding = eqx.field(static=True)
+    weight: Array
+
+    def __init__(
+        self,
+        num_embeddings: int,
+        embed_dim: int,
+        key: PRNGKeyArray,
+        strategy: Sharding
+    ):
+        self.sharding = strategy(policy)
+
+        self.weight = jax.random.normal(
+            key, (num_embeddings, embed_dim), dtype=jnp.float32
+        ) * ((2 / (5 * embed_dim)) ** 0.5)
+
+    def __call__(self, x: Array) -> Array:
+        return jnp.take(self.weight, x, axis=0)
