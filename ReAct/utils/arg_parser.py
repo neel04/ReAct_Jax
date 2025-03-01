@@ -134,10 +134,9 @@ def parse_args() -> Namespace:
 
     parser.add_argument(
         "--exp_logging",
-        action="store_const",
-        const="online",
-        default="offline",
-        help="Enable experiment logging in the cloud. Default: offline",
+        action="store_true",
+        default=False,
+        help="Enable experiment logging in the cloud. Default: False",
     )
 
     parser.add_argument(
@@ -158,6 +157,7 @@ def parse_args() -> Namespace:
         "--resume",
         nargs="?",
         default=False,
+        const=True, # If no string is provided after the flag
         help="Obtain WandB run_path from Overview tab and append the"
         'epoch & step number with a +. \nExample arg: "neel/ReAct_Jax/6ktmhalt/ + 0 + 200"',
     )

@@ -11,9 +11,12 @@ from jmp import Policy
 
 from ReAct.utils.sharding import Sharding, get_strategy
 
-policy = Policy(compute_dtype=jnp.bfloat16, param_dtype=jnp.bfloat16, output_dtype=jnp.bfloat16)
+policy = Policy(
+    compute_dtype=jnp.bfloat16, param_dtype=jnp.bfloat16, output_dtype=jnp.bfloat16
+)
 
 # ruff: noqa: F722
+
 
 class NewGELU(eqx.Module):
     sharding: Sharding = eqx.field(static=True)
@@ -27,7 +30,7 @@ class NewGELU(eqx.Module):
         a = 0.044715
 
         x = self.sharding.shard_model_cast(x)
-        
+
         output = 0.5 * x * (1.0 + jax.nn.tanh(c * (x + a * jnp.power(x, 3.0))))
 
         return self.sharding.shard_model_cast(output)
@@ -47,12 +50,12 @@ class LinearProj(eqx.Module):
         input_dim: int,
         output_dim: int,
         key: PRNGKeyArray,
-        use_bias = True,
-        strategy: Sharding | None = None
+        use_bias=True,
+        strategy: Sharding | None = None,
     ):
-        assert input_dim >= 1 or output_dim >= 1, (
-            f"input_dim: {input_dim} | output_dim: {output_dim} are too small"
-        )
+        assert (
+            input_dim >= 1 or output_dim >= 1
+        ), f"input_dim: {input_dim} | output_dim: {output_dim} are too small"
         assert strategy is not None, "No strategy provided."
 
         wkey, bkey = jax.random.split(key, 2)
@@ -79,8 +82,7 @@ class LinearProj(eqx.Module):
         arr: Float[Array, "batch in_dim"],
         mask: Array | None = None,
     ) -> Array:
-
-        arr, mask = self.sharding.shard_model_cast((arr, mask)) 
+        arr, mask = self.sharding.shard_model_cast((arr, mask))
 
         _mask = jnp.ones_like(self.weight) if mask is None else mask
 
@@ -105,12 +107,12 @@ class MLP(eqx.Module):
         p: float,
         key: PRNGKeyArray,
         strategy: Sharding,
-        ff_mult: int = 4
+        ff_mult: int = 4,
     ):
         key1, key2 = jax.random.split(key, 2)
 
         self.sharding = strategy(policy)
-        
+
         self.layer_1 = LinearProj(
             input_dim, output_dim * ff_mult, key=key1, strategy=strategy
         )
@@ -132,6 +134,7 @@ class MLP(eqx.Module):
         output = self.dropout(x, key=key, inference=enable_dropout)
 
         return self.sharding.shard_model_cast(self.act(output))
+
 
 class AttentionBlock(eqx.Module):
     """Basic Block for LiteAttention. Uses Pre-LN from Xiong et al."""
@@ -211,12 +214,11 @@ class AttentionBlock(eqx.Module):
     def __call__(
         self,
         inp: Float[Array, "seqlen in_dim"],
-        passthrough: None, # for API compatibility
+        passthrough: None,  # for API compatibility
         mask: Array,
         enable_dropout: bool,
         key: PRNGKeyArray,
     ) -> Float[Array, "seqlen in_dim"]:
-
         key_1, key_2 = jax.random.split(key, 2)
 
         inp, mask = self.sharding.shard_model_cast((inp, mask))
@@ -239,6 +241,7 @@ class AttentionBlock(eqx.Module):
 
         return self.sharding.shard_model_cast(inp)
 
+
 class CopyGate(eqx.Module):
     """
     Copy Gate adapted from Csordas et al.
@@ -260,11 +263,14 @@ class CopyGate(eqx.Module):
             replace_fn=lambda arr: jnp.full(arr.shape, -3.0),
         )
 
-    def __call__(self, input: Array, key: PRNGKeyArray, enable_dropout: bool = True) -> Array:
+    def __call__(
+        self, input: Array, key: PRNGKeyArray, enable_dropout: bool = True
+    ) -> Array:
         return jax.nn.sigmoid(self.gating_layer(input, enable_dropout, key))
 
 
-L = TypeVar('L', bound=LinearProj | AttentionBlock | LayerNorm | CopyGate)
+L = TypeVar("L", bound=LinearProj | AttentionBlock | LayerNorm | CopyGate)
+
 
 class UnsharedBlock(eqx.Module, Generic[L]):
     """
@@ -294,7 +300,7 @@ class UnsharedBlock(eqx.Module, Generic[L]):
             return layer(keys[idx])
 
         return layer
-        
+
     def apply_layer(
         self,
         name: str,
@@ -318,6 +324,7 @@ class UnsharedBlock(eqx.Module, Generic[L]):
         branches = tuple(apply_fn(i) for i in range(len(layers)))
 
         return jax.lax.switch(iteration_index, branches, args)
+
 
 class NDRAttentionBlock(eqx.Module):
     """CopyGated Augmented block inspired by Csordas et al."""
@@ -373,7 +380,7 @@ class NDRAttentionBlock(eqx.Module):
                     drop_rate,
                     strategy=self.sharding,
                 ),
-                'ln1': LayerNorm(self.in_dim)
+                "ln1": LayerNorm(self.in_dim),
             },
             max_iters=max_iters,
             key=key,
@@ -413,7 +420,6 @@ class NDRAttentionBlock(eqx.Module):
         enable_dropout: bool,
         key: PRNGKeyArray,
     ) -> Float[Array, "seqlen in_dim"]:
-
         key_1, key_2, key_3 = jax.random.split(key, 3)
 
         inp, mask = self.sharding.shard_model_cast((inp, mask))
@@ -445,6 +451,7 @@ class NDRAttentionBlock(eqx.Module):
 
         return self.sharding.shard_model_cast(out)
 
+
 class Lerp(eqx.Module):
     alpha: Array
 
@@ -459,19 +466,17 @@ class Lerp(eqx.Module):
 
         return policy.cast_to_output(output)
 
+
 class ModdedEmbedding(eqx.Module):
-    '''
+    """
     Using `jnp.take` instead of naive indexing. Equinox issue #920
-    '''
+    """
+
     sharding: Sharding = eqx.field(static=True)
     weight: Array
 
     def __init__(
-        self,
-        num_embeddings: int,
-        embed_dim: int,
-        key: PRNGKeyArray,
-        strategy: Sharding
+        self, num_embeddings: int, embed_dim: int, key: PRNGKeyArray, strategy: Sharding
     ):
         self.sharding = strategy(policy)
 

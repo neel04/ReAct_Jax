@@ -134,7 +134,7 @@ class Trainer:
     def __init__(
         self,
         args: Any,
-        logger: Tuple,
+        loggers: Tuple,
         loaders: Tuple,
         decode_fn: Callable,
         dataset_size: Optional[int] = None,
@@ -150,7 +150,7 @@ class Trainer:
         self.args = args
         self.key = key
 
-        self.my_logger, self.wandb_logger = logger
+        self.my_logger, self.wandb_logger = loggers
         self.trainloader, self.valloader = loaders
 
         self.dataset_length = (
@@ -388,7 +388,7 @@ class Trainer:
         optim, _, _ = self.set_optim_and_scheduler(model)
         filter_spec = self.get_filterspec(model)
 
-        if self.args.resume is not False:
+        if self.args.resume is True and self.args.tune_hyperparams is False:
             model, opt_state, step_done, epoch_done = self.resume_training(
                 model, opt_state
             )

@@ -176,3 +176,5 @@ cython_debug/
 typings/
 devlog.md
 lm-evaluation-harness
+CLAUDE.md
+*db

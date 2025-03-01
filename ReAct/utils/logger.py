@@ -1,10 +1,8 @@
-import os
-import jax
-import wandb
 import logging
-
+import os
 from argparse import Namespace
 from typing import Any, Callable, Optional
+import wandb
 
 class UnifiedLogger:
     '''
@@ -37,23 +35,22 @@ class UnifiedLogger:
         key = os.environ.get("WANDB_API_KEY")
         wandb.login(key=key)
 
-        if args.resume:
+        wandb_id = None
+
+        if isinstance(args.resume, str):
             # args.resume is of the form: "neel/ReAct_Jax/lxxn0x54 + 20"
             # we want to extract the run id, i.e "lxxn0x54"
             wandb_id = args.resume.split("+")[0].split("/")[-1].strip()
-        else:
-            wandb_id = None
 
         wandb.init(
             project="ReAct_Jax",
             config=args,
             group=args.group,
-            mode="online"
-            if jax.process_index() == 0 and args.exp_logging
-            else "offline",
+            mode="online" if args.exp_logging else "offline",
             resume="allow",
             id=wandb_id,
             reinit=True,
+            allow_val_change=True
         )
 
         wandb.run.log_code(

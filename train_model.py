@@ -1,8 +1,10 @@
 import os
-import jax
-import optuna
 import platform
 import subprocess
+import jax
+import optuna
+
+from ReAct.utils.helpers import download_artifact
 
 if platform.processor() != "arm":
     try:
@@ -15,7 +17,6 @@ if platform.processor() != "arm":
         print("No GPU - assuming TPU.")
         jax.distributed.initialize()  # don't run on apple sillicon
 
-from wandb import Artifact
 from jax import config
 from jaxtyping import PRNGKeyArray
 from optuna.integration.wandb import WeightsAndBiasesCallback
@@ -27,6 +28,7 @@ from ReAct.data.tinystories import TinyStoriesDataset
 from ReAct.utils.arg_parser import parse_args
 from ReAct.utils.logger import UnifiedLogger
 from ReAct.utils.trainer import Trainer
+from wandb import Artifact
 
 
 def main(key: PRNGKeyArray):
@@ -82,8 +84,23 @@ def main(key: PRNGKeyArray):
     ]
 
     if args.tune_hyperparams:
+        # Rename the group to seperate sweeps from normal runs.
         args.group = "Sweeps_base" if args.baseline else f"Sweeps_{args.max_iters}i"
-        args.group += args.sweep_metadata # add metadata on end
+        args.group += args.sweep_metadata # append metadata on end
+
+        artifact_name = (
+            f"Sweeps_{args.max_iters}i{args.sweep_metadata}"
+            if not args.baseline
+            else f"Sweeps_baseline{args.sweep_metadata}"
+        )
+
+        if args.resume:
+            download_artifact("neel/ReAct_Jax/" + artifact_name + ":latest")
+            args.exp_logging = False if jax.process_index() != 0 else args.exp_logging
+
+        # ========= Logging ========
+        logger = UnifiedLogger(args, level="DEBUG")
+        my_logger, wandb_logger = logger.my_logger(), logger.wandb_logger(args)
 
         jax.experimental.multihost_utils.sync_global_devices("Sync up all nodes.")  # type: ignore
         trainloader = dataset.create_dataloader(
@@ -126,6 +143,7 @@ def main(key: PRNGKeyArray):
         trainer_kwargs = {
             "args": args,
             "loaders": (trainloader, valloader),
+            "loggers": (my_logger, wandb_logger),
             "decode_fn": dataset.tok.decode,
             "key": key,
         }
@@ -138,7 +156,9 @@ def main(key: PRNGKeyArray):
         [study.enqueue_trial(hyperparams) for hyperparams in init_hyperparams]
 
         study.optimize(
-            lambda trial: kickoff_optuna(trial=trial, **trainer_kwargs),
+            lambda trial: kickoff_optuna(
+                trial=trial, artifact_name=artifact_name, **trainer_kwargs
+            ),
             n_trials=100,
             callbacks=[wandbc],
             gc_after_trial=True,
@@ -157,12 +177,12 @@ def main(key: PRNGKeyArray):
         jax.experimental.multihost_utils.sync_global_devices("Sync up all nodes.")  # type: ignore
         valloader = dataset.create_dataloader(split="test", upload_to_hub=True)
 
-        logger = UnifiedLogger(args, level="DEBUG")
-        my_logger, wandb_logger = logger.my_logger(), logger.wandb_logger(args)
+        loggers = UnifiedLogger(args, level="DEBUG")
+        my_logger, wandb_logger = loggers.my_logger(), loggers.wandb_logger(args)
 
         trainer = Trainer(
             args,
-            logger=(my_logger, wandb_logger),
+            loggers=(my_logger, wandb_logger),
             loaders=(trainloader, valloader),
             decode_fn=dataset.tok.decode,
             key=key,
@@ -176,9 +196,10 @@ def main(key: PRNGKeyArray):
             trainer.train()
 
 
-def kickoff_optuna(trial, **trainer_kwargs):
-    args = trainer_kwargs["args"]
+def kickoff_optuna(trial, artifact_name: str, **trainer_kwargs):
+    my_logger, wandb_logger = trainer_kwargs["loggers"]
 
+    args = trainer_kwargs["args"]
     args.epochs = 1
 
     # Regularization hyperparams
@@ -198,30 +219,26 @@ def kickoff_optuna(trial, **trainer_kwargs):
 
     args = trainer_kwargs["args"]
 
-    # ========= Logging ========
-    logger = UnifiedLogger(args, level="DEBUG")
-    my_logger, wandb_logger = logger.my_logger(), logger.wandb_logger(args)
-
     # Store the optuna checkpoint progress
     optuna_chkp_path = f"chkp_{args.max_iters}i_{args.num_blocks}L_{args.width}{args.sweep_metadata}.db"
 
-    artifact_name = (
-        f"Sweeps_{args.max_iters}i{args.sweep_metadata}"
-        if not args.baseline
-        else f"Sweeps_baseline{args.sweep_metadata}"
-    )
-
-    if os.path.isfile(optuna_chkp_path):
+    w_logger = wandb_logger.run if hasattr(wandb_logger, "run") else wandb_logger
+    
+    if os.path.isfile(optuna_chkp_path) and not any([
+        w_logger.disabled,
+        w_logger.offline,
+    ]):
         artifact = Artifact(name=artifact_name, type="OptunaCheckpoint")
-
         artifact.add_file(
             local_path=optuna_chkp_path,
             name=optuna_chkp_path,
         )
 
-        artifact.save()
+        wandb_logger.log_artifact(artifact)
+        artifact.wait() # Wait for artifact to be logged before accessing properties
+        
+        artifact.aliases.append("latest") # mark as latest
 
-    trainer_kwargs["logger"] = (my_logger, wandb_logger)
 
     trainer = Trainer(**trainer_kwargs)
 

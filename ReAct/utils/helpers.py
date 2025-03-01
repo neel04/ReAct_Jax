@@ -1,13 +1,15 @@
 import math
 import os
 from logging import Logger
-from typing import Annotated, Any, Callable, List, Optional, Tuple, TypeVar, Union
+from typing import Annotated, Any, Callable, List, Optional, Tuple, TypeVar
 
 import equinox as eqx
 import jax
 import jax.numpy as jnp
 from jax_array_info import sharding_info
 from jaxtyping import Array, PRNGKeyArray, PyTree
+
+import wandb
 
 T = TypeVar('T')
 
@@ -255,3 +257,10 @@ def get_rand_nums(
         )
 
     return dist.astype(int)
+
+def download_artifact(artifact_path: str):
+    api = wandb.Api()
+    artifact = api.artifact(artifact_path)
+    datadir = artifact.download(root="./", skip_cache=True)
+
+    print(f"\nArtifact downloaded at {datadir}. Ensure this chkp is loaded.")
