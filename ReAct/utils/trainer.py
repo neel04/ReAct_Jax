@@ -378,6 +378,7 @@ class Trainer:
             self.my_logger.info(f"\nReported metric: {loss} @ {progress} to optuna.")
 
             if trial.should_prune():
+                self.wandb_logger.finish() # finish before pruning.
                 raise optuna.exceptions.TrialPruned()
 
     def train(self, trial: Optional[Any] = None) -> float:
@@ -453,6 +454,7 @@ class Trainer:
 
                     if jnp.isnan(loss):
                         self.my_logger.warning(f"\nLoss is NaN at step {step}")
+                        self.wandb_logger.finish()
                         return loss
 
                 if step % self.args.log_interval == 0 and len(train_acc) > 0:

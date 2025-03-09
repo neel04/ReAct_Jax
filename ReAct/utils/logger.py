@@ -8,7 +8,7 @@ class UnifiedLogger:
     '''
     Holds both WandB and python logger objects
     '''
-    def __init__(self, args, level: str = 'DEBUG') -> None:
+    def __init__(self, level: str = 'DEBUG') -> None:
         self.level = level
 
     def my_logger(self) -> logging.Logger:
