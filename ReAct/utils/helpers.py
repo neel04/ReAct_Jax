@@ -260,7 +260,10 @@ def get_rand_nums(
 
 def download_artifact(artifact_path: str):
     api = wandb.Api()
-    artifact = api.artifact(artifact_path)
-    datadir = artifact.download(root="./", skip_cache=True)
 
-    print(f"\nArtifact downloaded at {datadir}. Ensure this chkp is loaded.")
+    if api.artifact_exists(artifact_path):
+        artifact = api.artifact(artifact_path)
+        datadir = artifact.download(root="./", skip_cache=True)
+        print(f"\nArtifact downloaded at {datadir}. Ensure this chkp is loaded.")
+    else:
+        print(f"Warning: Artifact {artifact_path} does not exist.\n")
