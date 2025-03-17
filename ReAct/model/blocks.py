@@ -156,6 +156,7 @@ class AttentionBlock(eqx.Module):
         n_heads: int,
         drop_rate: float,
         in_dim: int,
+        max_iters: int,
         key: PRNGKeyArray,
         strategy: Sharding,
     ):
@@ -442,7 +443,7 @@ class NDRAttentionBlock(eqx.Module):
             "copy_gate", iteration_idx, (scores, key_2)
         )
 
-        ff_out = jax.nn.sigmoid(self.mlp(scores, enable_dropout=True, key=key_3))
+        ff_out = jax.nn.tanh(self.mlp(scores, enable_dropout=True, key=key_3))
 
         # Here we carry over the `passthrough`
         # if the gate is closed. However, in future

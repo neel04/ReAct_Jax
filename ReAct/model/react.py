@@ -12,6 +12,7 @@ from ReAct.utils.sharding import Sharding
 from .blocks import (
     LinearProj,
     ModdedEmbedding,
+    AttentionBlock,
     NDRAttentionBlock,
     UnsharedBlock,
 )
@@ -78,8 +79,8 @@ class RecurrentModule(eqx.Module):
         bottleneck: int,
         max_iters: int,
         key: PRNGKeyArray,
-    ) -> NDRAttentionBlock:
-        return NDRAttentionBlock(
+    ) -> AttentionBlock:
+        return AttentionBlock(
             seqlen,
             n_heads,
             drop_rate,
@@ -129,7 +130,7 @@ class RecurrentModule(eqx.Module):
 
             layer = eqx.combine(blck, static_part)
 
-            x = layer(x, passthrough, iteration_index, pad_mask, enable_dropout, keys[idx])
+            x = layer(x, passthrough, pad_mask, enable_dropout, keys[idx])
             x = self.unshared_layers.apply_layer("post_ln", iteration_index, (x,), jax.vmap)
 
             x = self.sharding.cast(x)
@@ -154,6 +155,7 @@ class React(eqx.Module):
     embed_layer: ModdedEmbedding
     embed_ln: eqx.nn.LayerNorm
     main_block: RecurrentModule
+    post_ln: UnsharedBlock[LayerNorm]
     unemb_ln: eqx.nn.LayerNorm
     out_head: LinearProj
 
@@ -177,7 +179,7 @@ class React(eqx.Module):
 
         self.embed_ln = eqx.nn.LayerNorm(width)
         self.embed_layer = ModdedEmbedding(vocab_size, width, key1, strategy)
-        
+
         self.main_block = RecurrentModule(
             seqlen,
             drop_rate,
@@ -187,6 +189,9 @@ class React(eqx.Module):
             max_iters,
             key2,
             self.sharding,
+        )
+        self.post_ln = UnsharedBlock(
+            layers={"post_ln": LayerNorm(width)}, max_iters=max_iters, key=key
         )
 
         self.unemb_ln = eqx.nn.LayerNorm(width)
@@ -208,7 +213,7 @@ class React(eqx.Module):
         interim_thought, input_arr, mask = self.sharding.cast((interim_thought, input_arr, mask))
         
         def body_fun(latent: Array, idx: int) -> Tuple[Array, Array]:
-            latent = self.main_block(
+            latent += self.main_block(
                 latent,
                 input_arr,
                 mask,
@@ -216,6 +221,10 @@ class React(eqx.Module):
                 idx,
                 keys[idx],
             )  # (seqlen, width)
+
+            latent = self.post_ln.apply_layer(
+                "post_ln", idx, args=(latent,), modifier_fn=jax.vmap
+            )
 
             latent = self.sharding.cast(latent)
 
