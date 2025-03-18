@@ -222,9 +222,9 @@ class React(eqx.Module):
                 keys[idx],
             )  # (seqlen, width)
 
-            latent = self.post_ln.apply_layer(
-                "post_ln", idx, args=(latent,), modifier_fn=jax.vmap
-            )
+            # latent = self.post_ln.apply_layer(
+            #     "post_ln", idx, args=(latent,), modifier_fn=jax.vmap
+            # )
 
             latent = self.sharding.cast(latent)
 
