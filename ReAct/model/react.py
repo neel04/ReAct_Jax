@@ -155,7 +155,7 @@ class React(eqx.Module):
     embed_layer: ModdedEmbedding
     embed_ln: eqx.nn.LayerNorm
     main_block: RecurrentModule
-    post_ln: UnsharedBlock[LayerNorm]
+    unshared_layers: UnsharedBlock[LayerNorm]
     unemb_ln: eqx.nn.LayerNorm
     out_head: LinearProj
 
@@ -190,7 +190,7 @@ class React(eqx.Module):
             key2,
             self.sharding,
         )
-        self.post_ln = UnsharedBlock(
+        self.unshared_layers = UnsharedBlock(
             layers={"post_ln": LayerNorm(width)}, max_iters=max_iters, key=key
         )
 
@@ -222,9 +222,9 @@ class React(eqx.Module):
                 keys[idx],
             )  # (seqlen, width)
 
-            # latent = self.post_ln.apply_layer(
-            #     "post_ln", idx, args=(latent,), modifier_fn=jax.vmap
-            # )
+            latent = self.unshared_layers.apply_layer(
+                "post_ln", idx, args=(latent,), modifier_fn=eqx.filter_vmap
+            )
 
             latent = self.sharding.cast(latent)
 
