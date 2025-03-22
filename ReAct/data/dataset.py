@@ -165,7 +165,7 @@ class ParentDataset:
     def create_dataloader(
         self, split: str, slice: str | None = None, upload_to_hub: bool = False
     ):
-        data_path = Path(f"./cached_data/owt_{split}.data")
+        data_path = Path(f"{os.getenv('HF_HOME')}/cached_data/owt_{split}.data")
 
         split, slice = self.produce_splits(split, slice)
 
@@ -230,6 +230,8 @@ class ParentDataset:
                 )
 
                 dataset.set_format(type="numpy")
+
+                self.save_data(split, dataset=dataset, path=data_path)
 
                 self.upload_dataset(
                     split,

@@ -313,6 +313,9 @@ class UnsharedBlock(eqx.Module, Generic[L]):
         if name not in self.layers:
             raise KeyError(f"No layer named '{name}'")
 
+        if modifier_fn is jax.vmap:
+            print("WARNING: Prefer to use `eqx.filter_vmap` modifier.")
+
         layers = self.layers[name]
 
         # Use lax.switch to select the appropriate layer without indexing with tracer

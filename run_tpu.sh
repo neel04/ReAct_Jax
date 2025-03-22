@@ -1,48 +1,73 @@
 #!/bin/bash -e
 BRANCH="dev"
 
-# Export environment variables
+# Create and mount ramdisk
+DISK_PATH="~/workspace"
+export JAX_COMPILATION_CACHE_DIR="/tmp/jax_cache"
+
+# Export environment variables pointing to the ramdisk
+export HF_HOME="$DISK_PATH/huggingface"
+export HF_DATASETS_CACHE="$DISK_PATH/huggingface_datasets"
+
+# Ensure cache directories exist
+mkdir -p "$DISK_PATH"
+
+# Mount GCP Bucket.
+export GCSFUSE_REPO=gcsfuse-$(lsb_release -c -s)
+echo "deb http://packages.cloud.google.com/apt $GCSFUSE_REPO main" | sudo tee /etc/apt/sources.list.d/gcsfuse.list
+curl https://packages.cloud.google.com/apt/doc/apt-key.gpg | sudo apt-key add -
+
+# Update and install gcsfuse
+sudo apt-get update
+sudo apt-get install gcsfuse
+
+# Create dir if it doesnt exist
+gcsfuse asura-hf-data "$DISK_PATH/"
+
+# Other environment variables
 export jax_threefry_partitionable=1
 export WANDB_API_KEY=78c7285b02548bf0c06dca38776c08bb6018593f
 export HF_TOKEN=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
-export HF_HOME=/tmp/
-export HF_DATASETS_CACHE=/tmp/
 export JAX_TRACEBACK_FILTERING=off
 
 # arguments for train_model.py
-TRAIN_ARGS="--save_dir ./ReAct/outputs/ --dataset 'tinystories' --group 'owt' \
---num_blocks 8 --width 128 --n_heads 16 --epochs 1 --num_classes 50304 \
---log_interval 750 --save_interval 10000 --seqlen 512 \
---max_iters 3 --batch_size 128 --accum_steps 4 \
---strategy 'megatron' --model_axis 2 \
---warmup_steps 180 --lr 3e-3 \
---beta_1 0.9 --beta_2 0.99 \
---weight_decay 5e-4 --drop_rate 0.00 --nesterov \
---exp_logging --tune_hyperparams"
+TRAIN_ARGS="--save_dir ./ReAct/outputs/ --dataset owt --group owt_repro --exp_logging \
+--log_interval 1500 --save_interval 10000 --seqlen 512 --num_classes 50304 \
+--num_blocks 13 --width 1024 --n_heads 8 --epochs 1 --max_iters 3 \
+--batch_size 512 --accum_steps 1 --warmup_steps 1000 \
+--lr 9e-4 --beta_1 0.9 --beta_2 0.98 --nesterov \
+--weight_decay 3e-3 --drop_rate 0.00 \
+--tune_hyperparams --sweep_metadata _SUM_accum --resume"
 
 git clone -b $BRANCH https://github.com/neel04/ReAct_Jax.git
 
 FLAG_FILE="./env_flag"
 
 git config --global safe.directory '*'
-cd ReAct_Jax/; git pull --all; git checkout f55d7bcc7d5243c66015d0bcab0e38946ad1b9dc; cd ..
+cd ReAct_Jax/
+git pull --all
+cd ..
 
 if [ ! -f "$FLAG_FILE" ]; then
     echo "Setting up environment..."
-    apt-get update
-    apt-get install neovim tmux
+    sudo apt-get update -y
+    sudo apt-get install neovim tmux -y
+    
+    # Set default python to python3
+    sudo ln -sf /usr/bin/python3 /usr/bin/python
 
     # Create virtual environment
     pip3 install uv
+    source ~/.profile
     uv venv 'main_env' --python 3.11
     source main_env/bin/activate
 
-    uv pip install -U -q jax[tpu] -f https://storage.googleapis.com/jax-releases/libtpu_releases.html
+    uv pip install --no-cache-dir "jax[tpu]" -f https://storage.googleapis.com/jax-releases/libtpu_releases.html --prerelease allow
     uv pip install -q transformers datasets scalax tokenizers icecream wandb einops torch tqdm jaxtyping optax optuna equinox rich
     uv pip install -U optuna-integration plotly lm-eval pdbpp
     uv pip install git+https://github.com/deepmind/jmp
     uv pip install git+https://github.com/Findus23/jax-array-info.git
-    uv pip install -q tensorboard-plugin-profile tensorboard etils importlib_resources "cloud-tpu-profiler>=2.3.0"
+    uv pip install -q tensorflow tensorboard-plugin-profile etils importlib_resources "cloud-tpu-profiler>=2.3.0"
 
     # ------------------
     # Create the flag file
@@ -55,6 +80,7 @@ echo "Executing train_model.py"
 source main_env/bin/activate
 
 echo "Executing train_model.py inside uv venv..."
+cd ReAct_Jax/
 python3 train_model.py $TRAIN_ARGS
 
 echo "Finished training!"
