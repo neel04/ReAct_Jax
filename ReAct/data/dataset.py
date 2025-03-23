@@ -165,15 +165,14 @@ class ParentDataset:
     def create_dataloader(
         self, split: str, slice: str | None = None, upload_to_hub: bool = False
     ):
-        data_path = Path(f"{os.getenv('HF_HOME')}/cached_data/owt_{split}.data")
+        data_path = Path(f"{os.getenv('DISK_PATH')}/cached_data/owt_{split}.data")
 
         split, slice = self.produce_splits(split, slice)
 
         try:
-            if os.path.exists(data_path):
-                print(f"Loading dataset from {data_path}...")
-                dataset = self.load_data(data_path)
-                return dataset
+            print(f"Loading dataset from {data_path}...")
+            dataset = self.load_data(data_path)
+            return dataset
         except (FileNotFoundError, ValueError):
             try:
                 dataset = load_dataset(
