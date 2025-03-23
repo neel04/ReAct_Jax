@@ -170,28 +170,28 @@ class ParentDataset:
         split, slice = self.produce_splits(split, slice)
 
         try:
-            dataset = load_dataset(
-                f"{self.hf_username}/{self.hf_dataset}-processed_{self.bsz}",
-                split=f"{split}[{slice}]",
-                verification_mode="no_checks",
-                keep_in_memory=False,
-                num_proc=None,
-            )
-
-            dataset = cast(Dataset, dataset)  # explicitly type it
-
-            print(f"Loaded {split} dataset from HuggingFace Hub")
-
-            dataset.set_format(type="numpy")
-
-            return dataset
-
-        except (FileNotFoundError, ValueError):
             if os.path.exists(data_path):
                 print(f"Loading dataset from {data_path}...")
                 dataset = self.load_data(data_path)
                 return dataset
-            else:
+        except (FileNotFoundError, ValueError):
+            try:
+                dataset = load_dataset(
+                    f"{self.hf_username}/{self.hf_dataset}-processed_{self.bsz}",
+                    split=f"{split}[{slice}]",
+                    verification_mode="no_checks",
+                    keep_in_memory=False,
+                    num_proc=None,
+                )
+
+                dataset = cast(Dataset, dataset)  # explicitly type it
+
+                print(f"Loaded {split} dataset from HuggingFace Hub")
+
+                dataset.set_format(type="numpy")
+
+                return dataset
+            except ValueError:
                 print(
                     f"Building dataset from scratch... [split: {split}] | [bsz: {self.bsz}]"
                 )
