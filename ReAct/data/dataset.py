@@ -96,7 +96,7 @@ class ParentDataset:
 
     @staticmethod
     def load_data(path: Path):
-        return load_from_disk(dataset_path=path, keep_in_memory=True)
+        return load_from_disk(dataset_path=path, keep_in_memory=False)
 
     @staticmethod
     def save_data(split: str, dataset: Any, path: Path) -> None:
