@@ -2,7 +2,7 @@
 BRANCH="dev"
 
 # Create and mount ramdisk
-DISK_PATH="~/workspace"
+export DISK_PATH="/mnt/workspace"
 export JAX_COMPILATION_CACHE_DIR="/tmp/jax_cache"
 
 # Export environment variables pointing to the ramdisk
@@ -10,19 +10,16 @@ export HF_HOME="$DISK_PATH/huggingface"
 export HF_DATASETS_CACHE="$DISK_PATH/huggingface_datasets"
 
 # Ensure cache directories exist
-mkdir -p "$DISK_PATH"
+sudo mkdir -p "$DISK_PATH"
 
-# Mount GCP Bucket.
-export GCSFUSE_REPO=gcsfuse-$(lsb_release -c -s)
-echo "deb http://packages.cloud.google.com/apt $GCSFUSE_REPO main" | sudo tee /etc/apt/sources.list.d/gcsfuse.list
-curl https://packages.cloud.google.com/apt/doc/apt-key.gpg | sudo apt-key add -
-
-# Update and install gcsfuse
-sudo apt-get update
-sudo apt-get install gcsfuse
-
-# Create dir if it doesnt exist
-gcsfuse asura-hf-data "$DISK_PATH/"
+# Mount GCP persistent disk.
+if ! mountpoint -q /mnt/workspace; then
+    # Mount the drive if it's not already mounted
+    sudo mount -o discard,defaults /dev/sdb /mnt/workspace
+    echo "Drive mounted successfully."
+else
+    echo "/mnt/workspace is already mounted."
+fi
 
 # Other environment variables
 export jax_threefry_partitionable=1
@@ -63,8 +60,9 @@ if [ ! -f "$FLAG_FILE" ]; then
     source main_env/bin/activate
 
     uv pip install --no-cache-dir "jax[tpu]" -f https://storage.googleapis.com/jax-releases/libtpu_releases.html --prerelease allow
-    uv pip install -q transformers datasets scalax tokenizers icecream wandb einops torch tqdm jaxtyping optax optuna equinox rich
+    uv pip install -q transformers datasets scalax tokenizers icecream wandb einops torch tqdm jaxtyping optuna equinox rich
     uv pip install -U optuna-integration plotly lm-eval pdbpp
+    uv pip install git+https://github.com/google-deepmind/optax.git
     uv pip install git+https://github.com/deepmind/jmp
     uv pip install git+https://github.com/Findus23/jax-array-info.git
     uv pip install -q tensorflow tensorboard-plugin-profile etils importlib_resources "cloud-tpu-profiler>=2.3.0"
