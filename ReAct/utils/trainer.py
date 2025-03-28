@@ -9,6 +9,7 @@ import optax
 import optuna
 from jaxtyping import Array, Int, PRNGKeyArray, PyTree
 from jmp import Policy
+from optax import contrib
 from optax._src.base import GradientTransformation
 from tqdm.auto import tqdm
 
@@ -200,7 +201,7 @@ class Trainer:
         self, model: eqx.Module
     ) -> Tuple[GradientTransformation, PyTree, eqx.Module]:
 
-        assert model is not None, 'Model is not initialized'
+        assert model is not None, "Model is not initialized"
 
         total_steps = self.args.epochs * self.dataset_length
 
@@ -213,16 +214,32 @@ class Trainer:
         )
 
         # optimizer with weight decay
-        optim = optax.chain(
-            optax.adaptive_grad_clip(self.args.grad_clip),
-            optax.MultiSteps(
-                optax.adamw(
+        match self.args.optimizer_type:
+            case "muon":
+                opt = contrib.muon(
+                    learning_rate=self.schedule_fn,
+                    adam_weight_decay=self.args.weight_decay,
+                    adam_b1=self.args.beta_1,
+                    adam_b2=self.args.beta_2,
+                    nesterov=self.args.nesterov,
+                    adaptive=self.args.muon_adaptive,
+                )
+
+            case _:
+                self.my_logger.warning("Using AdamW optimizer.")
+
+                opt = optax.adamw(
                     learning_rate=self.schedule_fn,
                     weight_decay=self.args.weight_decay,
                     b1=self.args.beta_1,
                     b2=self.args.beta_2,
                     nesterov=self.args.nesterov,
-                ),
+                )
+
+        optim = optax.chain(
+            optax.adaptive_grad_clip(self.args.grad_clip),
+            optax.MultiSteps(
+                opt,
                 every_k_schedule=self.args.accum_steps,
             ),
         )

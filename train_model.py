@@ -202,10 +202,18 @@ def kickoff_optuna(trial, artifact_name: str, **trainer_kwargs):
     args.epochs = 1
 
     # Regularization hyperparams
+    args.optimizer_type = trial.suggest_categorical("optimizer_type", ["adamw", "muon"])
+    args.optimizer_type = "muon"
+
     args.lr = trial.suggest_float("lr", 1e-6, 1e-3, log=True)
     args.drop_rate = trial.suggest_float("drop_rate", 0.0, 0.03, step=0.01)
     args.weight_decay = trial.suggest_float("weight_decay", 1e-6, 1e-2)
     args.warmup_steps = trial.suggest_int("warmup_steps", 0, 1000, step=100)
+
+    if args.optimizer_type == "muon":
+        args.muon_adaptive = trial.suggest_categorical(
+            "muon_is_adaptive", [True, False]
+        )
 
     # Optimizer hyperparams
     args.beta_1 = trial.suggest_categorical(

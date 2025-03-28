@@ -131,7 +131,7 @@ class RecurrentModule(eqx.Module):
             layer = eqx.combine(blck, static_part)
 
             x = layer(x, passthrough, pad_mask, enable_dropout, keys[idx])
-            x = self.unshared_layers.apply_layer("post_ln", iteration_index, (x,), jax.vmap)
+            x = self.unshared_layers.apply_layer("post_ln", iteration_index, (x,), eqx.filter_vmap)
 
             x = self.sharding.cast(x)
 

@@ -85,6 +85,10 @@ def parse_args() -> Namespace:
     )
 
     parser.add_argument(
+        "--optimizer_type", type=str, default="adamw", help="Optimizer to use. Default: AdamW"
+    )
+
+    parser.add_argument(
         "--epochs", type=int, default=1, help="Number of epochs. Default: 1"
     )
 
