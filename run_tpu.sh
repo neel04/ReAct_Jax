@@ -1,27 +1,39 @@
 #!/bin/bash -e
 BRANCH="dev"
 
-# Create and mount ramdisk
-export DISK_PATH="/mnt/workspace"
+# Define path for RAM disk
+export DISK_PATH="$HOME/workspace"
 export JAX_COMPILATION_CACHE_DIR="/tmp/jax_cache"
 
 # Export environment variables pointing to the ramdisk
 export HF_HOME="$DISK_PATH/huggingface"
 export HF_DATASETS_CACHE="$DISK_PATH/huggingface_datasets"
 
-# Ensure cache directories exist
-sudo mkdir -p "$DISK_PATH"
+# Ensure target directory exists
+mkdir -p "$DISK_PATH"
 
-# Mount GCP persistent disk.
-if ! mountpoint -q /mnt/workspace; then
-    # Mount the drive if it's not already mounted
-    sudo mount -o discard,defaults /dev/sdb /mnt/workspace
-    echo "Drive mounted successfully."
-else
-    echo "/mnt/workspace is already mounted."
+# Allocate RAM disk (ensure machine has > 350GB RAM available)
+echo "Allocating 350GB RAM disk at $DISK_PATH..."
+sudo mount -t tmpfs -o size=350G tmpfs "$DISK_PATH"
+echo "RAM disk mounted."
+
+# Install gsutil if necessary (part of google-cloud-cli)
+if ! command -v gsutil &> /dev/null; then
+    echo "gsutil not found, installing google-cloud-cli..."
+    sudo apt-get update
+    sudo apt-get install -y google-cloud-cli
 fi
 
+# Prepopulate RAM disk with bucket contents
+echo "Copying contents from gs://hf-data-bucket to $DISK_PATH..."
+gsutil -m cp -r gs://hf-data-bucket/huggingface_datasets "$DISK_PATH/"
+echo "Copy complete."
+
+# Adjust ownership to the current user
+sudo chown -R $(whoami):$(whoami) "$DISK_PATH"
+
 # Other environment variables
+export HF_DATASETS_IN_MEMORY_MAX_SIZE=10000000000 # 10GB
 export jax_threefry_partitionable=1
 export WANDB_API_KEY=78c7285b02548bf0c06dca38776c08bb6018593f
 export HF_TOKEN=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
@@ -34,7 +46,7 @@ TRAIN_ARGS="--save_dir ./ReAct/outputs/ --dataset owt --group owt_repro --exp_lo
 --batch_size 512 --accum_steps 1 --warmup_steps 1000 \
 --lr 9e-4 --beta_1 0.9 --beta_2 0.98 --nesterov \
 --weight_decay 3e-3 --drop_rate 0.00 \
---tune_hyperparams --sweep_metadata _SUM_accum --resume"
+--tune_hyperparams --sweep_metadata _Muon_accum --resume"
 
 git clone -b $BRANCH https://github.com/neel04/ReAct_Jax.git
 
@@ -82,3 +94,6 @@ cd ReAct_Jax/
 python3 train_model.py $TRAIN_ARGS
 
 echo "Finished training!"
+
+sudo umount "$DISK_PATH"
+rm -rf "$DISK_PATH"
