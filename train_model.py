@@ -203,8 +203,6 @@ def kickoff_optuna(trial, artifact_name: str, **trainer_kwargs):
 
     # Regularization hyperparams
     args.optimizer_type = trial.suggest_categorical("optimizer_type", ["adamw", "muon"])
-    args.optimizer_type = "muon"
-
     args.lr = trial.suggest_float("lr", 1e-6, 1e-3, log=True)
     args.drop_rate = trial.suggest_float("drop_rate", 0.0, 0.03, step=0.01)
     args.weight_decay = trial.suggest_float("weight_decay", 1e-6, 1e-2)
