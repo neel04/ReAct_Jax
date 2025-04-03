@@ -73,13 +73,14 @@ def main(key: PRNGKeyArray):
             "nesterov": True,
         },
         {
-            "lr": 9e-4,
-            "drop_rate": 0.01,
+            "lr": 9e-5,
+            "drop_rate": 0.00,
             "weight_decay": 4e-4,
             "warmup_steps": 1000,
-            "beta_1": 0.65,
+            "beta_1": 0.8,
             "beta_2": 0.9,
             "nesterov": False,
+            "optimizer_type": "muon"
         },
     ]
 
@@ -202,7 +203,7 @@ def kickoff_optuna(trial, artifact_name: str, **trainer_kwargs):
     args.epochs = 1
 
     # Regularization hyperparams
-    args.optimizer_type = trial.suggest_categorical("optimizer_type", ["adamw", "muon"])
+    # args.optimizer_type = trial.suggest_categorical("optimizer_type", ["adamw", "muon"])
     args.lr = trial.suggest_float("lr", 1e-6, 1e-3, log=True)
     args.drop_rate = trial.suggest_float("drop_rate", 0.0, 0.03, step=0.01)
     args.weight_decay = trial.suggest_float("weight_decay", 1e-6, 1e-2)

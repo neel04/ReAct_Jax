@@ -85,7 +85,10 @@ def parse_args() -> Namespace:
     )
 
     parser.add_argument(
-        "--optimizer_type", type=str, default="adamw", help="Optimizer to use. Default: AdamW"
+        "--optimizer_type",
+        type=str,
+        default="adamw",
+        help="Optimizer to use. Default: AdamW",
     )
 
     parser.add_argument(
@@ -161,7 +164,7 @@ def parse_args() -> Namespace:
         "--resume",
         nargs="?",
         default=False,
-        const=True, # If no string is provided after the flag
+        const=True,  # If no string is provided after the flag
         help="Obtain WandB run_path from Overview tab and append the"
         'epoch & step number with a +. \nExample arg: "neel/ReAct_Jax/6ktmhalt/ + 0 + 200"',
     )
@@ -315,6 +318,7 @@ def get_inference_args() -> Namespace:
 
     return args
 
+
 def get_evaluation_args():
     description = "Collects the arguments for evaluating the model on any task"
 
@@ -378,7 +382,7 @@ def get_evaluation_args():
     parser.add_argument(
         "--strategy",
         type=str,
-        default='ddp',
+        default="ddp",
         help="Strategy to use when inferencing. DDP should be enough",
     )
 

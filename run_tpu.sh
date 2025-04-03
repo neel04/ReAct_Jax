@@ -25,8 +25,10 @@ if ! command -v gsutil &> /dev/null; then
 fi
 
 # Prepopulate RAM disk with bucket contents
+sudo apt-get install -y p7zip-full
 echo "Copying contents from gs://hf-data-bucket to $DISK_PATH..."
-gsutil -m cp -r gs://hf-data-bucket/huggingface_datasets "$DISK_PATH/"
+gsutil -m cp -r gs://hf-data-bucket/hf_data.7z "$DISK_PATH/"
+cd workspace/; 7za x hf_data.7z; cd .. # Unzipping the compressed dataset.
 echo "Copy complete."
 
 # Adjust ownership to the current user

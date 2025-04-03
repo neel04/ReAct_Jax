@@ -1,7 +1,6 @@
 import logging
 import os
-from argparse import Namespace
-from typing import Any, Callable, Optional
+from typing import Any
 import wandb
 
 class UnifiedLogger:
@@ -61,19 +60,6 @@ class UnifiedLogger:
         )
 
         return wandb
-
-    def update_args_for_hypertuning(self, args: Namespace, experiment: Optional[Callable] = None):
-        '''
-        Consumes the experiment object provided by init_hypertuning() and updates the args dict
-        '''
-        arglist = ['lr', 'drop_rate', 'weight_decay', 'grad_clip', 'warmup_steps']
-
-        for arg_name in arglist:
-            setattr(args, arg_name, experiment.config[arg_name])
-
-        args.epochs = 1 # for faster training
-
-        return args
 
     def init_wandb_sweep(self) -> str:
         '''
