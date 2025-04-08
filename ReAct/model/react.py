@@ -60,7 +60,7 @@ class RecurrentModule(eqx.Module):
                     bottleneck,
                     strategy=self.sharding,
                 ),
-                'post_ln': LayerNorm(bottleneck)
+                "post_ln": LayerNorm(bottleneck),
             },
             max_iters=max_iters,
             key=key,
@@ -213,7 +213,7 @@ class React(eqx.Module):
         interim_thought, input_arr, mask = self.sharding.cast((interim_thought, input_arr, mask))
         
         def body_fun(latent: Array, idx: int) -> Tuple[Array, Array]:
-            latent += self.main_block(
+            latent = self.main_block(
                 latent,
                 input_arr,
                 mask,
