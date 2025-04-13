@@ -10,6 +10,7 @@ from jaxtyping import Array, PRNGKeyArray, PyTree
 from ReAct.utils.sharding import Sharding
 
 from .blocks import (
+    Lerp,
     LinearProj,
     FastEmbedding,
     AttentionBlock,
@@ -155,7 +156,7 @@ class React(eqx.Module):
     embed_layer: FastEmbedding
     embed_ln: eqx.nn.LayerNorm
     main_block: RecurrentModule
-    unshared_layers: UnsharedBlock[LayerNorm]
+    unshared_layers: UnsharedBlock[LayerNorm | LinearProj | Lerp]
     unemb_ln: eqx.nn.LayerNorm
     out_head: LinearProj
 
@@ -190,8 +191,18 @@ class React(eqx.Module):
             key2,
             self.sharding,
         )
+
+        rank = 32
+
         self.unshared_layers = UnsharedBlock(
-            layers={"post_ln": LayerNorm(width)}, max_iters=max_iters, key=key
+            layers={
+                "post_ln": LayerNorm(width),
+                "adapter_A": partial(LinearProj, width, rank, strategy=self.sharding),
+                "adapter_B": partial(LinearProj, rank, width, strategy=self.sharding),
+                "mixer": Lerp(1.0),
+            },
+            max_iters=max_iters,
+            key=key,
         )
 
         self.unemb_ln = eqx.nn.LayerNorm(width)
@@ -222,9 +233,15 @@ class React(eqx.Module):
                 keys[idx],
             )  # (seqlen, width)
 
+            lora_lat = self.unshared_layers.apply_layer("adapter_A", idx, (latent,))
+            lora_lat = self.unshared_layers.apply_layer("adapter_B", idx, (lora_lat,))
+
             latent = self.unshared_layers.apply_layer(
                 "post_ln", idx, args=(latent,), modifier_fn=eqx.filter_vmap
             )
+
+            # Lerp both with a learnable alpha
+            latent = self.unshared_layers.apply_layer("mixer", idx, (latent, lora_lat))
 
             latent = self.sharding.cast(latent)
 

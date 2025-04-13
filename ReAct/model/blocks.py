@@ -17,6 +17,19 @@ policy = Policy(
 
 # ruff: noqa: F722
 
+class Lerp(eqx.Module):
+    alpha: Array
+
+    def __init__(self, alpha: float = 0.5):
+        self.alpha = jnp.array([alpha])
+
+    @eqx.filter_jit
+    def __call__(self, x: Array, y: Array) -> Array:
+        x, y = policy.cast_to_compute((x, y))
+
+        output = self.alpha * x + (1 - self.alpha) * y
+
+        return policy.cast_to_output(output)
 
 class NewGELU(eqx.Module):
     sharding: Sharding = eqx.field(static=True)
@@ -270,13 +283,16 @@ class CopyGate(eqx.Module):
         return jax.nn.sigmoid(self.gating_layer(input, enable_dropout, key))
 
 
-L = TypeVar("L", bound=LinearProj | AttentionBlock | LayerNorm | CopyGate)
+L = TypeVar("L", bound=LinearProj | AttentionBlock | LayerNorm | CopyGate | Lerp)
 
 
 class UnsharedBlock(eqx.Module, Generic[L]):
     """
     Wrapper class to explicitly manage named layers that aren't
     shared between iterations.
+
+    Layers that need to be initialized with a `key` need to be wrapped with
+    a `partial`.
     """
 
     max_iters: int = eqx.field(static=True)
@@ -456,19 +472,6 @@ class NDRAttentionBlock(eqx.Module):
         return self.sharding.shard_model_cast(out)
 
 
-class Lerp(eqx.Module):
-    alpha: Array
-
-    def __init__(self, alpha: float = 0.5):
-        self.alpha = jnp.array([alpha])
-
-    @eqx.filter_jit
-    def __call__(self, x: Array, y: Array) -> Array:
-        x, y = policy.cast_to_compute((x, y))
-
-        output = self.alpha * x + (1 - self.alpha) * y
-
-        return policy.cast_to_output(output)
 
 
 class FastEmbedding(eqx.Module):
