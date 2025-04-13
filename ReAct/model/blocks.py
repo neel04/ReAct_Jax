@@ -471,7 +471,7 @@ class Lerp(eqx.Module):
         return policy.cast_to_output(output)
 
 
-class ModdedEmbedding(eqx.Module):
+class FastEmbedding(eqx.Module):
     """
     Using `jnp.take` instead of naive indexing. Equinox issue #920
     """

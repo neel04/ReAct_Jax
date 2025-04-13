@@ -11,7 +11,7 @@ from ReAct.utils.sharding import Sharding
 
 from .blocks import (
     LinearProj,
-    ModdedEmbedding,
+    FastEmbedding,
     AttentionBlock,
     NDRAttentionBlock,
     UnsharedBlock,
@@ -152,7 +152,7 @@ class React(eqx.Module):
     max_iters: int = eqx.field(static=True)
     width: int = eqx.field(static=True)
     
-    embed_layer: ModdedEmbedding
+    embed_layer: FastEmbedding
     embed_ln: eqx.nn.LayerNorm
     main_block: RecurrentModule
     unshared_layers: UnsharedBlock[LayerNorm]
@@ -178,7 +178,7 @@ class React(eqx.Module):
         self.width = width
 
         self.embed_ln = eqx.nn.LayerNorm(width)
-        self.embed_layer = ModdedEmbedding(vocab_size, width, key1, strategy)
+        self.embed_layer = FastEmbedding(vocab_size, width, key1, strategy)
 
         self.main_block = RecurrentModule(
             seqlen,
