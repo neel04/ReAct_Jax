@@ -7,13 +7,14 @@ import jax.numpy as jnp
 from equinox.nn import LayerNorm
 from jaxtyping import Array, PRNGKeyArray, PyTree
 
+from ReAct.utils.helpers import zero_init
 from ReAct.utils.sharding import Sharding
 
 from .blocks import (
+    AttentionBlock,
+    FastEmbedding,
     Lerp,
     LinearProj,
-    FastEmbedding,
-    AttentionBlock,
     NDRAttentionBlock,
     UnsharedBlock,
 )
@@ -192,18 +193,23 @@ class React(eqx.Module):
             self.sharding,
         )
 
-        rank = 32
+        rank = 64
 
         self.unshared_layers = UnsharedBlock(
             layers={
                 "post_ln": LayerNorm(width),
                 "adapter_A": partial(LinearProj, width, rank, strategy=self.sharding),
                 "adapter_B": partial(LinearProj, rank, width, strategy=self.sharding),
-                "mixer": Lerp(1.0),
+                "mixer": Lerp(0.9),
             },
             max_iters=max_iters,
             key=key,
         )
+
+        self.unshared_layers.layers["adapter_B"] = [  # type: ignore
+            eqx.tree_at(lambda layer: layer.weight, layer, replace_fn=zero_init)
+            for layer in self.unshared_layers.layers["adapter_B"]
+        ]
 
         self.unemb_ln = eqx.nn.LayerNorm(width)
         self.out_head = LinearProj(width, vocab_size, key=key3, strategy=self.sharding)
@@ -233,12 +239,12 @@ class React(eqx.Module):
                 keys[idx],
             )  # (seqlen, width)
 
-            lora_lat = self.unshared_layers.apply_layer("adapter_A", idx, (latent,))
-            lora_lat = self.unshared_layers.apply_layer("adapter_B", idx, (lora_lat,))
-
             latent = self.unshared_layers.apply_layer(
                 "post_ln", idx, args=(latent,), modifier_fn=eqx.filter_vmap
             )
+
+            lora_lat = self.unshared_layers.apply_layer("adapter_A", idx, (latent,))
+            lora_lat = self.unshared_layers.apply_layer("adapter_B", idx, (lora_lat,))
 
             # Lerp both with a learnable alpha
             latent = self.unshared_layers.apply_layer("mixer", idx, (latent, lora_lat))
