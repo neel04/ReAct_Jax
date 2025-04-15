@@ -229,9 +229,13 @@ class React(eqx.Module):
 
         interim_thought, input_arr, mask = self.sharding.cast((interim_thought, input_arr, mask))
         
-        def body_fun(latent: Array, idx: int) -> Tuple[Array, Array]:
+        def body_fun(input: Array, idx: int) -> Tuple[Array, Array]:
+            lora_lat = self.unshared_layers.apply_layer("adapter_A", idx, (input,))
+
+            lora_lat = self.unshared_layers.apply_layer("adapter_B", idx, (lora_lat,))
+
             latent = self.main_block(
-                latent,
+                input,
                 input_arr,
                 mask,
                 enable_dropout,
@@ -242,9 +246,6 @@ class React(eqx.Module):
             latent = self.unshared_layers.apply_layer(
                 "post_ln", idx, args=(latent,), modifier_fn=eqx.filter_vmap
             )
-
-            lora_lat = self.unshared_layers.apply_layer("adapter_A", idx, (latent,))
-            lora_lat = self.unshared_layers.apply_layer("adapter_B", idx, (lora_lat,))
 
             # Lerp both with a learnable alpha
             latent = self.unshared_layers.apply_layer("mixer", idx, (latent, lora_lat))
