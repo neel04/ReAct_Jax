@@ -200,7 +200,6 @@ class React(eqx.Module):
                 "post_ln": LayerNorm(width),
                 "adapter_A": partial(LinearProj, width, rank, strategy=self.sharding),
                 "adapter_B": partial(LinearProj, rank, width, strategy=self.sharding),
-                "mixer": Lerp(0.9),
             },
             max_iters=max_iters,
             key=key,
@@ -247,8 +246,7 @@ class React(eqx.Module):
                 "post_ln", idx, args=(latent,), modifier_fn=eqx.filter_vmap
             )
 
-            # Lerp both with a learnable alpha
-            latent = self.unshared_layers.apply_layer("mixer", idx, (latent, lora_lat))
+            latent = latent + lora_lat # finish off lora
 
             latent = self.sharding.cast(latent)
 
