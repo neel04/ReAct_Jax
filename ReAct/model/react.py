@@ -205,11 +205,6 @@ class React(eqx.Module):
             key=key,
         )
 
-        self.unshared_layers.layers["adapter_B"] = [  # type: ignore
-            eqx.tree_at(lambda layer: layer.weight, layer, replace_fn=zero_init)
-            for layer in self.unshared_layers.layers["adapter_B"]
-        ]
-
         self.unemb_ln = eqx.nn.LayerNorm(width)
         self.out_head = LinearProj(width, vocab_size, key=key3, strategy=self.sharding)
 
@@ -242,11 +237,11 @@ class React(eqx.Module):
                 keys[idx],
             )  # (seqlen, width)
 
+            latent = latent + lora_lat # finish off lora
+
             latent = self.unshared_layers.apply_layer(
                 "post_ln", idx, args=(latent,), modifier_fn=eqx.filter_vmap
             )
-
-            latent = latent + lora_lat # finish off lora
 
             latent = self.sharding.cast(latent)
 
