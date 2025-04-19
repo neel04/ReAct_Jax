@@ -1,13 +1,16 @@
 import math
 import os
 from logging import Logger
-from typing import Any, Callable, List, Optional, Tuple, TypeVar
+from typing import Any, Callable, List, Optional, Tuple, TypeVar, Union
 
+import chex
 import equinox as eqx
 import jax
 import jax.numpy as jnp
 from jax_array_info import sharding_info
 from jaxtyping import Array, PRNGKeyArray, PyTree
+from optax._src import alias, base, combine, transform
+from optax.contrib import scale_by_muon
 
 import wandb
 

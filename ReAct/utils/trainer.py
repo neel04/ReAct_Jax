@@ -9,7 +9,6 @@ import optax
 import optuna
 from jaxtyping import Array, Int, PRNGKeyArray, PyTree
 from jmp import Policy
-from optax import contrib
 from optax._src.base import GradientTransformation
 from tqdm.auto import tqdm
 
@@ -33,6 +32,7 @@ from ReAct.utils.losses import (
     _cross_entropy_with_logits_fwd,
     cross_entropy_with_logits,
 )
+from ReAct.utils.muon_modded import muon
 from ReAct.utils.sharding import get_strategy
 
 get_linear_weights = partial(get_weights, layer=LinearProj)
@@ -216,13 +216,14 @@ class Trainer:
         # optimizer with weight decay
         match self.args.optimizer_type:
             case "muon":
-                opt = contrib.muon(
+                opt = muon(
                     learning_rate=self.schedule_fn,
                     adam_weight_decay=self.args.weight_decay,
                     adam_b1=self.args.beta_1,
                     adam_b2=self.args.beta_2,
                     nesterov=self.args.nesterov,
-                    adaptive=self.args.muon_adaptive,
+                    # adaptive=self.args.muon_is_adaptive,
+                    adaptive=True,
                 )
 
             case _:
