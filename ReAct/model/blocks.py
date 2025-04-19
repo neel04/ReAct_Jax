@@ -295,22 +295,22 @@ class UnsharedBlock(eqx.Module, Generic[L]):
     a `partial`.
     """
 
-    max_iters: int = eqx.field(static=True)
+    num_repeats: int = eqx.field(static=True)
     layers: Dict[str, Tuple[L, ...]]
 
     def __init__(
         self,
         layers: Dict[str, Callable[[PRNGKeyArray], L] | L],
-        max_iters: int,
+        num_repeats: int,
         key: PRNGKeyArray,
     ):
-        keys = jax.random.split(key, max_iters)
+        keys = jax.random.split(key, num_repeats)
 
         self.layers = {
-            name: tuple(self.init_layer(layer_init, keys, i) for i in range(max_iters))
+            name: tuple(self.init_layer(layer_init, keys, i) for i in range(num_repeats))
             for name, layer_init in layers.items()
         }
-        self.max_iters = max_iters
+        self.num_repeats = num_repeats
 
     def init_layer(self, layer: L | partial, keys: PRNGKeyArray, idx: int) -> L:
         if isinstance(layer, partial):
@@ -402,7 +402,7 @@ class NDRAttentionBlock(eqx.Module):
                 ),
                 "ln1": LayerNorm(self.in_dim),
             },
-            max_iters=max_iters,
+            num_repeats=max_iters,
             key=key,
         )
 

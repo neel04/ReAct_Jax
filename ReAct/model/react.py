@@ -7,13 +7,11 @@ import jax.numpy as jnp
 from equinox.nn import LayerNorm
 from jaxtyping import Array, PRNGKeyArray, PyTree
 
-from ReAct.utils.helpers import zero_init
 from ReAct.utils.sharding import Sharding
 
 from .blocks import (
     AttentionBlock,
     FastEmbedding,
-    Lerp,
     LinearProj,
     NDRAttentionBlock,
     UnsharedBlock,
@@ -27,6 +25,7 @@ class RecurrentModule(eqx.Module):
     '''
     sharding: Sharding = eqx.field(static=True)
     num_layers: int = eqx.field(static=True)
+    max_iters: int = eqx.field(static=True)
 
     attention_layers: List[PyTree]
     post_ln: eqx.nn.LayerNorm
@@ -46,6 +45,8 @@ class RecurrentModule(eqx.Module):
 
         self.sharding = strategy
         self.num_layers = num_layers
+        self.max_iters = max_iters
+
         keys = jax.random.split(key, num_layers)
 
         make_attn = lambda k: self.make_layer(
@@ -53,6 +54,8 @@ class RecurrentModule(eqx.Module):
         )
 
         self.post_ln = eqx.nn.LayerNorm(bottleneck)
+
+        rank = 64
 
         self.unshared_layers = UnsharedBlock(
             layers={
@@ -63,8 +66,10 @@ class RecurrentModule(eqx.Module):
                     strategy=self.sharding,
                 ),
                 "post_ln": LayerNorm(bottleneck),
+                "adapter_A": partial(LinearProj, bottleneck, rank, strategy=self.sharding),
+                "adapter_B": partial(LinearProj, rank, bottleneck, strategy=self.sharding),
             },
-            max_iters=max_iters,
+            num_repeats=num_layers * max_iters, # each layer has different LoRA, for every iteration.
             key=key,
         )
 
@@ -128,16 +133,26 @@ class RecurrentModule(eqx.Module):
         def scan_fn(
             carry: Tuple[Array, int], blck: PyTree
         ) -> Tuple[Tuple[Array, int], Array]:
-            x, idx = carry
+            x, blck_idx = carry
+
+            blck_idx += (iteration_index * self.max_iters)
 
             layer = eqx.combine(blck, static_part)
 
-            x = layer(x, passthrough, pad_mask, enable_dropout, keys[idx])
-            x = self.unshared_layers.apply_layer("post_ln", iteration_index, (x,), eqx.filter_vmap)
+            lora_lat = self.unshared_layers.apply_layer("adapter_A", blck_idx, (x,))
+            lora_lat = self.unshared_layers.apply_layer("adapter_B", blck_idx, (lora_lat,))
+
+            x = layer(x, passthrough, pad_mask, enable_dropout, keys[blck_idx]) # Get the actual layer output
+
+            x += lora_lat  # Merge adapter representation.
+
+            x = self.unshared_layers.apply_layer(
+                "post_ln", blck_idx, (x,), eqx.filter_vmap
+            )
 
             x = self.sharding.cast(x)
 
-            return (x, idx + 1), x
+            return (x, blck_idx + 1), x
 
         outputs, _ = jax.lax.scan(scan_fn, (x, 0), dynamic_part, unroll=True)
 
@@ -157,7 +172,7 @@ class React(eqx.Module):
     embed_layer: FastEmbedding
     embed_ln: eqx.nn.LayerNorm
     main_block: RecurrentModule
-    unshared_layers: UnsharedBlock[LayerNorm | LinearProj | Lerp]
+    unshared_layers: UnsharedBlock[LayerNorm]
     unemb_ln: eqx.nn.LayerNorm
     out_head: LinearProj
 
@@ -193,15 +208,11 @@ class React(eqx.Module):
             self.sharding,
         )
 
-        rank = 64
-
         self.unshared_layers = UnsharedBlock(
             layers={
                 "post_ln": LayerNorm(width),
-                "adapter_A": partial(LinearProj, width, rank, strategy=self.sharding),
-                "adapter_B": partial(LinearProj, rank, width, strategy=self.sharding),
             },
-            max_iters=max_iters,
+            num_repeats=max_iters,
             key=key,
         )
 
@@ -224,10 +235,6 @@ class React(eqx.Module):
         interim_thought, input_arr, mask = self.sharding.cast((interim_thought, input_arr, mask))
         
         def body_fun(input: Array, idx: int) -> Tuple[Array, Array]:
-            lora_lat = self.unshared_layers.apply_layer("adapter_A", idx, (input,))
-
-            lora_lat = self.unshared_layers.apply_layer("adapter_B", idx, (lora_lat,))
-
             latent = self.main_block(
                 input,
                 input_arr,
@@ -236,8 +243,6 @@ class React(eqx.Module):
                 idx,
                 keys[idx],
             )  # (seqlen, width)
-
-            latent = latent + lora_lat # finish off lora
 
             latent = self.unshared_layers.apply_layer(
                 "post_ln", idx, args=(latent,), modifier_fn=eqx.filter_vmap
