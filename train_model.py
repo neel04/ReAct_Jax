@@ -71,8 +71,6 @@ def main(key: PRNGKeyArray):
             "beta_1": 0.9,
             "beta_2": 0.9,
             "nesterov": True,
-            "optimizer_type": "muon",
-            "muon_is_adaptive": True,
         },
         {
             "lr": 3e-4,
@@ -82,8 +80,6 @@ def main(key: PRNGKeyArray):
             "beta_1": 0.75,
             "beta_2": 0.75,
             "nesterov": False,
-            "optimizer_type": "muon",
-            "muon_is_adaptive": True,
         },
     ]
 

@@ -25,6 +25,8 @@ if ! command -v gsutil &> /dev/null; then
 fi
 
 # Prepopulate RAM disk with bucket contents
+sudo apt-get update
+sleep 20 && sudo apt-get update && sleep 20
 sudo apt-get install -y p7zip-full
 echo "Copying contents from gs://hf-data-bucket to $DISK_PATH..."
 gsutil -m cp -r gs://hf-data-bucket/hf_data.7z "$DISK_PATH/"
@@ -47,8 +49,8 @@ TRAIN_ARGS="--save_dir ./ReAct/outputs/ --dataset owt --group owt_repro --exp_lo
 --num_blocks 13 --width 1024 --n_heads 8 --epochs 1 --max_iters 3 \
 --batch_size 512 --accum_steps 1 --warmup_steps 1000 \
 --lr 9e-4 --beta_1 0.9 --beta_2 0.98 --nesterov \
---weight_decay 3e-3 --drop_rate 0.00 \
---tune_hyperparams --sweep_metadata _Muon_accum --resume"
+--weight_decay 3e-3 --drop_rate 0.00 --optimizer_type adamw \
+--tune_hyperparams --sweep_metadata _LayerLora --resume"
 
 git clone -b $BRANCH https://github.com/neel04/ReAct_Jax.git
 
@@ -96,6 +98,3 @@ cd ReAct_Jax/
 python3 train_model.py $TRAIN_ARGS
 
 echo "Finished training!"
-
-sudo umount "$DISK_PATH"
-rm -rf "$DISK_PATH"

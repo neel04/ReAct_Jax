@@ -222,13 +222,10 @@ class Trainer:
                     adam_b1=self.args.beta_1,
                     adam_b2=self.args.beta_2,
                     nesterov=self.args.nesterov,
-                    # adaptive=self.args.muon_is_adaptive,
-                    adaptive=True,
+                    adaptive=self.args.muon_adaptive,
                 )
 
             case _:
-                self.my_logger.warning("Using AdamW optimizer.")
-
                 opt = optax.adamw(
                     learning_rate=self.schedule_fn,
                     weight_decay=self.args.weight_decay,
@@ -236,6 +233,8 @@ class Trainer:
                     b2=self.args.beta_2,
                     nesterov=self.args.nesterov,
                 )
+
+        self.my_logger.warning(f"Using {opt} optimizer.")
 
         optim = optax.chain(
             optax.adaptive_grad_clip(self.args.grad_clip),
@@ -293,7 +292,7 @@ class Trainer:
             )
 
         # custom weight init
-        weights= get_linear_weights(model)
+        weights = get_linear_weights(model)
 
         new_weights = [
             megatron_init(weight, subkey)

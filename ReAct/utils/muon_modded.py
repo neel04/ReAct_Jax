@@ -1,4 +1,4 @@
-from typing import Callable, NamedTuple, Optional, Union
+from typing import Any, Callable, NamedTuple, Optional, Union
 
 import chex
 import jax
@@ -222,8 +222,9 @@ def muon(
     ns_steps: int = 5,
     beta: float = 0.95,
     eps: float = 1e-8,
+    weight_decay: float = 0,
+    mask: Optional[Union[Any, Callable[[base.Params], Any]]] = None,
     mu_dtype: Optional[chex.ArrayDType] = None,
-    *,
     nesterov: bool = True,
     adaptive: bool = False,
     adam_b1: float = 0.9,
@@ -246,6 +247,15 @@ def muon(
         ns_steps: Number of Newton-schulz iterations.
         beta: Decay rate for the Muon momentum.
         eps: Term added denominator in Muon orthogonalization.
+        weight_decay: Strength of the weight decay regularization. Note that this
+          weight decay is multiplied with the learning rate. This is consistent
+          with other frameworks such as PyTorch, but different from
+          (Loshchilov et al, 2019) where the weight decay is only multiplied with
+          the "schedule multiplier", but not the base learning rate.
+        mask: A tree with same structure as (or a prefix of) the params PyTree,
+          or a Callable that returns such a pytree given the params/updates.
+          The leaves should be booleans, `True` for leaves/subtrees you want to
+          apply the weight decay to, and `False` for those you want to skip.
         mu_dtype: Data type of the momentum accumulators.
         nesterov: Whether to use Nesterov momentum (applies to both).
         adaptive: Whether to scale Muon updates by dual norm.
@@ -260,12 +270,11 @@ def muon(
     """
 
     def is_muon_param(param: chex.Array) -> bool:
-        # Apply Muon to 2D and 3D tensors
+        # Apply Muon to only 2D and 3D tensors
         return param.ndim in (2, 3)
 
-    param_labels: Callable = lambda params: jax.tree.map(
-        lambda x: "muon" if is_muon_param(x) else "adam", params
-    )
+    def param_labels(params):
+        return jax.tree.map(lambda x: "muon" if is_muon_param(x) else "adam", params)
 
     return combine.partition(
         transforms={
@@ -279,6 +288,7 @@ def muon(
                     nesterov=nesterov,
                     adaptive=adaptive,
                 ),
+                transform.add_decayed_weights(weight_decay, mask),
                 transform.scale_by_learning_rate(learning_rate),
             ),
             "adam": alias.adamw(
