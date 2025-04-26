@@ -228,7 +228,6 @@ class AttentionBlock(eqx.Module):
     def __call__(
         self,
         inp: Float[Array, "seqlen in_dim"],
-        passthrough: None,  # for API compatibility
         mask: Array,
         enable_dropout: bool,
         key: PRNGKeyArray,
@@ -472,7 +471,129 @@ class NDRAttentionBlock(eqx.Module):
         return self.sharding.shard_model_cast(out)
 
 
+class AdaptableAttentionBlock(eqx.Module):
+    """Basic Block for LiteAttention. Uses Pre-LN from Xiong et al."""
 
+    sharding: Sharding = eqx.field(static=True)
+    seqlen: int = eqx.field(static=True)
+    n_heads: int = eqx.field(static=True)
+    in_dim: int = eqx.field(static=True)
+
+    unshared_layers: UnsharedBlock[LinearProj | LayerNorm]
+    rope_embed: eqx.nn.RotaryPositionalEmbedding
+    attn_gate: eqx.nn.MultiheadAttention
+    ln1: eqx.nn.LayerNorm
+    ln2: eqx.nn.LayerNorm
+    mlp: MLP
+
+    def __init__(
+        self,
+        seqlen: int,
+        n_heads: int,
+        num_layers: int,
+        drop_rate: float,
+        in_dim: int,
+        max_iters: int,
+        key: PRNGKeyArray,
+        strategy: Sharding,
+    ):
+        key1, key2 = jax.random.split(key, 2)
+
+        self.sharding = strategy(policy)
+
+        self.seqlen = seqlen
+        self.n_heads = n_heads
+        self.in_dim = in_dim
+
+        self.rope_embed = eqx.nn.RotaryPositionalEmbedding(
+            embedding_size=in_dim // n_heads
+        )
+
+        self.attn_gate = eqx.nn.MultiheadAttention(
+            num_heads=n_heads,
+            query_size=in_dim,
+            use_query_bias=True,
+            use_key_bias=True,
+            use_value_bias=True,
+            use_output_bias=True,
+            dropout_p=drop_rate,
+            key=key1,
+        )
+
+        rank = 64
+        
+        self.unshared_layers = UnsharedBlock(
+            layers={
+                "adapter_A": partial(LinearProj, in_dim, rank, strategy=self.sharding),
+                "adapter_B": partial(LinearProj, rank, in_dim, strategy=self.sharding),
+            },
+            num_repeats=num_layers * max_iters,
+            key=key,
+        )
+
+        self.ln1 = eqx.nn.LayerNorm(self.in_dim)
+        self.ln2 = eqx.nn.LayerNorm(self.in_dim)
+
+        self.mlp = MLP(self.in_dim, self.in_dim, drop_rate, key2, strategy)
+
+    def process_heads(
+        self,
+        query_heads: Float[Array, "seq_length num_heads qk_size"],
+        key_heads: Float[Array, "seq_length num_heads qk_size"],
+        value_heads: Float[Array, "seq_length num_heads vo_size"],
+    ) -> tuple[
+        Float[Array, "seq_length num_heads qk_size"],
+        Float[Array, "seq_length num_heads qk_size"],
+        Float[Array, "seq_length num_heads vo_size"],
+    ]:
+        query_heads = jax.vmap(self.rope_embed, in_axes=1, out_axes=1)(query_heads)
+
+        key_heads = jax.vmap(self.rope_embed, in_axes=1, out_axes=1)(key_heads)
+
+        return query_heads, key_heads, value_heads
+
+    def _make_self_attention_mask(self, pad_mask: Int[Array, "seqlen"]) -> Array:
+        mask = jnp.ones((self.seqlen, self.seqlen))
+        mask = jnp.tril(mask)
+        mask = mask * pad_mask[:, None] * pad_mask[None, :]
+
+        return mask
+
+    @eqx.filter_jit
+    def __call__(
+        self,
+        inp: Float[Array, "seqlen in_dim"],
+        final_idx: int,  # block_idx + (max_iters * iteration_index)
+        mask: Array,
+        enable_dropout: bool,
+        key: PRNGKeyArray,
+    ) -> Float[Array, "seqlen in_dim"]:
+        key_1, key_2 = jax.random.split(key, 2)
+
+        inp, mask = self.sharding.shard_model_cast((inp, mask))
+
+        x = jax.vmap(self.ln1)(inp)
+
+        lora_lat = self.unshared_layers.apply_layer("adapter_A", final_idx, (x,))
+        lora_lat = self.unshared_layers.apply_layer("adapter_B", final_idx, (lora_lat,))
+
+        inp += self.attn_gate(
+            query=x,
+            key_=inp,
+            value=inp,
+            mask=self._make_self_attention_mask(mask),
+            inference=enable_dropout,
+            process_heads=self.process_heads,
+            key=key_1,
+        )
+
+        inp += lora_lat # inject adapter information in the residual. 
+
+        x = jax.vmap(self.ln2)(inp)
+
+        inp += self.mlp(x, enable_dropout=True, key=key_2)
+
+        return self.sharding.shard_model_cast(inp)
 
 class FastEmbedding(eqx.Module):
     """

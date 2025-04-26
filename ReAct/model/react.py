@@ -10,10 +10,9 @@ from jaxtyping import Array, PRNGKeyArray, PyTree
 from ReAct.utils.sharding import Sharding
 
 from .blocks import (
-    AttentionBlock,
+    AdaptableAttentionBlock,
     FastEmbedding,
     LinearProj,
-    NDRAttentionBlock,
     UnsharedBlock,
 )
 
@@ -50,12 +49,17 @@ class RecurrentModule(eqx.Module):
         keys = jax.random.split(key, num_layers)
 
         make_attn = lambda k: self.make_layer(
-            self.sharding, seqlen, n_heads, drop_rate, bottleneck, max_iters, k
+            self.sharding,
+            seqlen,
+            num_layers,
+            n_heads,
+            drop_rate,
+            bottleneck,
+            max_iters,
+            k,
         )
 
         self.post_ln = eqx.nn.LayerNorm(bottleneck)
-
-        rank = 64
 
         self.unshared_layers = UnsharedBlock(
             layers={
@@ -66,10 +70,8 @@ class RecurrentModule(eqx.Module):
                     strategy=self.sharding,
                 ),
                 "post_ln": LayerNorm(bottleneck),
-                "adapter_A": partial(LinearProj, bottleneck, rank, strategy=self.sharding),
-                "adapter_B": partial(LinearProj, rank, bottleneck, strategy=self.sharding),
             },
-            num_repeats=num_layers * max_iters, # each layer has different LoRA, for every iteration.
+            num_repeats=max_iters,
             key=key,
         )
 
@@ -82,14 +84,16 @@ class RecurrentModule(eqx.Module):
         strategy: Sharding,
         seqlen: int,
         n_heads: int,
+        num_layers: int,
         drop_rate: float,
         bottleneck: int,
         max_iters: int,
         key: PRNGKeyArray,
-    ) -> AttentionBlock:
-        return AttentionBlock(
+    ) -> AdaptableAttentionBlock:
+        return AdaptableAttentionBlock(
             seqlen,
             n_heads,
+            num_layers,
             drop_rate,
             bottleneck,
             max_iters=max_iters,
@@ -123,28 +127,16 @@ class RecurrentModule(eqx.Module):
 
         x, pad_mask = self.sharding.cast((x, pad_mask))
 
-        # TODO: Ensure `NDRAttentionBlock` isn't changed to vanilla AttentionBlock
-        passthrough = (
-            prev_latent
-            if isinstance(self.attention_layers, NDRAttentionBlock)
-            else None
-        )
-
         def scan_fn(
             carry: Tuple[Array, int], blck: PyTree
         ) -> Tuple[Tuple[Array, int], Array]:
             x, blck_idx = carry
 
-            blck_idx += (iteration_index * self.max_iters)
-
             layer = eqx.combine(blck, static_part)
 
-            lora_lat = self.unshared_layers.apply_layer("adapter_A", blck_idx, (x,))
-            lora_lat = self.unshared_layers.apply_layer("adapter_B", blck_idx, (lora_lat,))
+            blck_idx += (self.max_iters * iteration_index)
 
-            x = layer(x, passthrough, pad_mask, enable_dropout, keys[blck_idx]) # Get the actual layer output
-
-            x += lora_lat  # Merge adapter representation.
+            x = layer(x, blck_idx, pad_mask, enable_dropout, keys[blck_idx])
 
             x = self.unshared_layers.apply_layer(
                 "post_ln", blck_idx, (x,), eqx.filter_vmap
