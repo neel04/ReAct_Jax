@@ -39,6 +39,10 @@ def parse_args() -> Namespace:
     )
 
     parser.add_argument(
+        "--rank", type=int, default=64, help="Rank dimension for LoRA. Default: 64"
+    )
+
+    parser.add_argument(
         "--drop_rate", type=float, default=0.1, help="Dropout rate. Default: 0.1"
     )
 

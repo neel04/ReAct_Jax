@@ -280,6 +280,7 @@ class Trainer:
             )
         else:
             model = React(
+                self.args.rank,
                 self.args.n_heads,
                 self.args.seqlen,
                 self.args.max_iters,

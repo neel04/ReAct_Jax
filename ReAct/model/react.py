@@ -32,6 +32,7 @@ class RecurrentModule(eqx.Module):
 
     def __init__(
         self,
+        rank: int,
         seqlen: int,
         drop_rate: float,
         n_heads: int,
@@ -50,6 +51,7 @@ class RecurrentModule(eqx.Module):
 
         make_attn = lambda k: self.make_layer(
             self.sharding,
+            rank,
             seqlen,
             num_layers,
             n_heads,
@@ -82,6 +84,7 @@ class RecurrentModule(eqx.Module):
     @staticmethod
     def make_layer(
         strategy: Sharding,
+        rank: int,
         seqlen: int,
         n_heads: int,
         num_layers: int,
@@ -91,6 +94,7 @@ class RecurrentModule(eqx.Module):
         key: PRNGKeyArray,
     ) -> AdaptableAttentionBlock:
         return AdaptableAttentionBlock(
+            rank,
             seqlen,
             n_heads,
             num_layers,
@@ -170,6 +174,7 @@ class React(eqx.Module):
 
     def __init__(
         self,
+        rank: int,
         n_heads: int,
         seqlen: int,
         max_iters: int,
@@ -190,6 +195,7 @@ class React(eqx.Module):
         self.embed_layer = FastEmbedding(vocab_size, width, key1, strategy)
 
         self.main_block = RecurrentModule(
+            rank,
             seqlen,
             drop_rate,
             n_heads,

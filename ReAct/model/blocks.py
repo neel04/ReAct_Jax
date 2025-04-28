@@ -488,6 +488,7 @@ class AdaptableAttentionBlock(eqx.Module):
 
     def __init__(
         self,
+        rank: int,
         seqlen: int,
         n_heads: int,
         num_layers: int,
@@ -520,8 +521,6 @@ class AdaptableAttentionBlock(eqx.Module):
             key=key1,
         )
 
-        rank = 64
-        
         self.unshared_layers = UnsharedBlock(
             layers={
                 "adapter_A": partial(LinearProj, in_dim, rank, strategy=self.sharding),
