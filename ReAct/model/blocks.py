@@ -526,7 +526,7 @@ class AdaptableAttentionBlock(eqx.Module):
                 "adapter_A": partial(LinearProj, in_dim, rank, strategy=self.sharding),
                 "adapter_B": partial(LinearProj, rank, in_dim, strategy=self.sharding),
             },
-            num_repeats=num_layers * max_iters,
+            num_repeats=max_iters,
             key=key,
         )
 
@@ -562,7 +562,7 @@ class AdaptableAttentionBlock(eqx.Module):
     def __call__(
         self,
         inp: Float[Array, "seqlen in_dim"],
-        final_idx: int,  # block_idx + (max_iters * iteration_index)
+        it_idx: int,  # <=> iteration index
         mask: Array,
         enable_dropout: bool,
         key: PRNGKeyArray,
@@ -573,8 +573,8 @@ class AdaptableAttentionBlock(eqx.Module):
 
         x = jax.vmap(self.ln1)(inp)
 
-        lora_lat = self.unshared_layers.apply_layer("adapter_A", final_idx, (x,))
-        lora_lat = self.unshared_layers.apply_layer("adapter_B", final_idx, (lora_lat,))
+        lora_lat = self.unshared_layers.apply_layer("adapter_A", it_idx, (x,))
+        lora_lat = self.unshared_layers.apply_layer("adapter_B", it_idx, (lora_lat,))
 
         inp += self.attn_gate(
             query=x,

@@ -1,16 +1,13 @@
 import math
 import os
 from logging import Logger
-from typing import Any, Callable, List, Optional, Tuple, TypeVar, Union
+from typing import Any, Callable, List, Optional, Tuple, TypeVar
 
-import chex
 import equinox as eqx
 import jax
 import jax.numpy as jnp
 from jax_array_info import sharding_info
 from jaxtyping import Array, PRNGKeyArray, PyTree
-from optax._src import alias, base, combine, transform
-from optax.contrib import scale_by_muon
 
 import wandb
 
@@ -237,6 +234,9 @@ def count_params(model: eqx.Module) -> None:
 
     if hasattr(model.main_block, "unshared_layers"):
         unshared_params += params_fn(model.main_block.unshared_layers) / 1_000_000
+
+    if hasattr((layers := model.main_block.attention_layers)[0], "unshared_layers"):
+        unshared_params += (params_fn(layers[0].unshared_layers) / 1_000_000) * len(layers)
 
     if hasattr(model, "unshared_layers"):
         unshared_params += params_fn(model.unshared_layers) / 1_000_000
