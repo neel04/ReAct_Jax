@@ -51,14 +51,14 @@ class RecurrentModule(eqx.Module):
 
         make_attn = lambda k: self.make_layer(
             self.sharding,
-            rank,
-            seqlen,
-            num_layers,
-            n_heads,
-            drop_rate,
-            bottleneck,
-            max_iters,
-            k,
+            rank=rank,
+            seqlen=seqlen,
+            n_heads=n_heads,
+            num_layers=num_layers,
+            drop_rate=drop_rate,
+            bottleneck=bottleneck,
+            max_iters=max_iters,
+            key=k,
         )
 
         self.post_ln = eqx.nn.LayerNorm(bottleneck)
