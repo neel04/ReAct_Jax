@@ -484,6 +484,7 @@ class AdaptableAttentionBlock(eqx.Module):
     attn_gate: eqx.nn.MultiheadAttention
     ln1: eqx.nn.LayerNorm
     ln2: eqx.nn.LayerNorm
+    mlp_lora_lerp: Lerp
     mlp: MLP
 
     def __init__(
@@ -534,6 +535,7 @@ class AdaptableAttentionBlock(eqx.Module):
         self.ln2 = eqx.nn.LayerNorm(self.in_dim)
 
         self.mlp = MLP(self.in_dim, self.in_dim, drop_rate, key2, strategy)
+        self.mlp_lora_lerp = Lerp(0.5)
 
     def process_heads(
         self,
@@ -590,7 +592,9 @@ class AdaptableAttentionBlock(eqx.Module):
 
         x = jax.vmap(self.ln2)(inp)
 
-        inp += self.mlp(x, enable_dropout=True, key=key_2)
+        inp += (self.mlp(x, enable_dropout=True, key=key_2) + self.mlp_lora_lerp(
+            inp, lora_lat
+        ))
 
         return self.sharding.shard_model_cast(inp)
 
