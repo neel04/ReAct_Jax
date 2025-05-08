@@ -592,9 +592,9 @@ class AdaptableAttentionBlock(eqx.Module):
 
         x = jax.vmap(self.ln2)(inp)
 
-        inp += (self.mlp(x, enable_dropout=True, key=key_2) + self.mlp_lora_lerp(
-            inp, lora_lat
-        ))
+        inp += self.mlp(x, enable_dropout=True, key=key_2)
+
+        inp = self.mlp_lora_lerp(inp, lora_lat)
 
         return self.sharding.shard_model_cast(inp)
 
