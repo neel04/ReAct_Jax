@@ -526,6 +526,12 @@ class AdaptableAttentionBlock(eqx.Module):
             layers={
                 "adapter_A": partial(LinearProj, in_dim, rank, strategy=self.sharding),
                 "adapter_B": partial(LinearProj, rank, in_dim, strategy=self.sharding),
+                "MLP_adapter_A": partial(
+                    LinearProj, in_dim, rank, strategy=self.sharding
+                ),
+                "MLP_adapter_B": partial(
+                    LinearProj, rank, in_dim, strategy=self.sharding
+                ),
             },
             num_repeats=max_iters,
             key=key,
@@ -592,9 +598,12 @@ class AdaptableAttentionBlock(eqx.Module):
 
         x = jax.vmap(self.ln2)(inp)
 
+        mlp_lora = self.unshared_layers.apply_layer("MLP_adapter_A", it_idx, (x,))
+        mlp_lora = self.unshared_layers.apply_layer("MLP_adapter_B", it_idx, (mlp_lora,))
+
         inp += self.mlp(x, enable_dropout=True, key=key_2)
 
-        inp = self.mlp_lora_lerp(inp, lora_lat)
+        inp = self.mlp_lora_lerp(inp, mlp_lora)
 
         return self.sharding.shard_model_cast(inp)
 
