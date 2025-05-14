@@ -39,6 +39,10 @@ def parse_args() -> Namespace:
     )
 
     parser.add_argument(
+        "--rank", type=int, default=64, help="Rank dimension for LoRA. Default: 64"
+    )
+
+    parser.add_argument(
         "--drop_rate", type=float, default=0.1, help="Dropout rate. Default: 0.1"
     )
 
@@ -82,6 +86,13 @@ def parse_args() -> Namespace:
 
     parser.add_argument(
         "--grad_clip", type=float, default=1.0, help="Gradient clipping. Default: 1.0"
+    )
+
+    parser.add_argument(
+        "--optimizer_type",
+        type=str,
+        default="adamw",
+        help="Optimizer to use. Default: AdamW",
     )
 
     parser.add_argument(
@@ -134,10 +145,9 @@ def parse_args() -> Namespace:
 
     parser.add_argument(
         "--exp_logging",
-        action="store_const",
-        const="online",
-        default="offline",
-        help="Enable experiment logging in the cloud. Default: offline",
+        action="store_true",
+        default=False,
+        help="Enable experiment logging in the cloud. Default: False",
     )
 
     parser.add_argument(
@@ -158,6 +168,7 @@ def parse_args() -> Namespace:
         "--resume",
         nargs="?",
         default=False,
+        const=True,  # If no string is provided after the flag
         help="Obtain WandB run_path from Overview tab and append the"
         'epoch & step number with a +. \nExample arg: "neel/ReAct_Jax/6ktmhalt/ + 0 + 200"',
     )
@@ -174,6 +185,13 @@ def parse_args() -> Namespace:
         action="store_true",
         default=False,
         help="Tune hyperparameters using wandb sweep. Default: False",
+    )
+
+    parser.add_argument(
+        "--sweep_metadata",
+        type=str,
+        default="",
+        help="Extra metadata for W&B Sweep Name. Always Prefix a `_`. Default: ''",
     )
 
     parser.add_argument(
@@ -304,6 +322,7 @@ def get_inference_args() -> Namespace:
 
     return args
 
+
 def get_evaluation_args():
     description = "Collects the arguments for evaluating the model on any task"
 
@@ -367,7 +386,7 @@ def get_evaluation_args():
     parser.add_argument(
         "--strategy",
         type=str,
-        default='ddp',
+        default="ddp",
         help="Strategy to use when inferencing. DDP should be enough",
     )
 

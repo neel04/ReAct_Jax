@@ -1,13 +1,15 @@
 import math
 import os
 from logging import Logger
-from typing import Annotated, Any, Callable, List, Optional, Tuple, TypeVar, Union
+from typing import Any, Callable, List, Optional, Tuple, TypeVar
 
 import equinox as eqx
 import jax
 import jax.numpy as jnp
 from jax_array_info import sharding_info
 from jaxtyping import Array, PRNGKeyArray, PyTree
+
+import wandb
 
 T = TypeVar('T')
 
@@ -166,6 +168,12 @@ def megatron_init(weight: Array, key: PRNGKeyArray) -> Array:
 
     return jax.random.uniform(key, dims, minval=-lim, maxval=lim) * stddev
 
+def zero_init(weight: Array) -> Array:
+    """
+    Init all the weights with zeroes.
+    """
+    return jnp.zeros_like(weight, dtype=weight.dtype)
+
 def get_weights(m: PyTree, layer: PyTree):
 
     def is_linear(x: Any):
@@ -209,20 +217,35 @@ def broad_to_bsz(arr: Array, shape: tuple) -> Array:
     return jnp.broadcast_to(arr, shape)
 
 
-def count_params(model: Union[Annotated[str, 'GPT'], Annotated[str, 'React']]) -> None:
-    def params_fn(model):
+def count_params(model: eqx.Module) -> None:
+    def params_fn(model: PyTree):
         return sum(
             x.size for x in jax.tree_util.tree_leaves(eqx.filter(model, eqx.is_array))
         )
 
-    num_params, non_embed_params = params_fn(model), params_fn(model.main_block)
+    num_params, non_embed_params = (
+        params_fn(model),
+        params_fn(model.main_block),
+    )
 
+    unshared_params = 0
     num_params /= 1_000_000
     non_embed_params /= 1_000_000
 
+    if hasattr(model.main_block, "unshared_layers"):
+        unshared_params += params_fn(model.main_block.unshared_layers) / 1_000_000
+
+    if hasattr((layers := model.main_block.attention_layers)[0], "unshared_layers"):
+        unshared_params += (params_fn(layers[0].unshared_layers) / 1_000_000) * len(layers)
+
+    if hasattr(model, "unshared_layers"):
+        unshared_params += params_fn(model.unshared_layers) / 1_000_000
+
+    print(f"\nUnshared Parameters: {unshared_params}M")
     print(
-        f"\nModel # of parameters: {num_params:.2f}M\n# of recurrent parameters: {non_embed_params:.2f}M\n"
+        f"Model # of parameters: {num_params:.2f}M\n# of recurrent parameters: {non_embed_params:.2f}M\n"
     )
+
 
 def get_rand_nums(
     key: PRNGKeyArray,
@@ -247,3 +270,13 @@ def get_rand_nums(
         )
 
     return dist.astype(int)
+
+def download_artifact(artifact_path: str):
+    api = wandb.Api()
+
+    if api.artifact_exists(artifact_path):
+        artifact = api.artifact(artifact_path)
+        datadir = artifact.download(root="./", skip_cache=True)
+        print(f"\nArtifact downloaded at {datadir}. Ensure this chkp is loaded.")
+    else:
+        print(f"Warning: Artifact {artifact_path} does not exist.\n")

@@ -10,7 +10,6 @@ dependencies = [
     "equinox>=0.11.9",
     "jax>=0.4.35",
     "jaxtyping>=0.2.36",
-    "optax>=0.2.4",
     "optuna-integration>=4.1.0",
     "optuna>=4.1.0",
     "rich>=13.9.4",
@@ -27,8 +26,13 @@ dependencies = [
     "tensorboard-plugin-profile>=2.18.0",
     "cloud-tpu-profiler>=2.3.0",
     "wandb==0.18.7",
+    "ruff>=0.9.4",
+    "basedpyright>=1.26.0",
+    "jupyter>=1.1.1",
+    "optax",
 ]
 
 [tool.uv.sources]
 jmp = { git = "https://github.com/deepmind/jmp" }
 jax-array-info = { git = "https://github.com/Findus23/jax-array-info.git" }
+optax = { git = "https://github.com/google-deepmind/optax.git" }

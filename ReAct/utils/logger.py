@@ -1,5 +1,5 @@
 import os
-import jax
+from typing import Any
 import wandb
 import logging
 
@@ -10,7 +10,7 @@ class UnifiedLogger:
     '''
     Holds both WandB and python logger objects
     '''
-    def __init__(self, args, level: str = 'DEBUG') -> None:
+    def __init__(self, level: str = 'DEBUG') -> None:
         self.level = level
 
     def my_logger(self) -> logging.Logger:
@@ -37,23 +37,22 @@ class UnifiedLogger:
         key = os.environ.get("WANDB_API_KEY")
         wandb.login(key=key)
 
-        if args.resume:
+        wandb_id = None
+
+        if isinstance(args.resume, str):
             # args.resume is of the form: "neel/ReAct_Jax/lxxn0x54 + 20"
             # we want to extract the run id, i.e "lxxn0x54"
             wandb_id = args.resume.split("+")[0].split("/")[-1].strip()
-        else:
-            wandb_id = None
 
         wandb.init(
             project="ReAct_Jax",
             config=args,
             group=args.group,
-            mode="online"
-            if jax.process_index() == 0 and args.exp_logging
-            else "offline",
+            mode="online" if args.exp_logging else "offline",
             resume="allow",
             id=wandb_id,
             reinit=True,
+            allow_val_change=True
         )
 
         wandb.run.log_code(
@@ -64,19 +63,6 @@ class UnifiedLogger:
         )
 
         return wandb
-
-    def update_args_for_hypertuning(self, args: Namespace, experiment: Optional[Callable] = None):
-        '''
-        Consumes the experiment object provided by init_hypertuning() and updates the args dict
-        '''
-        arglist = ['lr', 'drop_rate', 'weight_decay', 'grad_clip', 'warmup_steps']
-
-        for arg_name in arglist:
-            setattr(args, arg_name, experiment.config[arg_name])
-
-        args.epochs = 1 # for faster training
-
-        return args
 
     def init_wandb_sweep(self) -> str:
         '''

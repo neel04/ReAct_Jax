@@ -22,7 +22,6 @@ from ReAct.utils.helpers import (
     calc_performance_metrics,
     count_params,
     get_hist,
-    get_leaves,
     get_weights,
     load_eqx_obj,
     megatron_init,
@@ -33,6 +32,7 @@ from ReAct.utils.losses import (
     _cross_entropy_with_logits_fwd,
     cross_entropy_with_logits,
 )
+from ReAct.utils.muon_modded import muon
 from ReAct.utils.sharding import get_strategy
 
 get_linear_weights = partial(get_weights, layer=LinearProj)
@@ -135,7 +135,7 @@ class Trainer:
     def __init__(
         self,
         args: Any,
-        logger: Tuple,
+        loggers: Tuple,
         loaders: Tuple,
         decode_fn: Callable,
         dataset_size: Optional[int] = None,
@@ -151,7 +151,7 @@ class Trainer:
         self.args = args
         self.key = key
 
-        self.my_logger, self.wandb_logger = logger
+        self.my_logger, self.wandb_logger = loggers
         self.trainloader, self.valloader = loaders
 
         self.dataset_length = (
@@ -201,7 +201,7 @@ class Trainer:
         self, model: eqx.Module
     ) -> Tuple[GradientTransformation, PyTree, eqx.Module]:
 
-        assert model is not None, 'Model is not initialized'
+        assert model is not None, "Model is not initialized"
 
         total_steps = self.args.epochs * self.dataset_length
 
@@ -214,16 +214,32 @@ class Trainer:
         )
 
         # optimizer with weight decay
-        optim = optax.chain(
-            optax.adaptive_grad_clip(self.args.grad_clip),
-            optax.MultiSteps(
-                optax.adamw(
+        match self.args.optimizer_type:
+            case "muon":
+                opt = muon(
+                    learning_rate=self.schedule_fn,
+                    adam_weight_decay=self.args.weight_decay,
+                    adam_b1=self.args.beta_1,
+                    adam_b2=self.args.beta_2,
+                    nesterov=self.args.nesterov,
+                    adaptive=self.args.muon_adaptive,
+                )
+
+            case _:
+                opt = optax.adamw(
                     learning_rate=self.schedule_fn,
                     weight_decay=self.args.weight_decay,
                     b1=self.args.beta_1,
                     b2=self.args.beta_2,
                     nesterov=self.args.nesterov,
-                ),
+                )
+
+        self.my_logger.warning(f"Using {opt} optimizer.")
+
+        optim = optax.chain(
+            optax.adaptive_grad_clip(self.args.grad_clip),
+            optax.MultiSteps(
+                opt,
                 every_k_schedule=self.args.accum_steps,
             ),
         )
@@ -264,6 +280,7 @@ class Trainer:
             )
         else:
             model = React(
+                self.args.rank,
                 self.args.n_heads,
                 self.args.seqlen,
                 self.args.max_iters,
@@ -276,7 +293,7 @@ class Trainer:
             )
 
         # custom weight init
-        weights= get_linear_weights(model)
+        weights = get_linear_weights(model)
 
         new_weights = [
             megatron_init(weight, subkey)
@@ -379,6 +396,7 @@ class Trainer:
             self.my_logger.info(f"\nReported metric: {loss} @ {progress} to optuna.")
 
             if trial.should_prune():
+                self.wandb_logger.finish() # finish before pruning.
                 raise optuna.exceptions.TrialPruned()
 
     def train(self, trial: Optional[Any] = None) -> float:
@@ -389,7 +407,7 @@ class Trainer:
         optim, _, _ = self.set_optim_and_scheduler(model)
         filter_spec = self.get_filterspec(model)
 
-        if self.args.resume is not False:
+        if self.args.resume is True and self.args.tune_hyperparams is False:
             model, opt_state, step_done, epoch_done = self.resume_training(
                 model, opt_state
             )
@@ -454,6 +472,7 @@ class Trainer:
 
                     if jnp.isnan(loss):
                         self.my_logger.warning(f"\nLoss is NaN at step {step}")
+                        self.wandb_logger.finish()
                         return loss
 
                 if step % self.args.log_interval == 0 and len(train_acc) > 0:

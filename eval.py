@@ -11,7 +11,7 @@ from lm_eval.api.model import TemplateLM
 from lm_eval.tasks import TaskManager
 from tqdm import tqdm
 
-from ReAct.data.owt import OpenWebTextDataset as OWT
+from inferencer import Tok
 from ReAct.model.baseline import GPT
 from ReAct.model.react import React
 from ReAct.utils.arg_parser import get_evaluation_args
@@ -26,10 +26,10 @@ class Evaluator:
         self.key = key
         self.args = args
 
-        dummy_dataset = OWT(split="train")
+        tok = Tok(vocab_dir=None, max_length=512)
 
-        self.decode_fn = dummy_dataset.tok.decode
-        self.encode_fn = dummy_dataset.tok.encode
+        self.decode_fn = tok.decode
+        self.encode_fn = tok.encode
 
         self.strategy = get_strategy(self.args.strategy)
 
@@ -242,7 +242,7 @@ class Evaluator:
             task_manager=task_manager,
         )
 
-        return results['results'] # type: ignore
+        return results["results"]  # type: ignore
 
 
 if __name__ == "__main__":
@@ -256,12 +256,12 @@ if __name__ == "__main__":
         "Make sure to provide the correct args per the model configuration - as it cant be autodetected!"
     )
     my_logger.warning("These are: max_iters| baseline | num_blocks | width | n_heads")
-    print(f"{'-'*50}\n")
+    print(f"{'-' * 50}\n")
 
     assert args.checkpoint_path is not None, "Please provide a checkpoint path"
-    assert os.path.exists(
-        args.checkpoint_path
-    ), "Please provide a valid checkpoint path | File does not exist"
+    assert os.path.exists(args.checkpoint_path), (
+        "Please provide a valid checkpoint path | File does not exist"
+    )
 
     evaluator = Evaluator(args, key)
 
