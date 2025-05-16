@@ -1,8 +1,19 @@
 import argparse
-from argparse import Namespace
+
+from ReAct.utils.arg_types import (
+    EvaluationArgs,
+    InferenceArgs,
+    TrainingArgs,
+    from_namespace,
+)
 
 
-def parse_args() -> Namespace:
+def parse_args() -> TrainingArgs:
+    """Parse command line arguments for training.
+
+    Returns:
+        TrainingArgs: The parsed arguments as a structured dataclass.
+    """
     description = "Training script - kicks off training of the model"
     epilog = "Hyperparameters defaults may not be optimal. Please use --help to check available options."
 
@@ -209,10 +220,16 @@ def parse_args() -> Namespace:
     )
 
     args = parser.parse_args()
-    return args
+    # Convert namespace to dataclass
+    return from_namespace(args, TrainingArgs)
 
 
-def get_inference_args() -> Namespace:
+def get_inference_args() -> InferenceArgs:
+    """Parse command line arguments for inference.
+
+    Returns:
+        InferenceArgs: The parsed arguments as a structured dataclass.
+    """
     description = "Inference script for sampling from a trained model"
 
     parser = argparse.ArgumentParser(description=description)
@@ -319,11 +336,16 @@ def get_inference_args() -> Namespace:
     )
 
     args = parser.parse_args()
+    # Convert namespace to dataclass
+    return from_namespace(args, InferenceArgs)
 
-    return args
 
+def get_evaluation_args() -> EvaluationArgs:
+    """Parse command line arguments for evaluation.
 
-def get_evaluation_args():
+    Returns:
+        EvaluationArgs: The parsed arguments as a structured dataclass.
+    """
     description = "Collects the arguments for evaluating the model on any task"
 
     parser = argparse.ArgumentParser(description=description)
@@ -399,7 +421,7 @@ def get_evaluation_args():
 
     args = parser.parse_args()
 
-    return args
+    return from_namespace(args, EvaluationArgs)
 
 
 if __name__ == "__main__":
