@@ -39,12 +39,11 @@ get_linear_weights = partial(get_weights, layer=LinearProj)
 half, full = jnp.bfloat16, jnp.float32
 policy = Policy(compute_dtype=half, param_dtype=half, output_dtype=half)
 
-# Stable CE (w/ z-loss) from PaLM
+# Assemble stable CE (w/ z-loss) from PaLM
 ce_loss = cross_entropy_with_logits
 ce_loss.defvjp(_cross_entropy_with_logits_fwd, _cross_entropy_with_logits_bwd)
 
-@eqx.filter_jit
-def iters_fwd(
+def _iters_fwd(
     model: React, input_arr: Array, pad_mask: Array, iters_to_do: int, key: PRNGKeyArray
 ) -> Array:
     # Only n passes, but track the gradient
@@ -59,11 +58,19 @@ def iters_fwd(
 
     return output
 
-@eqx.filter_jit
-def vanilla_fwd(
+def _vanilla_fwd(
     model: GPT, input_arr: Array, pad_mask: Array, iters_to_do: int, key: PRNGKeyArray
 ) -> Array:
     return model(input_arr, pad_mask, enable_dropout=True, key=key)
+
+
+@eqx.filter_jit
+def forward(model: React | GPT, args: Tuple[Any, ...]) -> Array:
+    if isinstance(model, React):
+        return jax.vmap(_iters_fwd, in_axes=(None, 0, 0, None, 0))(model, *args)
+    else:
+        return jax.vmap(_vanilla_fwd, in_axes=(None, 0, 0, None, 0))(model, *args)
+
 
 @eqx.filter_jit
 def _compute_softmax_cross_entropy_loss(pred_y: Array, y_one_hot: Array) -> Array:
@@ -74,7 +81,7 @@ def _compute_softmax_cross_entropy_loss(pred_y: Array, y_one_hot: Array) -> Arra
 @eqx.filter_jit
 def make_step(
     keys: PRNGKeyArray,
-    model: Union[React, GPT],
+    model: React | GPT,
     opt_state: PyTree,
     filter_spec: PyTree,
     x: Array,
@@ -102,14 +109,7 @@ def make_step(
         """
         Computes the loss of the model w.r.t the input.
         """
-        if model.__name__ == "ReAct":
-            forward = iters_fwd
-        else:
-            forward = vanilla_fwd
-
-        pred_y = jax.vmap(forward, in_axes=(None, 0, 0, None, 0))(
-            model, x, pad_mask, iters_to_do, keys
-        )  # (batch_size, seqlen, num_classes)
+        pred_y = forward(model, args=(x, pad_mask, iters_to_do, keys))  # (batch_size, seqlen, num_classes)
 
         y_one_hot = jax.nn.one_hot(
             y, num_classes=num_classes
@@ -367,7 +367,7 @@ class Trainer:
         keys = keys[:input_arr.shape[0], ...] # take a batch_size sized slice of the keys
 
         if is_baseline:
-            pred_y = jax.vmap(model, in_axes=(0, 0, None, 0))(input_arr, pad_mask, False, keys) # type: ignore
+            pred_y = jax.vmap(model, in_axes=(0, 0, None, 0))(input_arr, pad_mask, False, keys)
         else:
             pred_y = jax.vmap(model, in_axes=(0, None, 0, None, None, 0))(input_arr, eval_iters, pad_mask, False, False, keys)[0] # type:ignore
 

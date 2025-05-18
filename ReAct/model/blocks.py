@@ -66,9 +66,9 @@ class LinearProj(eqx.Module):
         use_bias=True,
         strategy: Sharding | None = None,
     ):
-        assert (
-            input_dim >= 1 or output_dim >= 1
-        ), f"input_dim: {input_dim} | output_dim: {output_dim} are too small"
+        assert input_dim >= 1 or output_dim >= 1, (
+            f"input_dim: {input_dim} | output_dim: {output_dim} are too small"
+        )
         assert strategy is not None, "No strategy provided."
 
         wkey, bkey = jax.random.split(key, 2)
@@ -306,7 +306,9 @@ class UnsharedBlock(eqx.Module, Generic[L]):
         keys = jax.random.split(key, num_repeats)
 
         self.layers = {
-            name: tuple(self.init_layer(layer_init, keys, i) for i in range(num_repeats))
+            name: tuple(
+                self.init_layer(layer_init, keys, i) for i in range(num_repeats)
+            )
             for name, layer_init in layers.items()
         }
         self.num_repeats = num_repeats
@@ -594,7 +596,7 @@ class AdaptableAttentionBlock(eqx.Module):
             key=key_1,
         )
 
-        inp += lora_lat # inject adapter information in the residual. 
+        inp += lora_lat  # inject adapter information in the residual.
 
         x = jax.vmap(self.ln2)(inp)
 
@@ -603,7 +605,7 @@ class AdaptableAttentionBlock(eqx.Module):
 
         inp += self.mlp(x, enable_dropout=True, key=key_2)
 
-        inp = self.mlp_lora_lerp(inp, mlp_lora)
+        inp += mlp_lora
 
         return self.sharding.shard_model_cast(inp)
 
