@@ -188,8 +188,7 @@ def main(key: PRNGKeyArray):
         my_logger.info(f"# of hosts: {jax.process_count()}")
         my_logger.info(f"Host id: {jax.process_index()}")
 
-        with jax.spmd_mode("allow_all"):
-            trainer.train()
+        trainer.train()
 
 
 def kickoff_optuna(trial, artifact_name: str, **trainer_kwargs):
@@ -246,8 +245,7 @@ def kickoff_optuna(trial, artifact_name: str, **trainer_kwargs):
     my_logger.info(f"# of hosts: {jax.process_count()}")
     my_logger.info(f"Host id: {jax.process_index()}")
 
-    with jax.spmd_mode("allow_all"):
-        output = trainer.train(trial)
+    output = trainer.train(trial)
 
     return jax.numpy.nan_to_num(output, nan=9e9)
 
