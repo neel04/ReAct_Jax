@@ -486,6 +486,7 @@ class AdaptableAttentionBlock(eqx.Module):
     attn_gate: eqx.nn.MultiheadAttention
     ln1: eqx.nn.LayerNorm
     ln2: eqx.nn.LayerNorm
+    act: NewGELU
     mlp: MLP
 
     def __init__(
@@ -538,6 +539,7 @@ class AdaptableAttentionBlock(eqx.Module):
             key=key,
         )
 
+        self.act = NewGELU(strategy)
         self.ln1 = eqx.nn.LayerNorm(self.in_dim)
         self.ln2 = eqx.nn.LayerNorm(self.in_dim)
 
@@ -598,7 +600,7 @@ class AdaptableAttentionBlock(eqx.Module):
 
         x = jax.vmap(self.ln2)(inp)
 
-        mlp_lora = self.unshared_layers.apply_layer("MLP_adapter_A", it_idx, (x,))
+        mlp_lora = self.act(self.unshared_layers.apply_layer("MLP_adapter_A", it_idx, (x,)))
         mlp_lora = self.unshared_layers.apply_layer("MLP_adapter_B", it_idx, (mlp_lora,))
 
         inp += self.mlp(x, enable_dropout=True, key=key_2) + mlp_lora
