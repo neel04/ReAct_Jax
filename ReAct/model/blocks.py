@@ -583,7 +583,7 @@ class AdaptableAttentionBlock(eqx.Module):
 
         x = jax.vmap(self.ln1)(inp)
 
-        lora_lat = self.unshared_layers.apply_layer("adapter_A", it_idx, (x,))
+        lora_lat = self.act(self.unshared_layers.apply_layer("adapter_A", it_idx, (x,)))
         lora_lat = self.unshared_layers.apply_layer("adapter_B", it_idx, (lora_lat,))
 
         inp += self.attn_gate(
