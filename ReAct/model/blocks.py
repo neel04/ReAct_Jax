@@ -370,7 +370,7 @@ class NDRAttentionBlock(eqx.Module):
         key: PRNGKeyArray,
         strategy: Sharding,
     ):
-        key1, key2, key3 = jax.random.split(key, 3)
+        key1, key2, _ = jax.random.split(key, 3)
 
         self.sharding = strategy(policy)
 
@@ -584,7 +584,9 @@ class AdaptableAttentionBlock(eqx.Module):
         x = jax.vmap(self.ln1)(inp)
 
         lora_lat = self.act(self.unshared_layers.apply_layer("adapter_A", it_idx, (x,)))
-        lora_lat = self.unshared_layers.apply_layer("adapter_B", it_idx, (lora_lat,))
+        lora_lat = self.act(
+            self.unshared_layers.apply_layer("adapter_B", it_idx, (lora_lat,))
+        )
 
         inp += self.attn_gate(
             query=x,
@@ -600,8 +602,12 @@ class AdaptableAttentionBlock(eqx.Module):
 
         x = jax.vmap(self.ln2)(inp)
 
-        mlp_lora = self.act(self.unshared_layers.apply_layer("MLP_adapter_A", it_idx, (x,)))
-        mlp_lora = self.unshared_layers.apply_layer("MLP_adapter_B", it_idx, (mlp_lora,))
+        mlp_lora = self.act(
+            self.unshared_layers.apply_layer("MLP_adapter_A", it_idx, (x,))
+        )
+        mlp_lora = self.act(
+            self.unshared_layers.apply_layer("MLP_adapter_B", it_idx, (mlp_lora,))
+        )
 
         inp += self.mlp(x, enable_dropout=True, key=key_2) + mlp_lora
 
