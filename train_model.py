@@ -1,8 +1,10 @@
 import os
 import platform
 import subprocess
+
 import jax
 import optuna
+import optunahub
 
 from ReAct.utils.helpers import download_artifact
 
@@ -112,19 +114,15 @@ def main(key: PRNGKeyArray):
         # Create optuna hypertununing study
         storage = f"sqlite:///chkp_{args.max_iters}i_{args.num_blocks}L_{args.width}{args.sweep_metadata}.db"
 
+        module = optunahub.load_module("samplers/hebo")
+        hebo_sampler = module.HEBOSampler(seed=69)
+
         study = optuna.create_study(
             study_name=f"Sweeps_{args.max_iters}i_{args.num_blocks}L_{args.width}{args.sweep_metadata}",
             direction="minimize",
             load_if_exists=True,
             storage=storage,
-            sampler=optuna.samplers.TPESampler(
-                seed=69,
-                consider_magic_clip=True,
-                consider_endpoints=True,
-                multivariate=True,
-                warn_independent_sampling=True,
-                n_startup_trials=10,
-            ),
+            sampler=hebo_sampler,
             pruner=optuna.pruners.PercentilePruner(
                 percentile=25.0, n_startup_trials=5, n_min_trials=5, n_warmup_steps=1500
             ),
