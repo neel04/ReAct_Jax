@@ -155,8 +155,8 @@ def main(key: PRNGKeyArray):
             lambda trial: kickoff_optuna(
                 trial=trial, artifact_name=artifact_name, **trainer_kwargs
             ),
-            n_trials=100,
-            callbacks=[wandbc],
+            n_trials=50,
+            callbacks=[wandbc] if jax.process_index() == 0 else None,
             gc_after_trial=True,
         )
 
