@@ -9,6 +9,7 @@ from equinox.nn import LayerNorm
 from jaxtyping import Array, Float, Int, PRNGKeyArray
 from jmp import Policy
 
+from ReAct.model._attn import AdaptableMultiheadAttention
 from ReAct.utils.sharding import Sharding, get_strategy
 
 policy = Policy(
@@ -480,10 +481,11 @@ class AdaptableAttentionBlock(eqx.Module):
     seqlen: int = eqx.field(static=True)
     n_heads: int = eqx.field(static=True)
     in_dim: int = eqx.field(static=True)
+    rank: int = eqx.field(static=True)
 
     unshared_layers: UnsharedBlock[LinearProj | LayerNorm]
     rope_embed: eqx.nn.RotaryPositionalEmbedding
-    attn_gate: eqx.nn.MultiheadAttention
+    attn_gate: AdaptableMultiheadAttention
     ln1: eqx.nn.LayerNorm
     ln2: eqx.nn.LayerNorm
     act: NewGELU
@@ -504,16 +506,19 @@ class AdaptableAttentionBlock(eqx.Module):
         key1, key2 = jax.random.split(key, 2)
 
         self.sharding = strategy(policy)
+        self.act = NewGELU(strategy)
 
         self.seqlen = seqlen
         self.n_heads = n_heads
         self.in_dim = in_dim
+        self.rank = rank
 
         self.rope_embed = eqx.nn.RotaryPositionalEmbedding(
             embedding_size=in_dim // n_heads
         )
 
-        self.attn_gate = eqx.nn.MultiheadAttention(
+        self.attn_gate = AdaptableMultiheadAttention(
+            act=self.act,
             num_heads=n_heads,
             query_size=in_dim,
             use_query_bias=True,
@@ -526,24 +531,29 @@ class AdaptableAttentionBlock(eqx.Module):
 
         self.unshared_layers = UnsharedBlock(
             layers={
-                "adapter_A": partial(LinearProj, in_dim, rank, strategy=self.sharding),
-                "adapter_B": partial(LinearProj, rank, in_dim, strategy=self.sharding),
-                "MLP_adapter_A": partial(
-                    LinearProj, in_dim, rank, strategy=self.sharding
-                ),
-                "MLP_adapter_B": partial(
-                    LinearProj, rank, in_dim, strategy=self.sharding
-                ),
+                "query_adapter_A": self._get_proj(),
+                "query_adapter_B": self._get_proj(reverse=True),
+                "key_adapter_A": self._get_proj(),
+                "key_adapter_B": self._get_proj(reverse=True),
+                "value_adapter_A": self._get_proj(),
+                "value_adapter_B": self._get_proj(reverse=True),
+                "MLP_adapter_A": self._get_proj(),
+                "MLP_adapter_B": self._get_proj(reverse=True),
             },
             num_repeats=max_iters,
             key=key,
         )
 
-        self.act = NewGELU(strategy)
         self.ln1 = eqx.nn.LayerNorm(self.in_dim)
         self.ln2 = eqx.nn.LayerNorm(self.in_dim)
 
         self.mlp = MLP(self.in_dim, self.in_dim, drop_rate, key2, strategy)
+
+    def _get_proj(self, reverse: bool = False):
+        if reverse:
+            return partial(LinearProj, self.rank, self.in_dim, strategy=self.sharding)
+
+        return partial(LinearProj, self.in_dim, self.rank, strategy=self.sharding)
 
     def process_heads(
         self,
@@ -568,6 +578,12 @@ class AdaptableAttentionBlock(eqx.Module):
 
         return mask
 
+    def _apply_lora(self, name: str, idx: int) -> Callable[[Array], Array]:
+        def _apply(x: Array) -> Array:
+            return self.act(self.unshared_layers.apply_layer(name, idx, (x,)))
+
+        return _apply
+
     @eqx.filter_jit
     def __call__(
         self,
@@ -583,9 +599,19 @@ class AdaptableAttentionBlock(eqx.Module):
 
         x = jax.vmap(self.ln1)(inp)
 
-        lora_lat = self.act(self.unshared_layers.apply_layer("adapter_A", it_idx, (x,)))
-        lora_lat = self.act(
-            self.unshared_layers.apply_layer("adapter_B", it_idx, (lora_lat,))
+        query_lora_op_a, query_lora_op_b = (
+            self._apply_lora("query_adapter_A", it_idx),
+            self._apply_lora("query_adapter_B", it_idx),
+        )
+
+        key_lora_op_a, key_lora_op_b = (
+            self._apply_lora("key_adapter_A", it_idx),
+            self._apply_lora("key_adapter_B", it_idx),
+        )
+
+        value_lora_op_a, value_lora_op_b = (
+            self._apply_lora("value_adapter_A", it_idx),
+            self._apply_lora("value_adapter_B", it_idx),
         )
 
         inp += self.attn_gate(
@@ -596,9 +622,12 @@ class AdaptableAttentionBlock(eqx.Module):
             inference=enable_dropout,
             process_heads=self.process_heads,
             key=key_1,
+            proj_operator={
+                "query_lora": (query_lora_op_a, query_lora_op_b),
+                "key_lora": (key_lora_op_a, key_lora_op_b),
+                "value_lora": (value_lora_op_a, value_lora_op_b),
+            },
         )
-
-        inp += lora_lat  # inject adapter information in the residual.
 
         x = jax.vmap(self.ln2)(inp)
 
