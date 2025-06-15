@@ -22,6 +22,9 @@ DEFAULT_LOGFILE="out.log"
 # Your specific command - with proper escaping
 DEFAULT_COMMAND='tmux kill-server; sudo rm -rf ./ReAct_Jax/ReAct/outputs/; sudo rm -rf *; curl -L https://gist.githubusercontent.com/neel04/9c26d460793466187b5dd8ffb2e4d90b/raw/run_uv.sh -o run.sh; sleep 1s && tmux new-session -d "source run.sh 2>&1 | tee out.log";'
 
+# Track UNAVAILABLE error occurrences
+UNAVAILABLE_ERROR_COUNT=0
+
 # Function to display usage
 function show_usage() {
   echo "Usage: tpu-babysitter.sh [VM_NAME] [options]"
@@ -176,26 +179,70 @@ function run_command_on_vm() {
   return $exit_code
 }
 
-# Function to check logfile for an error pattern and restart if found.
+# Function to delete and recreate VM
+function delete_and_recreate_vm() {
+  echo "Deleting VM $VM_NAME for recreation..."
+  yes | gcloud compute tpus tpu-vm delete --zone "$ZONE" "$VM_NAME" &> /dev/null
+  
+  # Wait a bit before recreating
+  echo "Waiting 60 seconds before recreating VM..."
+  sleep 60
+  
+  # Reset the UNAVAILABLE error count since we're recreating
+  UNAVAILABLE_ERROR_COUNT=0
+  
+  # Create and setup the VM
+  create_and_setup_vm
+  return $?
+}
+
+# Function to check logfile for error patterns and restart if found.
 function check_logfile_for_errors() {
    echo "Checking logfile $LOGFILE for errors on all workers..."
 
    local error_flag="RESTART_TRIGGERED_BY_ERROR"
+   local unavailable_flag="UNAVAILABLE_ERROR_FOUND"
 
-   # Run grep on all workers. If the pattern is found, print the error flag.
-   # The output from all workers is aggregated by the gcloud command.
+   # Check for multiple error patterns
    local gcloud_output
    gcloud_output=$(gcloud compute tpus tpu-vm ssh "$USERNAME@$VM_NAME" \
        --zone="$ZONE" \
        --worker=all \
-       --command="if grep -q 'RAW: Raising signal 6 with default behavior' \"$LOGFILE\"; then echo \"$error_flag\"; fi")
+       --command="
+         if grep -q 'RAW: Raising signal 6 with default behavior' \"$LOGFILE\"; then 
+           echo \"$error_flag\"
+         fi
+         if grep -q 'absl::Status: UNAVAILABLE:' \"$LOGFILE\"; then 
+           echo \"$unavailable_flag\"
+         fi
+         if grep -q 'absl::Status: DEADLINE_EXCEEDED:' \"$LOGFILE\"; then 
+           echo \"$unavailable_flag\"
+         fi
+       ")
 
-   # Check if the aggregated output contains our flag from any worker.
+   # Check for RAW signal error (simple restart)
    if [[ "$gcloud_output" == *"$error_flag"* ]]; then
-       echo "Found error pattern in $LOGFILE on at least one worker. Restarting after 60 seconds..."
+       echo "Found RAW signal error pattern in $LOGFILE on at least one worker. Restarting after 60 seconds..."
        sleep 60
        run_command_on_vm
        return $?
+   fi
+
+   # Check for UNAVAILABLE error (escalating response)
+   if [[ "$gcloud_output" == *"$unavailable_flag"* ]]; then
+       UNAVAILABLE_ERROR_COUNT=$((UNAVAILABLE_ERROR_COUNT + 1))
+       echo "Found UNAVAILABLE error pattern in $LOGFILE on at least one worker (occurrence #$UNAVAILABLE_ERROR_COUNT)"
+       
+       if [ $UNAVAILABLE_ERROR_COUNT -eq 1 ]; then
+           echo "First UNAVAILABLE error - restarting command after 60 seconds..."
+           sleep 60
+           run_command_on_vm
+           return $?
+       else
+           echo "Second UNAVAILABLE error detected - deleting and recreating VM..."
+           delete_and_recreate_vm
+           return $?
+       fi
    fi
 
    return 1
@@ -325,6 +372,9 @@ while true; do
     echo "VM $VM_NAME is not in READY state or doesn't exist"
     echo "Deleting VM if it exists..."
     yes | gcloud compute tpus tpu-vm delete --zone "$ZONE" "$VM_NAME" &> /dev/null
+    
+    # Reset UNAVAILABLE error count when VM is recreated due to preemption
+    UNAVAILABLE_ERROR_COUNT=0
 
     echo "VM was preempted or crashed. Recreating and running setup command..."
     create_and_setup_vm
@@ -345,10 +395,10 @@ while true; do
   else
     echo "VM $VM_NAME is running normally"
     
-    # Check logfile for error pattern
+    # Check logfile for error patterns
     check_logfile_for_errors
     if [ $? -eq 0 ]; then
-      echo "Command restarted due to logfile error detection"
+      echo "Action taken due to logfile error detection"
     fi
   fi
 
