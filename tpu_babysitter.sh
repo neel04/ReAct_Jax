@@ -203,23 +203,15 @@ function check_logfile_for_errors() {
    local error_flag="RESTART_TRIGGERED_BY_ERROR"
    local unavailable_flag="UNAVAILABLE_ERROR_FOUND"
 
-   # Check for multiple error patterns
+   # Single-line remote command that checks for all error patterns
    local gcloud_output
    gcloud_output=$(gcloud compute tpus tpu-vm ssh "$USERNAME@$VM_NAME" \
        --zone="$ZONE" \
        --worker=all \
-       --command="
-         if grep -q 'RAW: Raising signal 6 with default behavior' \"$LOGFILE\"; then 
-           echo \"$error_flag\"
-         fi
-         if grep -q 'absl::Status: UNAVAILABLE:' \"$LOGFILE\"; then 
-           echo \"$unavailable_flag\"
-         fi
-         if grep -q 'absl::Status: DEADLINE_EXCEEDED:' \"$LOGFILE\"; then 
-           echo \"$unavailable_flag\"
-         fi
-       ")
+       --command="if grep -q 'RAW: Raising signal 6 with default behavior' '$LOGFILE' 2>/dev/null; then echo '$error_flag'; elif grep -q 'absl::Status: UNAVAILABLE:\|absl::Status: DEADLINE_EXCEEDED:' '$LOGFILE' 2>/dev/null; then echo '$unavailable_flag'; fi")
 
+   echo "gcloud output: $gcloud_output"
+   
    # Check for RAW signal error (simple restart)
    if [[ "$gcloud_output" == *"$error_flag"* ]]; then
        echo "Found RAW signal error pattern in $LOGFILE on at least one worker. Restarting after 60 seconds..."
