@@ -50,6 +50,14 @@ class NewGELU(eqx.Module):
         return self.sharding.shard_model_cast(output)
 
 
+def _init_weight(input_dim: int, output_dim: int, key: PRNGKeyArray) -> Array:
+    lim = 1 / math.sqrt(input_dim)
+
+    return jax.random.uniform(
+        key, (input_dim, output_dim), minval=-lim, maxval=lim
+    ) * math.sqrt(1 / (3 * input_dim))
+
+
 class LinearProj(eqx.Module):
     bias: jax.Array
     weight: jax.Array
@@ -283,7 +291,56 @@ class CopyGate(eqx.Module):
         return jax.nn.sigmoid(self.gating_layer(input, enable_dropout, key))
 
 
-L = TypeVar("L", bound=LinearProj | AttentionBlock | LayerNorm | CopyGate | Lerp)
+class ABBA(eqx.Module):
+    in_dim: float = eqx.field(static=True)
+    out_dim: float = eqx.field(static=True)
+    rank: float = eqx.field(static=True)
+
+    A_1: Array
+    A_2: Array
+
+    B_1: Array
+    B_2: Array
+
+    def __init__(
+        self,
+        in_dim: int,
+        out_dim: int,
+        rank: int,
+        key: PRNGKeyArray,
+        strategy: Sharding,
+    ):
+        key1, key2, key3, key4 = jax.random.split(key, 4)
+
+        self.in_dim = in_dim
+        self.out_dim = out_dim
+        self.rank = rank
+
+        self.B_1 = _init_weight(in_dim, rank, key1)
+        self.A_1 = _init_weight(rank, out_dim, key2)
+
+        self.B_2 = _init_weight(in_dim, rank, key3)
+        self.A_2 = _init_weight(rank, out_dim, key4)
+
+    def __call__(self, x: Float[Array, "... in_dim"]) -> Float[Array, "... out_dim"]:
+        A_kr: Float[Array, "r_1*r_2 out_dim"] = self.rowwise_khatri_rao(self.A_1.T, self.A_2.T).T
+        B_kr: Float[Array, "in_dim r_1*r_2"] = self.rowwise_khatri_rao(self.B_1, self.B_2)
+
+        return (x @ B_kr) @ A_kr
+        
+    @staticmethod
+    def rowwise_khatri_rao(U: Array, V: Array) -> Array:
+        m, n = U.shape
+
+        U_exp = U[:, :, None]  # (m, n, 1)
+        V_exp = V[:, None, :]  # (m, 1, n)
+
+        # Elementwise multiply and reshape
+        out = (U_exp * V_exp).reshape(m, n * n)
+
+        return out
+
+L = TypeVar("L", bound=LinearProj | AttentionBlock | LayerNorm | CopyGate | Lerp | ABBA)
 
 
 class UnsharedBlock(eqx.Module, Generic[L]):
@@ -483,7 +540,7 @@ class AdaptableAttentionBlock(eqx.Module):
     in_dim: int = eqx.field(static=True)
     rank: int = eqx.field(static=True)
 
-    unshared_layers: UnsharedBlock[LinearProj | LayerNorm]
+    unshared_layers: UnsharedBlock[LinearProj | ABBA]
     rope_embed: eqx.nn.RotaryPositionalEmbedding
     attn_gate: AdaptableMultiheadAttention
     ln1: eqx.nn.LayerNorm
@@ -531,14 +588,10 @@ class AdaptableAttentionBlock(eqx.Module):
 
         self.unshared_layers = UnsharedBlock(
             layers={
-                "query_adapter_A": self._get_proj(),
-                "query_adapter_B": self._get_proj(reverse=True),
-                "key_adapter_A": self._get_proj(),
-                "key_adapter_B": self._get_proj(reverse=True),
-                "value_adapter_A": self._get_proj(),
-                "value_adapter_B": self._get_proj(reverse=True),
-                "MLP_adapter_A": self._get_proj(),
-                "MLP_adapter_B": self._get_proj(reverse=True),
+                "query_adapter_A": self._get_abba(),
+                "key_adapter_A": self._get_abba(),
+                "value_adapter_A": self._get_abba(),
+                "MLP_adapter_A": self._get_abba(),
             },
             num_repeats=max_iters,
             key=key,
@@ -554,6 +607,11 @@ class AdaptableAttentionBlock(eqx.Module):
             return partial(LinearProj, self.rank, self.in_dim, strategy=self.sharding)
 
         return partial(LinearProj, self.in_dim, self.rank, strategy=self.sharding)
+
+    def _get_abba(self):
+        return partial(
+            ABBA, self.in_dim, self.in_dim, self.rank, strategy=self.sharding
+        )
 
     def process_heads(
         self,
@@ -579,6 +637,10 @@ class AdaptableAttentionBlock(eqx.Module):
         return mask
 
     def _apply_lora(self, name: str, idx: int) -> Callable[[Array], Array]:
+        """
+        Helper function that applies non-linear LoRA-like transformation
+        """
+
         def _apply(x: Array) -> Array:
             return self.act(self.unshared_layers.apply_layer(name, idx, (x,)))
 
@@ -588,7 +650,7 @@ class AdaptableAttentionBlock(eqx.Module):
     def __call__(
         self,
         inp: Float[Array, "seqlen in_dim"],
-        it_idx: int,  # <=> iteration index
+        it_idx: int,  # iteration index
         mask: Array,
         enable_dropout: bool,
         key: PRNGKeyArray,
@@ -599,20 +661,9 @@ class AdaptableAttentionBlock(eqx.Module):
 
         x = jax.vmap(self.ln1)(inp)
 
-        query_lora_op_a, query_lora_op_b = (
-            self._apply_lora("query_adapter_A", it_idx),
-            self._apply_lora("query_adapter_B", it_idx),
-        )
-
-        key_lora_op_a, key_lora_op_b = (
-            self._apply_lora("key_adapter_A", it_idx),
-            self._apply_lora("key_adapter_B", it_idx),
-        )
-
-        value_lora_op_a, value_lora_op_b = (
-            self._apply_lora("value_adapter_A", it_idx),
-            self._apply_lora("value_adapter_B", it_idx),
-        )
+        query_lora = self._apply_lora("query_adapter_A", it_idx)
+        key_lora = self._apply_lora("key_adapter_A", it_idx)
+        value_lora = self._apply_lora("value_adapter_A", it_idx)
 
         inp += self.attn_gate(
             query=x,
@@ -623,9 +674,9 @@ class AdaptableAttentionBlock(eqx.Module):
             process_heads=self.process_heads,
             key=key_1,
             proj_operator={
-                "query_lora": (query_lora_op_a, query_lora_op_b),
-                "key_lora": (key_lora_op_a, key_lora_op_b),
-                "value_lora": (value_lora_op_a, value_lora_op_b),
+                "query_lora": query_lora,
+                "key_lora": key_lora,
+                "value_lora": value_lora,
             },
         )
 
@@ -633,9 +684,6 @@ class AdaptableAttentionBlock(eqx.Module):
 
         mlp_lora = self.act(
             self.unshared_layers.apply_layer("MLP_adapter_A", it_idx, (x,))
-        )
-        mlp_lora = self.act(
-            self.unshared_layers.apply_layer("MLP_adapter_B", it_idx, (mlp_lora,))
         )
 
         inp += self.mlp(x, enable_dropout=True, key=key_2) + mlp_lora

@@ -26,6 +26,11 @@ class AttnLoRANs(TypedDict):
     key_lora: Tuple[ArrayMap, ArrayMap]
     value_lora: Tuple[ArrayMap, ArrayMap]
 
+class AttnABBAs(TypedDict):
+    query_lora: ArrayMap
+    key_lora: ArrayMap
+    value_lora: ArrayMap
+
 
 def dot_product_attention_weights(
     query: Float[Array, "q_seq qk_size"],
@@ -284,7 +289,7 @@ class AdaptableMultiheadAttention(Module, strict=True):
         inference: bool | None = None,
         deterministic: bool | None = None,
         process_heads: None | _ProcessHeads = None,
-        proj_operator: AttnLoRANs | None = None,
+        proj_operator: AttnLoRANs | AttnABBAs | None = None,
     ) -> Float[Array, "q_seq o_size"]:
         """**Arguments:**
 
@@ -378,14 +383,19 @@ class AdaptableMultiheadAttention(Module, strict=True):
 
         return jax.vmap(self.output_proj)(attn)
 
-    def _project(self, proj, x: Array, lora: Tuple[ArrayMap, ArrayMap] | None) -> Array:
+    def _project(
+        self, proj, x: Array, lora: Tuple[ArrayMap, ArrayMap] | ArrayMap | None = None
+    ) -> Array:
         seq_length, _ = x.shape
         projection = jax.vmap(proj)(x)
 
         if lora:
-            lora_a, lora_b = lora
-            lora_lat = lora_a(x)
-            lora_lat = lora_b(lora_lat)
+            if isinstance(lora, tuple):
+                lora_a, lora_b = lora
+                lora_lat = lora_a(x)
+                lora_lat = lora_b(lora_lat)
+            else:
+                lora_lat = lora(x)
 
             projection += lora_lat
 
