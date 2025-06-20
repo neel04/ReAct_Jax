@@ -12,6 +12,8 @@ from jmp import Policy
 from ReAct.model._attn import AdaptableMultiheadAttention
 from ReAct.utils.sharding import Sharding, get_strategy
 
+ArrayMap = Callable[[Array], Array]
+
 policy = Policy(
     compute_dtype=jnp.bfloat16, param_dtype=jnp.bfloat16, output_dtype=jnp.bfloat16
 )
@@ -146,16 +148,27 @@ class MLP(eqx.Module):
         self.dropout = eqx.nn.Dropout(p=p)
 
     @eqx.filter_jit
-    def __call__(self, x: Array, enable_dropout: bool, key: PRNGKeyArray):
+    def __call__(
+        self,
+        x: Array,
+        enable_dropout: bool,
+        key: PRNGKeyArray,
+        *,
+        proj_operator: Tuple[ArrayMap, ArrayMap] | None = None,
+    ):
+        proj_1, proj_2 = proj_operator or (None, None)
+
         x = self.sharding.shard_model_cast(x)
 
         x = self.act(self.layer_1(x))
+        x = x + proj_1(x) if proj_1 else x
 
-        x = self.layer_2(x)
+        latent = self.layer_2(x)
+        latent = latent + proj_2(latent) if proj_2 else latent
 
-        output = self.dropout(x, key=key, inference=enable_dropout)
+        output = self.act(self.dropout(latent, key=key, inference=enable_dropout))
 
-        return self.sharding.shard_model_cast(self.act(output))
+        return self.sharding.shard_model_cast(output)
 
 
 class AttentionBlock(eqx.Module):
@@ -588,10 +601,8 @@ class AdaptableAttentionBlock(eqx.Module):
 
         self.unshared_layers = UnsharedBlock(
             layers={
-                "query_adapter_A": self._get_abba(),
-                "key_adapter_A": self._get_abba(),
-                "value_adapter_A": self._get_abba(),
-                "MLP_adapter_A": self._get_abba(),
+                "attn_adapter": self._get_abba(),
+                "MLP_adapter": self._get_abba(),
             },
             num_repeats=max_iters,
             key=key,
@@ -661,9 +672,7 @@ class AdaptableAttentionBlock(eqx.Module):
 
         x = jax.vmap(self.ln1)(inp)
 
-        query_lora = self._apply_lora("query_adapter_A", it_idx)
-        key_lora = self._apply_lora("key_adapter_A", it_idx)
-        value_lora = self._apply_lora("value_adapter_A", it_idx)
+        lora_lat = self._apply_lora("attn_adapter", it_idx)(x)
 
         inp += self.attn_gate(
             query=x,
@@ -672,18 +681,15 @@ class AdaptableAttentionBlock(eqx.Module):
             mask=self._make_self_attention_mask(mask),
             inference=enable_dropout,
             process_heads=self.process_heads,
-            key=key_1,
-            proj_operator={
-                "query_lora": query_lora,
-                "key_lora": key_lora,
-                "value_lora": value_lora,
-            },
+            key=key_1
         )
+
+        inp += lora_lat # mixing in adapter information
 
         x = jax.vmap(self.ln2)(inp)
 
         mlp_lora = self.act(
-            self.unshared_layers.apply_layer("MLP_adapter_A", it_idx, (x,))
+            self.unshared_layers.apply_layer("MLP_adapter", it_idx, (x,))
         )
 
         inp += self.mlp(x, enable_dropout=True, key=key_2) + mlp_lora
