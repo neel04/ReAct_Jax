@@ -13,6 +13,7 @@ from optax._src.base import GradientTransformation
 from tqdm.auto import tqdm
 
 import wandb
+from ReAct.utils.arg_types import TrainingArgs
 from eval import Evaluator
 from inferencer import Inferencer
 from ReAct.model.baseline import GPT
@@ -135,7 +136,7 @@ def make_step(
 class Trainer:
     def __init__(
         self,
-        args: Any,
+        args: TrainingArgs,
         loggers: Tuple,
         loaders: Tuple,
         decode_fn: Callable,
@@ -415,7 +416,12 @@ class Trainer:
 
         print(f"Model: {model}")
 
-        evaluator = Evaluator(self.args, model=model, task="lambada_openai", key=self.key)
+        evaluator = Evaluator(
+            self.args,  # type: ignore
+            model=model,
+            task=self.args.bench_task,
+            key=self.key,
+        )
 
         for epoch in range(epoch_done, self.args.epochs):
             train_acc, train_loss, train_ppl = [], [], []
@@ -490,8 +496,8 @@ class Trainer:
                     # Eval on benchmark
                     eval_results = evaluator.run_lm_evaluation(model)
 
-                    lambada_ppl = eval_results["lambada_openai"]["perplexity,none"]
-                    lambada_stderr = eval_results["lambada_openai"][
+                    lambada_ppl = eval_results[self.args.bench_task]["perplexity,none"]
+                    lambada_stderr = eval_results[self.args.bench_task][
                         "perplexity_stderr,none"
                     ]
 

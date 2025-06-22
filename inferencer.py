@@ -10,13 +10,14 @@ from ReAct.data.tokenizer import Tok
 from ReAct.model.baseline import GPT
 from ReAct.model.react import React
 from ReAct.utils.arg_parser import get_inference_args
+from ReAct.utils.arg_types import Args
 from ReAct.utils.helpers import count_params, load_eqx_obj
 from ReAct.utils.logger import UnifiedLogger
 from ReAct.utils.sharding import get_strategy
 
 
 class Inferencer:
-    def __init__(self, args: argparse.Namespace, key: PRNGKeyArray):
+    def __init__(self, args: Args, key: PRNGKeyArray):
         self.pad_token = 50257
         self.key = key
         self.args = args
