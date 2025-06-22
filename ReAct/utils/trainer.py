@@ -13,6 +13,7 @@ from optax._src.base import GradientTransformation
 from tqdm.auto import tqdm
 
 import wandb
+from eval import Evaluator
 from inferencer import Inferencer
 from ReAct.model.baseline import GPT
 from ReAct.model.blocks import LinearProj
@@ -414,6 +415,8 @@ class Trainer:
 
         print(f"Model: {model}")
 
+        evaluator = Evaluator(self.args, model=model, task="lambada_openai", key=self.key)
+
         for epoch in range(epoch_done, self.args.epochs):
             train_acc, train_loss, train_ppl = [], [], []
 
@@ -484,6 +487,16 @@ class Trainer:
                     # clear the metrics
                     train_acc, train_loss, train_ppl = [], [], []
 
+                    # Eval on benchmark
+                    eval_results = evaluator.run_lm_evaluation(model)
+
+                    lambada_ppl = eval_results["lambada_openai"]["perplexity,none"]
+                    lambada_stderr = eval_results["lambada_openai"][
+                        "perplexity_stderr,none"
+                    ]
+
+                    self.my_logger.info(f"LAMBADA ppl: {lambada_ppl} | stderr: {lambada_stderr}")
+
                     ## Validation
                     (val_acc, val_loss, val_ppl), val_sample = self.evaluate_acc(
                         model,
@@ -501,6 +514,8 @@ class Trainer:
                             "Val/acc": val_acc,
                             "Val/loss": val_loss,
                             "Val/ppl": val_ppl,
+                            "Bench/LAMBADA_ppl": lambada_ppl,
+                            "Bench/LAMBADA_stderr": lambada_stderr,
                             "Gradients": wandb.Histogram(np_histogram=get_hist(grads)),
                             "Updates": wandb.Histogram(np_histogram=get_hist(updates)),
                             "Weights": wandb.Histogram(np_histogram=get_hist(model)),

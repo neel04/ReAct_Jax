@@ -32,6 +32,7 @@ dependencies = [
     "optax",
     "pylsp-rope>=0.1.17",
     "python-lsp-server>=1.12.2",
+    "hf-xet>=1.1.5",
 ]
 
 [tool.uv.sources]

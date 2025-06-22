@@ -176,6 +176,13 @@ def parse_args() -> TrainingArgs:
     )
 
     parser.add_argument(
+        "--bench_task",
+        type=str,
+        default="lambada_openai",
+        help="Task to benchmark during training. Defauls: lambada (OpenAI)",
+    )
+
+    parser.add_argument(
         "--resume",
         nargs="?",
         default=False,
@@ -413,11 +420,12 @@ def get_evaluation_args() -> EvaluationArgs:
     )
 
     parser.add_argument(
-        "--task",
+        "--bench_task",
         type=str,
-        default="hellaswag",
-        help="Which task to evaluate on. See full list on the EAI LM Eval Harness' GitHub repo",
+        default="lambada_openai",
+        help="Task to benchmark during training. Defauls: lambada_openai",
     )
+
 
     args = parser.parse_args()
 

@@ -36,6 +36,7 @@ class TrainingArgs:
     exp_logging: bool
     group: str
     checkpoint_path: str | None
+    bench_task: str | None
     resume: bool | str
     baseline: bool
     tune_hyperparams: bool
@@ -70,6 +71,8 @@ class InferenceArgs:
 class EvaluationArgs:
     """Evaluation arguments for the model."""
 
+    bench_task: str | None
+    rank: int
     seqlen: int
     max_iters: int
     num_classes: int
