@@ -152,8 +152,8 @@ class MLP(eqx.Module):
         self,
         x: Array,
         enable_dropout: bool,
-        key: PRNGKeyArray,
         *,
+        key: PRNGKeyArray,
         proj_operator: Tuple[ArrayMap, ArrayMap] | None = None,
     ):
         proj_1, proj_2 = proj_operator or (None, None)
@@ -602,7 +602,8 @@ class AdaptableAttentionBlock(eqx.Module):
         self.unshared_layers = UnsharedBlock(
             layers={
                 "attn_adapter": self._get_abba(),
-                "MLP_adapter": self._get_abba(),
+                "MLP_adapter_A": self._get_abba(4, 4, 0.25),
+                "MLP_adapter_B": self._get_abba(1, 1, 0.25),
             },
             num_repeats=max_iters,
             key=key,
@@ -619,9 +620,15 @@ class AdaptableAttentionBlock(eqx.Module):
 
         return partial(LinearProj, self.in_dim, self.rank, strategy=self.sharding)
 
-    def _get_abba(self):
+    def _get_abba(
+        self, in_ff_mult: int = 1, out_ff_mult: int = 1, rank_mul: float = 1.0
+    ):
         return partial(
-            ABBA, self.in_dim, self.in_dim, self.rank, strategy=self.sharding
+            ABBA,
+            self.in_dim * in_ff_mult,
+            self.in_dim * out_ff_mult,
+            int(self.rank * rank_mul),
+            strategy=self.sharding,
         )
 
     def process_heads(
@@ -688,11 +695,15 @@ class AdaptableAttentionBlock(eqx.Module):
 
         x = jax.vmap(self.ln2)(inp)
 
-        mlp_lora = self.act(
-            self.unshared_layers.apply_layer("MLP_adapter", it_idx, (x,))
+        inp += self.mlp(
+            x,
+            enable_dropout=True,
+            key=key_2,
+            proj_operator=(
+                self._apply_lora("MLP_adapter_A", it_idx),
+                self._apply_lora("MLP_adapter_B", it_idx),
+            ),
         )
-
-        inp += self.mlp(x, enable_dropout=True, key=key_2) + mlp_lora
 
         return self.sharding.shard_model_cast(inp)
 
