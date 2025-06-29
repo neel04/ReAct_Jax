@@ -160,11 +160,11 @@ class MLP(eqx.Module):
 
         x = self.sharding.shard_model_cast(x)
 
-        x = self.act(self.layer_1(x))
-        x = x + proj_1(x) if proj_1 else x
+        lat = self.act(self.layer_1(x))
+        lat = lat + proj_1(x) if proj_1 else lat
 
-        latent = self.layer_2(x)
-        latent = latent + proj_2(latent) if proj_2 else latent
+        latent = self.layer_2(lat)
+        latent = latent + proj_2(lat) if proj_2 else latent
 
         output = self.act(self.dropout(latent, key=key, inference=enable_dropout))
 
@@ -602,8 +602,8 @@ class AdaptableAttentionBlock(eqx.Module):
         self.unshared_layers = UnsharedBlock(
             layers={
                 "attn_adapter": self._get_abba(),
-                "MLP_adapter_A": self._get_abba(4, 4, 0.25),
-                "MLP_adapter_B": self._get_abba(1, 1, 0.25),
+                "MLP_adapter_A": self._get_abba(1, 4, 0.25),
+                "MLP_adapter_B": self._get_abba(4, 1, 0.25),
             },
             num_repeats=max_iters,
             key=key,
