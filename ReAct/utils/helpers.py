@@ -17,7 +17,7 @@ class Profiler:
     def __init__(
         self, activate_profiler: bool = True, logdir: str = "./profiles/"
     ) -> None:
-        self.warmup_steps = 50
+        self.warmup_steps = 100
         self.activate_profiler = activate_profiler
         self.logdir = logdir
 
@@ -27,16 +27,23 @@ class Profiler:
                 print(f'Started TensorBoard Profiler at: {self.logdir}')
                 jax.profiler.start_trace(self.logdir)
 
-    def stop_prof(self, output: Array, step: int) -> Array:
+    def stop_prof(self, w_logger: Any, output: Array, step: int) -> Array:
         if step == self.warmup_steps:
             if self.activate_profiler:
                 output = output.block_until_ready() # wait for output
                 jax.profiler.stop_trace()
                 print(f'Stopped Profiler at: {self.logdir}')
+                self.upload_to_wandb(w_logger)
 
             self.activate_profiler = False
 
         return output
+
+    def upload_to_wandb(self, w_logger: Any):
+        print("Uploading to W&B...")
+        artifact = wandb.Artifact('tb_profile', type='profile')
+        artifact.add_dir("profiles/")
+        w_logger.log_artifact(artifact)
 
 def convert_flops(params: int) -> str:
     if params == 0:

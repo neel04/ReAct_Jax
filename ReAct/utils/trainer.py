@@ -13,12 +13,12 @@ from optax._src.base import GradientTransformation
 from tqdm.auto import tqdm
 
 import wandb
-from ReAct.utils.arg_types import TrainingArgs
 from eval import Evaluator
 from inferencer import Inferencer
 from ReAct.model.baseline import GPT
 from ReAct.model.blocks import LinearProj
 from ReAct.model.react import React
+from ReAct.utils.arg_types import TrainingArgs
 from ReAct.utils.helpers import (
     Profiler,
     calc_performance_metrics,
@@ -450,7 +450,9 @@ class Trainer:
                     num_classes=self.args.num_classes,
                 )
 
-                loss = prof.stop_prof(loss, step)  # end trace if profiled
+                loss = prof.stop_prof(
+                    self.wandb_logger, loss, step
+                )  # end trace if profiled
 
                 if step % 100 == 0:
                     accuracy, loss, perplexity = self.compute_metrics(
