@@ -601,7 +601,8 @@ class AdaptableAttentionBlock(eqx.Module):
 
         self.unshared_layers = UnsharedBlock(
             layers={
-                "attn_adapter": self._get_abba(),
+                "Attn_adapter_A": self._get_abba(rank_mul=0.5),
+                "Attn_adapter_B": self._get_abba(rank_mul=0.5),
                 "MLP_adapter_A": self._get_abba(1, 4, 0.25),
                 "MLP_adapter_B": self._get_abba(4, 1, 0.25),
             },
@@ -679,7 +680,8 @@ class AdaptableAttentionBlock(eqx.Module):
 
         x = jax.vmap(self.ln1)(inp)
 
-        lora_lat = self._apply_lora("attn_adapter", it_idx)(x)
+        attn_lora = self._apply_lora("Attn_adapter_A", it_idx)(x)
+        attn_lora = self._apply_lora("Attn_adapter_B", it_idx)(attn_lora)
 
         inp += self.attn_gate(
             query=x,
@@ -691,19 +693,14 @@ class AdaptableAttentionBlock(eqx.Module):
             key=key_1
         )
 
-        inp += lora_lat # mixing in adapter information
+        inp += attn_lora # mixing in adapter information
 
         x = jax.vmap(self.ln2)(inp)
 
-        inp += self.mlp(
-            x,
-            enable_dropout=True,
-            key=key_2,
-            proj_operator=(
-                self._apply_lora("MLP_adapter_A", it_idx),
-                self._apply_lora("MLP_adapter_B", it_idx),
-            ),
-        )
+        mlp_lora = self._apply_lora("MLP_adapter_A", it_idx)(x)
+        mlp_lora = self._apply_lora("MLP_adapter_B", it_idx)(mlp_lora)
+
+        inp += self.mlp(x, enable_dropout=True, key=key_2) + mlp_lora
 
         return self.sharding.shard_model_cast(inp)
 
