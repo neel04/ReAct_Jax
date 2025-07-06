@@ -97,7 +97,12 @@ def main(key: PRNGKeyArray):
         )
 
         if args.resume:
-            download_artifact("neel/ReAct_Jax/" + artifact_name + ":latest")
+            try:
+                download_artifact("neel/ReAct_Jax/" + artifact_name + ":latest")
+            except TypeError:
+                print(
+                    "\nEmpty W&B Artifact detected. Cannot resume from it. Continuing as normal..."
+                )
 
         jax.experimental.multihost_utils.sync_global_devices("Sync up all nodes.")  # type: ignore
         trainloader = dataset.create_dataloader(

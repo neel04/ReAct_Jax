@@ -180,3 +180,5 @@ CLAUDE.md
 *db
 uv.lock
 profiles/
+.opencode
+OpenCode.md
