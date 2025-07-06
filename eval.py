@@ -256,6 +256,7 @@ class Evaluator:
             tasks=[self.task],
             num_fewshot=None,
             task_manager=task_manager,
+            bootstrap_iters=0
         )
 
         return results["results"]  # type: ignore
