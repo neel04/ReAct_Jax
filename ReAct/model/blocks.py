@@ -338,8 +338,6 @@ class ABBA(eqx.Module):
         self.A_2 = _init_weight(rank, out_dim, key4)
 
     def __call__(self, x: Float[Array, "... in_dim"]) -> Float[Array, "... out_dim"]:
-        A_kr: Float[Array, "r_1*r_2 out_dim"] = self.rowwise_khatri_rao(self.A_1.T, self.A_2.T).T
-        B_kr: Float[Array, "in_dim r_1*r_2"] = self.rowwise_khatri_rao(self.B_1, self.B_2)
         A_kr: Float[Array, "r_1*r_2 out_dim"] = self.rowwise_khatri_rao(
             self.A_1.T, self.A_2.T
         ).T
@@ -609,10 +607,8 @@ class AdaptableAttentionBlock(eqx.Module):
 
         self.unshared_layers = UnsharedBlock(
             layers={
-                "Attn_adapter_A": self._get_abba(rank_mul=0.5),
-                "Attn_adapter_B": self._get_abba(rank_mul=0.5),
-                "MLP_adapter_A": self._get_abba(1, 4, 0.25),
-                "MLP_adapter_B": self._get_abba(4, 1, 0.25),
+                "Attn_adapter_A": self._get_abba(),
+                "MLP_adapter_A": self._get_abba(rank_mul=0.5),
             },
             num_repeats=max_iters,
             key=key,
@@ -689,7 +685,6 @@ class AdaptableAttentionBlock(eqx.Module):
         x = jax.vmap(self.ln1)(inp)
 
         attn_lora = self._apply_lora("Attn_adapter_A", it_idx)(x)
-        attn_lora = self._apply_lora("Attn_adapter_B", it_idx)(attn_lora)
 
         inp += self.attn_gate(
             query=x,
@@ -706,7 +701,6 @@ class AdaptableAttentionBlock(eqx.Module):
         x = jax.vmap(self.ln2)(inp)
 
         mlp_lora = self._apply_lora("MLP_adapter_A", it_idx)(x)
-        mlp_lora = self._apply_lora("MLP_adapter_B", it_idx)(mlp_lora)
 
         inp += self.mlp(x, enable_dropout=True, key=key_2) + mlp_lora
 
