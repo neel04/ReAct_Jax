@@ -308,6 +308,7 @@ class ABBA(eqx.Module):
     in_dim: float = eqx.field(static=True)
     out_dim: float = eqx.field(static=True)
     rank: float = eqx.field(static=True)
+    s_abb: float = eqx.field(static=True)  # scaling factor
 
     A_1: Array
     A_2: Array
@@ -328,6 +329,7 @@ class ABBA(eqx.Module):
         self.in_dim = in_dim
         self.out_dim = out_dim
         self.rank = rank
+        self.s_abb = 1 / rank
 
         self.B_1 = _init_weight(in_dim, rank, key1)
         self.A_1 = _init_weight(rank, out_dim, key2)
@@ -338,9 +340,15 @@ class ABBA(eqx.Module):
     def __call__(self, x: Float[Array, "... in_dim"]) -> Float[Array, "... out_dim"]:
         A_kr: Float[Array, "r_1*r_2 out_dim"] = self.rowwise_khatri_rao(self.A_1.T, self.A_2.T).T
         B_kr: Float[Array, "in_dim r_1*r_2"] = self.rowwise_khatri_rao(self.B_1, self.B_2)
+        A_kr: Float[Array, "r_1*r_2 out_dim"] = self.rowwise_khatri_rao(
+            self.A_1.T, self.A_2.T
+        ).T
+        B_kr: Float[Array, "in_dim r_1*r_2"] = self.rowwise_khatri_rao(
+            self.B_1, self.B_2
+        )
 
-        return (x @ B_kr) @ A_kr
-        
+        return self.s_abb * (x @ B_kr) @ A_kr
+
     @staticmethod
     def rowwise_khatri_rao(U: Array, V: Array) -> Array:
         m, n = U.shape
