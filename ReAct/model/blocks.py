@@ -608,7 +608,7 @@ class AdaptableAttentionBlock(eqx.Module):
         self.unshared_layers = UnsharedBlock(
             layers={
                 "Attn_adapter_A": self._get_abba(),
-                "MLP_adapter_A": self._get_abba(rank_mul=0.5),
+                "MLP_adapter_A": self._get_abba(),
             },
             num_repeats=max_iters,
             key=key,
