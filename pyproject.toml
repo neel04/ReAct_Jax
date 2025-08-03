@@ -8,7 +8,7 @@ dependencies = [
     "datasets>=3.1.0",
     "einops>=0.8.0",
     "equinox>=0.11.9",
-    "jax>=0.4.35",
+    "jax==0.6.2",
     "jaxtyping>=0.2.36",
     "optuna-integration>=4.1.0",
     "optuna>=4.1.0",

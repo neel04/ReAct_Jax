@@ -136,7 +136,7 @@ def parse_args() -> TrainingArgs:
     parser.add_argument(
         "--save_dir",
         type=str,
-        default="/Users/neel/Documents/research/ReAct_Jax/ReAct/outputs/",
+        default="./outputs/",
         help="Save directory for checkpoints. Default: ./outputs/. Keep the slash at the end",
     )
 

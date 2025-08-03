@@ -6,6 +6,7 @@ export DISK_PATH="$HOME/workspace"
 export JAX_COMPILATION_CACHE_DIR="/tmp/jax_cache"
 
 # Export environment variables pointing to the ramdisk
+export TOKENIZERS_PARALLELISM=false
 export HF_HOME="$DISK_PATH/huggingface"
 export HF_DATASETS_CACHE="$DISK_PATH/huggingface_datasets"
 
@@ -25,7 +26,6 @@ if ! command -v gsutil &> /dev/null; then
 fi
 
 # Prepopulate RAM disk with bucket contents
-sudo apt-get update
 sleep 20 && sudo apt-get update && sleep 20
 sudo apt-get install -y p7zip-full
 echo "Copying contents from gs://hf-data-bucket to $DISK_PATH..."
@@ -40,17 +40,19 @@ sudo chown -R $(whoami):$(whoami) "$DISK_PATH"
 export HF_DATASETS_IN_MEMORY_MAX_SIZE=10000000000 # 10GB
 export jax_threefry_partitionable=1
 export WANDB_API_KEY=78c7285b02548bf0c06dca38776c08bb6018593f
-export HF_TOKEN=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
+export HF_TOKEN=$(echo "aGZfandzQmFOaU1lbmduQkJDQm5HeHhVYmlxWm1YQnF0Q2xTaA==" | base64 -d)
 export JAX_TRACEBACK_FILTERING=off
+export DISABLE_MULTIPROC=1
+export LMEVAL_HASHMM=0 #TODO: Remove at some point
 
 # arguments for train_model.py
 TRAIN_ARGS="--save_dir ./ReAct/outputs/ --dataset owt --group owt_repro --exp_logging \
 --log_interval 1500 --save_interval 10000 --seqlen 512 --num_classes 50304 \
---num_blocks 13 --width 1024 --n_heads 8 --epochs 1 --max_iters 3 \
+--num_blocks 18 --width 1024 --n_heads 16 --epochs 1 --max_iters 3 \
 --batch_size 512 --accum_steps 1 --warmup_steps 1000 \
 --lr 9e-4 --beta_1 0.9 --beta_2 0.98 --nesterov \
 --weight_decay 3e-3 --drop_rate 0.00 --optimizer_type adamw \
---tune_hyperparams --sweep_metadata _LayerLora --resume"
+--tune_hyperparams --sweep_metadata _64_OnlyA_ABBA --resume --rank 64"
 
 git clone -b $BRANCH https://github.com/neel04/ReAct_Jax.git
 
@@ -75,9 +77,10 @@ if [ ! -f "$FLAG_FILE" ]; then
     uv venv 'main_env' --python 3.11
     source main_env/bin/activate
 
-    uv pip install --no-cache-dir "jax[tpu]" -f https://storage.googleapis.com/jax-releases/libtpu_releases.html --prerelease allow
-    uv pip install -q transformers datasets scalax tokenizers icecream wandb einops torch tqdm jaxtyping optuna equinox rich
-    uv pip install -U optuna-integration plotly lm-eval pdbpp
+    uv pip install --no-cache-dir "jax[tpu]==0.6.2" -f https://storage.googleapis.com/jax-releases/libtpu_releases.html --prerelease allow
+    uv pip install -q transformers datasets==3.6.0 scalax tokenizers icecream wandb einops torch tqdm jaxtyping optuna equinox rich
+    uv pip install -U optuna-integration plotly pdbpp
+    uv pip install git+https://github.com/neel04/lm-evaluation-harness.git@debug/mp # TODO: Remove my fork
     uv pip install git+https://github.com/google-deepmind/optax.git
     uv pip install git+https://github.com/deepmind/jmp
     uv pip install git+https://github.com/Findus23/jax-array-info.git
@@ -98,3 +101,6 @@ cd ReAct_Jax/
 python3 train_model.py $TRAIN_ARGS
 
 echo "Finished training!"
+
+#sudo umount "$DISK_PATH"
+#rm -rf "$DISK_PATH"
