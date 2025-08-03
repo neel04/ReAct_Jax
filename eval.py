@@ -177,8 +177,8 @@ class Evaluator:
     def __init__(
         self,
         args: EvaluationArgs,
+        task: str,
         model: str | React | GPT | None = None,
-        task: str | None = None,
         *,
         key: PRNGKeyArray,
     ):
@@ -253,7 +253,7 @@ class Evaluator:
 
         results = lm_eval.simple_evaluate(
             model=lm_obj,
-            tasks=[self.task],
+            tasks=self.task.split(","),
             num_fewshot=None,
             task_manager=task_manager,
         )

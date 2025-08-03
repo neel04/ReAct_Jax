@@ -7,12 +7,13 @@ import jax
 import jax.numpy as jnp
 import optax
 import optuna
+import regex as re
+import wandb
 from jaxtyping import Array, Int, PRNGKeyArray, PyTree
 from jmp import Policy
 from optax._src.base import GradientTransformation
 from tqdm.auto import tqdm
 
-import wandb
 from eval import Evaluator
 from inferencer import Inferencer
 from ReAct.model.baseline import GPT
@@ -23,6 +24,7 @@ from ReAct.utils.helpers import (
     Profiler,
     calc_performance_metrics,
     count_params,
+    download_artifact,
     get_hist,
     get_weights,
     load_eqx_obj,
@@ -319,31 +321,33 @@ class Trainer:
     def resume_training(
         self, model: PyTree, opt_state: eqx.Module
     ) -> tuple[PyTree, PyTree, int, int]:
-        if isinstance(self.args.resume, str):
-            run_path, epoch, step = self.args.resume.split("+")
-            run_path, epoch, step = run_path.strip(), int(epoch.strip()), int(step.strip())
+        assert isinstance(self.args.resume, str), (
+            "Resume flag should be a string to locate Artifact"
+        )
 
-            base_path = "https://api.wandb.ai/files/"
-            model_path = f'{base_path}{run_path}/model_{epoch}_{step}.eqx'
+        status = download_artifact("neel/ReAct_Jax/" + self.args.resume + ":latest")
 
-            # wget both files to ReAct/outputs/, if those files don't exist
-            if not os.path.exists(f'{self.args.save_dir}model_{epoch}_{step}.eqx'):
-                os.system(f'wget -O {self.args.save_dir}model_{epoch}_{step}.eqx {model_path}')
-        else:
-            # get the model with max step & epoch number living in `save_dir`
+        if status:
             files = [
                 os.path.join(self.args.save_dir, file)
                 for file in os.listdir(self.args.save_dir)
                 if file.endswith("eqx")
             ]
 
-            get_info = lambda idx: os.path.basename(latest_file).split(".")[0].split("_")[idx]  # noqa: E731
-            latest_file = max(files, key=os.path.getctime)
-            step, epoch = int(get_info(-1)), int(get_info(-2))
+            epoch, step = max(
+                [re.findall(r"\d+", file) for file in files],
+                key=lambda x: (int(x[0]), int(x[1])),
+            )
 
-        model, opt_state = load_eqx_obj( f"{self.args.save_dir}model_{epoch}_{step}.eqx", (model, opt_state) )
+            model, opt_state = load_eqx_obj(
+                f"{self.args.save_dir}model_{epoch}_{step}.eqx", (model, opt_state)
+            )
 
-        self.my_logger.info(f'\n-------- Resuming training from step {step} ---------\n')
+            self.my_logger.info(
+                f"\n-------- Resuming training from step {step} ---------\n"
+            )
+        else:
+            epoch, step = 0, 0
 
         return model, opt_state, step, epoch
 
@@ -417,9 +421,9 @@ class Trainer:
         print(f"Model: {model}")
 
         evaluator = Evaluator(
-            self.args,  # type: ignore
-            model=model,
+            self.args,  # pyright: ignore[reportArgumentType]
             task=self.args.bench_task,
+            model=model,
             key=self.key,
         )
 
@@ -498,10 +502,13 @@ class Trainer:
                     # Eval on benchmark
                     eval_results = evaluator.run_lm_evaluation(model)
 
-                    lambada_ppl = eval_results[self.args.bench_task]["perplexity,none"]
-                    lambada_stderr = eval_results[self.args.bench_task][
-                        "perplexity_stderr,none"
-                    ]
+                    lambada, mmlu_alg = self.args.bench_task.split(",")
+
+                    lambada_ppl = eval_results[lambada]["perplexity,none"]
+                    lambada_stderr = eval_results[lambada]["perplexity_stderr,none"]
+
+                    mmlu_alg_acc = eval_results[mmlu_alg]["acc,none"]
+                    mmlu_alg_stderr = eval_results[mmlu_alg]["acc_stderr,none"]
 
                     self.my_logger.info(f"LAMBADA ppl: {lambada_ppl} | stderr: {lambada_stderr}")
 
@@ -524,6 +531,8 @@ class Trainer:
                             "Val/ppl": val_ppl,
                             "Bench/LAMBADA_ppl": lambada_ppl,
                             "Bench/LAMBADA_stderr": lambada_stderr,
+                            "Bench/MMLU_Abstract_Alg_acc": mmlu_alg_acc,
+                            "Bench/MMLU_Abstract_Alg_stderr": mmlu_alg_stderr,
                             "Gradients": wandb.Histogram(np_histogram=get_hist(grads)),
                             "Updates": wandb.Histogram(np_histogram=get_hist(updates)),
                             "Weights": wandb.Histogram(np_histogram=get_hist(model)),
