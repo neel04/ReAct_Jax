@@ -236,19 +236,21 @@ def count_params(model: eqx.Module) -> None:
     )
 
     unshared_params = 0
-    num_params /= 1_000_000
-    non_embed_params /= 1_000_000
 
     if hasattr(model.main_block, "unshared_layers"):
-        unshared_params += params_fn(model.main_block.unshared_layers) / 1_000_000
+        unshared_params += params_fn(model.main_block.unshared_layers)
 
-    if hasattr((layers := model.main_block.attention_layers)[0], "unshared_layers"):
-        unshared_params += (params_fn(layers[0].unshared_layers) / 1_000_000) * len(layers)
+    if hasattr(model.main_block.attention_layers, "unshared_layers"):
+        unshared_params += params_fn(model.main_block.attention_layers.unshared_layers)
 
     if hasattr(model, "unshared_layers"):
-        unshared_params += params_fn(model.unshared_layers) / 1_000_000
+        unshared_params += params_fn(model.unshared_layers)
 
-    print(f"\nUnshared Parameters: {unshared_params}M")
+    num_params /= 1_000_000
+    non_embed_params /= 1_000_000
+    unshared_params /= 1_000_000
+
+    print(f"\nUnshared Parameters: {unshared_params:.2f}M")
     print(
         f"Model # of parameters: {num_params:.2f}M\n# of recurrent parameters: {non_embed_params:.2f}M\n"
     )
