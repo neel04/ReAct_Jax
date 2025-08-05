@@ -396,6 +396,7 @@ class UnsharedBlock(eqx.Module, Generic[L]):
 
         return layer
 
+    @eqx.filter_jit
     def apply_layer(
         self,
         name: str,
