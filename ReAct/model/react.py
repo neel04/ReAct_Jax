@@ -77,9 +77,7 @@ class RecurrentModule(eqx.Module):
             key=key,
         )
 
-        self.attention_layers = eqx.filter(
-            eqx.filter_vmap(make_attn)(keys), eqx.is_array_like
-        )
+        self.attention_layers = [make_attn(k) for k in keys] # disable `scan`-over layers for now
 
     @staticmethod
     def make_layer(
@@ -125,23 +123,14 @@ class RecurrentModule(eqx.Module):
 
         x, pad_mask = self.sharding.cast((x, pad_mask))
 
-        dynamic, static = eqx.partition(
-            self.attention_layers,
-            eqx.is_array_like,
-            is_leaf=lambda x: isinstance(x, eqx.nn.Dropout),
-        )
-
         def scan_fn(
             carry: Tuple[Array, int], layer: AdaptableAttentionBlock
         ) -> Tuple[Tuple[Array, int], Array]:
             x, idx = carry
 
-            block = eqx.combine(layer, static)
             blck_global_idx = idx + (self.max_iters * iteration_index)
 
-            x = block(
-                x, iteration_index, pad_mask, enable_dropout, keys[blck_global_idx]
-            )
+            x = layer(x, iteration_index, pad_mask, enable_dropout, keys[blck_global_idx])
 
             x = self.unshared_layers.apply_layer(
                 "post_ln", iteration_index, (x,), eqx.filter_vmap
@@ -151,7 +140,10 @@ class RecurrentModule(eqx.Module):
 
             return (x, idx + 1), x
 
-        carry, _ = jax.lax.scan(scan_fn, (x, 0), dynamic, unroll=True)
+        carry = (x, 0)
+
+        for layer in self.attention_layers:
+            carry, _ = scan_fn(carry, layer)
 
         return self.sharding.cast(carry[0])
 
