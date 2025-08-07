@@ -300,7 +300,7 @@ class Trainer:
         weights = get_linear_weights(model)
 
         new_weights = [
-            megatron_init(weight, subkey)
+            megatron_init(weight=weight, key=subkey, dims=weight.shape)
             for weight, subkey in zip(weights, jax.random.split(key, len(weights)))
         ]
 

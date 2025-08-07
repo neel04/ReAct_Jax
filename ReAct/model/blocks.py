@@ -560,7 +560,6 @@ class AdaptableAttentionBlock(eqx.Module):
     in_dim: int = eqx.field(static=True)
     rank: int = eqx.field(static=True)
 
-    unshared_layers: UnsharedBlock[LinearProj | ABBA]
     rope_embed: eqx.nn.RotaryPositionalEmbedding
     attn_gate: AdaptableMultiheadAttention
     ln1: eqx.nn.LayerNorm
@@ -606,36 +605,10 @@ class AdaptableAttentionBlock(eqx.Module):
             key=key1,
         )
 
-        self.unshared_layers = UnsharedBlock(
-            layers={
-                "Attn_adapter_A": self._get_abba(),
-                "MLP_adapter_A": self._get_abba(),
-            },
-            num_repeats=max_iters,
-            key=key,
-        )
-
         self.ln1 = eqx.nn.LayerNorm(self.in_dim)
         self.ln2 = eqx.nn.LayerNorm(self.in_dim)
 
         self.mlp = MLP(self.in_dim, self.in_dim, drop_rate, key2, strategy)
-
-    def _get_proj(self, reverse: bool = False):
-        if reverse:
-            return partial(LinearProj, self.rank, self.in_dim, strategy=self.sharding)
-
-        return partial(LinearProj, self.in_dim, self.rank, strategy=self.sharding)
-
-    def _get_abba(
-        self, in_ff_mult: int = 1, out_ff_mult: int = 1, rank_mul: float = 1.0
-    ):
-        return partial(
-            ABBA,
-            self.in_dim * in_ff_mult,
-            self.in_dim * out_ff_mult,
-            int(self.rank * rank_mul),
-            strategy=self.sharding,
-        )
 
     def process_heads(
         self,
@@ -674,7 +647,7 @@ class AdaptableAttentionBlock(eqx.Module):
     def __call__(
         self,
         inp: Float[Array, "seqlen in_dim"],
-        it_idx: int,  # iteration index
+        post_iters: Tuple[Array, Array],
         mask: Array,
         enable_dropout: bool,
         key: PRNGKeyArray,
@@ -685,7 +658,7 @@ class AdaptableAttentionBlock(eqx.Module):
 
         x = jax.vmap(self.ln1)(inp)
 
-        attn_lora = self._apply_lora("Attn_adapter_A", it_idx)(x)
+        attn_lora = self.act(x @ post_iters[0])
 
         inp += self.attn_gate(
             query=x,
@@ -701,7 +674,7 @@ class AdaptableAttentionBlock(eqx.Module):
 
         x = jax.vmap(self.ln2)(inp)
 
-        mlp_lora = self._apply_lora("MLP_adapter_A", it_idx)(x)
+        mlp_lora = self.act(x @ post_iters[1])
 
         inp += self.mlp(x, enable_dropout=True, key=key_2) + mlp_lora
 
