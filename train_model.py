@@ -4,6 +4,7 @@ import subprocess
 import jax
 import optuna
 
+from ReAct.data.fineweb import FineWebDataset
 from ReAct.utils.helpers import download_artifact
 
 if platform.processor() != "arm": # Nothing on Apple sillicon
@@ -57,6 +58,8 @@ def main(key: PRNGKeyArray):
             dataset = MiniPileDataset
         case "github":
             dataset = GithubCodeDataset
+        case "fineweb":
+            dataset = FineWebDataset
         case _:
             raise ValueError(
                 f"Unsupported dataset '{args.dataset}'. Supported datasets are 'tinystories', 'owt', 'minipile', 'github'."

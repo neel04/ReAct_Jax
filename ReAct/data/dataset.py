@@ -3,6 +3,7 @@ from functools import partial
 from pathlib import Path
 from typing import Any, Callable, Dict, List, Tuple, cast
 
+import datasets
 import jax
 import numpy as np
 from datasets.arrow_dataset import Dataset
@@ -185,12 +186,12 @@ class ParentDataset:
             dataset.set_format(type="numpy")
 
             return dataset
-        except (FileNotFoundError, ValueError):
+        except (FileNotFoundError, datasets.exceptions.DatasetNotFoundError):
             try:
                 print(f"Loading dataset from {data_path}...")
                 dataset = self.load_data(data_path)
                 return dataset
-            except ValueError:
+            except FileNotFoundError:
                 print(
                     f"Building dataset from scratch... [split: {split}] | [bsz: {self.bsz}]"
                 )
