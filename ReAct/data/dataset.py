@@ -20,6 +20,8 @@ class ParentDataset:
         self,
         hf_username: str,
         hf_dataset: str,
+        hf_subset_name: str | None = None,
+        *,
         tgt_hf_repo: str,
         max_length: int,
         bsz: int,
@@ -38,6 +40,7 @@ class ParentDataset:
         self.max_length = max_length + 1
         self.hf_username = hf_username
         self.hf_dataset = hf_dataset
+        self.hf_subset_name = hf_subset_name
         self.tgt_hf_repo = tgt_hf_repo
         self.col_name = col_name
         self.bsz = bsz
@@ -173,6 +176,7 @@ class ParentDataset:
         try:
             dataset = load_dataset(
                 f"{self.hf_username}/{self.hf_dataset}-processed_{self.bsz}",
+                name=self.hf_subset_name,
                 split=f"{split}[{slice}]",
                 verification_mode="no_checks",
                 keep_in_memory=False,
