@@ -3,6 +3,7 @@ import platform
 import subprocess
 import jax
 import optuna
+from datasets.iterable_dataset import IterableDataset
 
 from ReAct.data.fineweb import FineWebDataset
 from ReAct.utils.helpers import download_artifact
@@ -79,11 +80,11 @@ def main(key: PRNGKeyArray):
             "nesterov": True,
         },
         {
-            "lr": 4e-3,
-            "drop_rate": 0.02,
-            "weight_decay": 3e-4,
-            "warmup_steps": 1000,
-            "beta_1": 0.65,
+            "lr": 1.5e-3,
+            "drop_rate": 0.01,
+            "weight_decay": 9e-4,
+            "warmup_steps": 500,
+            "beta_1": 0.95,
             "beta_2": 0.9,
             "nesterov": False,
         },
@@ -112,12 +113,12 @@ def main(key: PRNGKeyArray):
 
         jax.experimental.multihost_utils.sync_global_devices("Sync up all nodes.")  # type: ignore
         trainloader = dataset.create_dataloader(
-            split="train", slice=":10%", upload_to_hub=False
+            split="train", slice=":1%", upload_to_hub=False
         )
 
         jax.experimental.multihost_utils.sync_global_devices("Sync up all nodes.")  # type: ignore
         valloader = dataset.create_dataloader(
-            split="val", slice=":10%", upload_to_hub=False
+            split="val", slice=":1%", upload_to_hub=False
         )
 
         # Create optuna hypertununing study
@@ -153,6 +154,9 @@ def main(key: PRNGKeyArray):
             "loaders": (trainloader, valloader),
             "decode_fn": dataset.tok.decode,
             "key": key,
+            "dataset_size": trainloader.info.splits["train"].num_examples
+            if isinstance(trainloader, IterableDataset)
+            else None,
         }
 
         wandbc = WeightsAndBiasesCallback(
@@ -193,6 +197,9 @@ def main(key: PRNGKeyArray):
             loaders=(trainloader, valloader),
             decode_fn=dataset.tok.decode,
             key=key,
+            dataset_size=trainloader.info.splits["train"].num_examples
+            if isinstance(trainloader, IterableDataset)
+            else None,
         )
 
         my_logger.info(f"# of all devices: {jax.device_count()}")

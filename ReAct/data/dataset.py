@@ -11,6 +11,7 @@ from datasets.dataset_dict import DatasetDict
 from datasets.load import load_dataset, load_from_disk
 from jaxtyping import Array
 from numpy._typing import NDArray
+from torch.utils.data import DataLoader
 
 from .tokenizer import Tok
 
@@ -167,8 +168,12 @@ class ParentDataset:
         raise NotImplementedError
 
     def create_dataloader(
-        self, split: str, slice: str | None = None, upload_to_hub: bool = False
-    ):
+        self,
+        split: str,
+        slice: str | None = None,
+        upload_to_hub: bool = False,
+        streaming: bool = False,
+    ) -> Dataset | DatasetDict | DataLoader:
         data_path = Path(f"{os.getenv('DISK_PATH')}/cached_data/owt_{split}.data")
 
         split, slice = self.produce_splits(split, slice)
@@ -207,6 +212,7 @@ class ParentDataset:
                     trust_remote_code=True,
                     keep_in_memory=False,
                     num_proc=None,
+                    streaming=streaming
                 ).select_columns(self.col_name)
 
                 dataset = self.take_subset(split, dataset, 2_000)
