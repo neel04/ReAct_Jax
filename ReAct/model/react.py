@@ -1,3 +1,4 @@
+from functools import partial
 from typing import Any, List, Tuple
 
 import equinox as eqx
@@ -6,7 +7,6 @@ import jax.numpy as jnp
 from equinox.nn import LayerNorm
 from jaxtyping import Array, PRNGKeyArray, PyTree
 
-from ReAct.utils.helpers import megatron_init
 from ReAct.utils.sharding import Sharding
 
 from .blocks import (
@@ -26,7 +26,6 @@ class RecurrentModule(eqx.Module):
     num_layers: int = eqx.field(static=True)
     max_iters: int = eqx.field(static=True)
 
-    reshape_gate: LinearProj
     attention_layers: List[PyTree]
     post_ln: eqx.nn.LayerNorm
     unshared_layers: UnsharedBlock[LinearProj | LayerNorm]
@@ -64,12 +63,14 @@ class RecurrentModule(eqx.Module):
 
         self.post_ln = eqx.nn.LayerNorm(bottleneck)
 
-        self.reshape_gate = LinearProj(
-            bottleneck * 2, bottleneck, strategy=self.sharding, key=key
-        )
-
         self.unshared_layers = UnsharedBlock(
             layers={
+                "reshape_gate": partial(
+                    LinearProj,
+                    bottleneck * 2,
+                    bottleneck,
+                    strategy=self.sharding,
+                ),
                 "post_ln": LayerNorm(bottleneck),
             },
             num_repeats=max_iters,
@@ -105,7 +106,6 @@ class RecurrentModule(eqx.Module):
     def __call__(
         self,
         prev_latent: Array,
-        post_iters: Tuple[Array, Array],
         input_arr: Array,
         pad_mask: Array,
         enable_dropout: bool,
@@ -117,7 +117,9 @@ class RecurrentModule(eqx.Module):
 
         x = jnp.concatenate([prev_latent, input_arr], axis=-1)
 
-        x = self.reshape_gate(x)
+        x = self.unshared_layers.apply_layer(
+            "reshape_gate", iteration_index, (x,)
+        )  # downsample the concatenated array
 
         x, pad_mask = self.sharding.cast((x, pad_mask))
 
@@ -128,13 +130,7 @@ class RecurrentModule(eqx.Module):
 
             blck_global_idx = idx + (self.max_iters * iteration_index)
 
-            x = layer(
-                x,
-                post_iters,
-                pad_mask,
-                enable_dropout,
-                keys[blck_global_idx],
-            )
+            x = layer(x, iteration_index, pad_mask, enable_dropout, keys[blck_global_idx])
 
             x = self.unshared_layers.apply_layer(
                 "post_ln", iteration_index, (x,), eqx.filter_vmap
@@ -160,7 +156,6 @@ class React(eqx.Module):
 
     sharding: Sharding = eqx.field(static=True)
     max_iters: int = eqx.field(static=True)
-    seqlen: int = eqx.field(static=True)
     width: int = eqx.field(static=True)
     
     embed_layer: FastEmbedding
@@ -169,8 +164,6 @@ class React(eqx.Module):
     unshared_layers: UnsharedBlock[LayerNorm]
     unemb_ln: eqx.nn.LayerNorm
     out_head: LinearProj
-    post_attn_head: LinearProj
-    post_mlp_head: LinearProj
 
     def __init__(
         self,
@@ -190,7 +183,6 @@ class React(eqx.Module):
         self.sharding = strategy
         self.max_iters = max_iters
         self.width = width
-        self.seqlen = seqlen
 
         self.embed_ln = eqx.nn.LayerNorm(width)
         self.embed_layer = FastEmbedding(vocab_size, width, key1, strategy)
@@ -215,9 +207,6 @@ class React(eqx.Module):
             key=key,
         )
 
-        self.post_attn_head = LinearProj(seqlen, width, key1, strategy=self.sharding)
-        self.post_mlp_head = LinearProj(seqlen, width, key2, strategy=self.sharding)
-
         self.unemb_ln = eqx.nn.LayerNorm(width)
         self.out_head = LinearProj(width, vocab_size, key=key3, strategy=self.sharding)
 
@@ -234,21 +223,11 @@ class React(eqx.Module):
         
         keys = jax.random.split(key, iters_to_do)
 
-        post_iters = (
-            megatron_init(dims=(self.width, self.width), key=keys[0]),
-            megatron_init(dims=(self.width, self.width), key=keys[1]),
-        )
-
         interim_thought, input_arr, mask = self.sharding.cast((interim_thought, input_arr, mask))
-
-        def body_fun(
-            carry: Tuple[Array, Tuple[Array, Array]], idx: int
-        ) -> Tuple[Tuple[Array, Tuple[Array, Array]], Array]:
-            input, post_iters = carry
-
+        
+        def body_fun(input: Array, idx: int) -> Tuple[Array, Array]:
             latent = self.main_block(
                 input,
-                post_iters,
                 input_arr,
                 mask,
                 enable_dropout,
@@ -256,25 +235,23 @@ class React(eqx.Module):
                 keys[idx],
             )  # (seqlen, width)
 
-            post_iters = (self.post_attn_head(latent.T), self.post_mlp_head(latent.T))
-
             latent = self.unshared_layers.apply_layer(
                 "post_ln", idx, args=(latent,), modifier_fn=eqx.filter_vmap
             )
 
             latent = self.sharding.cast(latent)
 
-            return (latent, post_iters), latent
+            return latent, latent
 
         output, _ = eqx.internal.scan(
             f=body_fun,
-            init=(interim_thought, post_iters),
+            init=interim_thought,
             xs=jnp.arange(iters_to_do), # type: ignore
             kind="checkpointed",
             checkpoints=iters_to_do,
         )
 
-        return output[0]
+        return output
 
     @eqx.filter_jit
     def __call__(

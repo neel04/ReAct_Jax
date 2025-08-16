@@ -165,26 +165,15 @@ def get_spec_on_larger_dim(leaf: PyTree, key: str = "model") -> List[str | None]
     return p_spec
 
 
-def megatron_init(
-    weight: Array | None = None,
-    *,
-    dims: Tuple[int, ...],
-    key: PRNGKeyArray,
-    dtype: jnp.dtype | None = None,
-) -> Array:
+def megatron_init(weight: Array, key: PRNGKeyArray) -> Array:
     """
     Init all the weights with the Megatron paper init
     """
-    dims = weight.shape if weight is not None else dims
+    dims = weight.shape
     stddev = (0.33 / dims[0]) ** 0.5
     lim = 1 / math.sqrt(dims[1])
 
-    return (
-        jax.random.uniform(
-            key, dims, minval=-lim, maxval=lim, dtype=dtype if dtype else jnp.bfloat16
-        )
-        * stddev
-    )
+    return jax.random.uniform(key, dims, minval=-lim, maxval=lim) * stddev
 
 def zero_init(weight: Array) -> Array:
     """
