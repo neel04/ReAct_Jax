@@ -3,11 +3,13 @@ import os
 from logging import Logger
 from typing import Any, Callable, List, Optional, Tuple, TypeVar
 
+from datasets.dataset_dict import DatasetDict
 import equinox as eqx
 import jax
 import jax.numpy as jnp
 from jax_array_info import sharding_info
 from jaxtyping import Array, PRNGKeyArray, PyTree
+from torch.utils.data import Dataset
 
 import wandb
 
@@ -291,3 +293,18 @@ def download_artifact(artifact_path: str) -> bool:
 
     print(f"Warning: Artifact {artifact_path} does not exist.\n")
     return False
+
+class IterableDatasetWithLen:
+    def __init__(self, dataset: Dataset | DatasetDict, length: int):
+        self.dataset = dataset
+        self._length = length
+
+    def __len__(self) -> int:
+        return self._length
+
+    def __getattr__(self, name: str):
+        return getattr(self.dataset, name)
+
+    def __iter__(self):
+        for item in self.dataset:
+            yield item

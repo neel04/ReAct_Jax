@@ -3,7 +3,6 @@ import platform
 import subprocess
 import jax
 import optuna
-from datasets.iterable_dataset import IterableDataset
 
 from ReAct.data.fineweb import FineWebDataset
 from ReAct.utils.helpers import download_artifact
@@ -153,10 +152,7 @@ def main(key: PRNGKeyArray):
             "args": args,
             "loaders": (trainloader, valloader),
             "decode_fn": dataset.tok.decode,
-            "key": key,
-            "dataset_size": trainloader.info.splits["train"].num_examples
-            if isinstance(trainloader, IterableDataset)
-            else None,
+            "key": key
         }
 
         wandbc = WeightsAndBiasesCallback(
@@ -196,10 +192,7 @@ def main(key: PRNGKeyArray):
             loggers=(my_logger, wandb_logger),
             loaders=(trainloader, valloader),
             decode_fn=dataset.tok.decode,
-            key=key,
-            dataset_size=trainloader.info.splits["train"].num_examples
-            if isinstance(trainloader, IterableDataset)
-            else None,
+            key=key
         )
 
         my_logger.info(f"# of all devices: {jax.device_count()}")
