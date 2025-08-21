@@ -242,8 +242,9 @@ def count_params(model: eqx.Module) -> None:
     if hasattr(model.main_block, "unshared_layers"):
         unshared_params += params_fn(model.main_block.unshared_layers)
 
-    if hasattr(model.main_block.attention_layers, "unshared_layers"):
-        unshared_params += params_fn(model.main_block.attention_layers.unshared_layers)
+    if hasattr(model.main_block, "attention_layers"):
+        if hasattr(model.main_block.attention_layers, "unshared_layers"):
+            unshared_params += params_fn(model.main_block.attention_layers.unshared_layers)
 
     if hasattr(model, "unshared_layers"):
         unshared_params += params_fn(model.unshared_layers)

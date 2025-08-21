@@ -50,7 +50,7 @@ class VanillaModule(eqx.Module):
         bottleneck: int,
         key: PRNGKeyArray,
     ) -> AttentionBlock:
-        return AttentionBlock(seqlen, n_heads, drop_rate, bottleneck, key, strategy)
+        return AttentionBlock(seqlen, n_heads, drop_rate, bottleneck, 0, key, strategy)
 
     def __call__(
         self,
@@ -63,7 +63,7 @@ class VanillaModule(eqx.Module):
 
         def scan_f(carry: Array, block: PyTree):
             carry = self.sharding.cast(carry)
-            output: Array = block(carry, carry, pad_mask, enable_dropout, key)
+            output: Array = block(carry, pad_mask, enable_dropout, key)
             output = self.sharding.cast(output)
 
             return output, None
