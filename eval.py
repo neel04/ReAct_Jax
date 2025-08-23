@@ -1,3 +1,4 @@
+from collections import defaultdict
 import os
 from typing import Any, List
 
@@ -251,12 +252,18 @@ class Evaluator:
 
         task_manager = TaskManager()
 
-        results = lm_eval.simple_evaluate(
-            model=lm_obj,
-            tasks=self.task.split(","),
-            num_fewshot=None,
-            task_manager=task_manager,
-        )
+        try:
+            results = lm_eval.simple_evaluate(
+                model=lm_obj,
+                tasks=self.task.split(","),
+                num_fewshot=None,
+                task_manager=task_manager,
+            )
+        except OverflowError:
+            print("\n :=== Overflow error detected in eval harness. Continuing... :===\n")
+            results = defaultdict(
+                lambda: defaultdict(lambda: defaultdict(lambda: None))
+            )
 
         return results["results"]  # type: ignore
 

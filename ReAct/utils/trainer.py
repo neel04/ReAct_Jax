@@ -510,7 +510,9 @@ class Trainer:
                     mmlu_alg_acc = eval_results[mmlu_alg]["acc,none"]
                     mmlu_alg_stderr = eval_results[mmlu_alg]["acc_stderr,none"]
 
-                    self.my_logger.info(f"LAMBADA ppl: {lambada_ppl} | stderr: {lambada_stderr}")
+                    self.my_logger.info(
+                        f"LAMBADA ppl: {lambada_ppl} | stderr: {lambada_stderr}"
+                    )
 
                     ## Validation
                     (val_acc, val_loss, val_ppl), val_sample = self.evaluate_acc(
