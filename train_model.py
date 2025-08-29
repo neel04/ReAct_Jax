@@ -104,6 +104,7 @@ def main(key: PRNGKeyArray):
 
         if args.resume:
             try:
+                print("Attempting to download artifact...")
                 download_artifact("neel/ReAct_Jax/" + artifact_name + ":latest")
             except TypeError:
                 print(

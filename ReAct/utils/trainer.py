@@ -325,7 +325,9 @@ class Trainer:
             "Resume flag should be a string to locate Artifact"
         )
 
-        status = download_artifact("neel/ReAct_Jax/" + self.args.resume + ":latest")
+        status = download_artifact(
+            "neel/ReAct_Jax/" + self.args.resume + ":latest", self.args.save_dir
+        )
 
         if status:
             files = [
@@ -349,7 +351,7 @@ class Trainer:
         else:
             epoch, step = 0, 0
 
-        return model, opt_state, step, epoch
+        return model, opt_state, int(step), int(epoch)
 
     @eqx.filter_jit
     def compute_metrics(
@@ -413,10 +415,15 @@ class Trainer:
         optim, _, _ = self.set_optim_and_scheduler(model)
         filter_spec = self.get_filterspec(model)
 
-        if self.args.resume is True and self.args.tune_hyperparams is False:
+        if (
+            self.args.resume or isinstance(self.args.resume, str)
+        ) and self.args.tune_hyperparams is False:
             model, opt_state, step_done, epoch_done = self.resume_training(
                 model, opt_state
             )
+
+            self.my_logger.warn(f"Skipping {step_done} steps")
+            self.trainloader = self.trainloader.skip(step_done)
 
         print(f"Model: {model}")
 
@@ -579,7 +586,17 @@ class Trainer:
                     save_eqx_obj(self.args.save_dir, filepath, (model, opt_state))
 
                     self.my_logger.info(f"Model saved at {filepath}")
-                    self.wandb_logger.save(filepath)
+
+                    if jax.process_index() == 0:
+                        artifact = wandb.Artifact(
+                            self.args.resume
+                            if isinstance(self.args.resume, str)
+                            else "run_chkp",
+                            type="checkpoint",
+                        )
+
+                        artifact.add_file(filepath)
+                        self.wandb_logger.log_artifact(artifact)
 
             step_done = step  # type: ignore
             self.optuna_log(trial, (val_loss, step))  # type: ignore

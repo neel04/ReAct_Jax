@@ -283,12 +283,13 @@ def get_rand_nums(
 
     return dist.astype(int)
 
-def download_artifact(artifact_path: str) -> bool:
+def download_artifact(artifact_path: str, save_dir: str = "./") -> bool:
     api = wandb.Api()
 
     if api.artifact_exists(artifact_path):
-        artifact = api.artifact(artifact_path)
-        datadir = artifact.download(root="./", skip_cache=True)
+        print("Downloading artifact...")
+        artifact = api.artifact(artifact_path, "checkpoint")
+        datadir = artifact.download(root=save_dir, skip_cache=True)
         print(f"\nArtifact downloaded at {datadir}. Ensure this chkp is loaded.")
         return True
 
