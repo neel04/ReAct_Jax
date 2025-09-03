@@ -26,8 +26,10 @@ class Profiler:
     def start_prof(self, step: int) -> None:
         if step == self.warmup_steps:
             if self.activate_profiler:
-                print(f'Started TensorBoard Profiler at: {self.logdir}')
-                jax.profiler.start_trace(self.logdir)
+                print(f"Started TensorBoard Profiler at: {self.logdir}")
+                jax.profiler.start_trace(
+                    self.logdir, create_perfetto_link=True, create_perfetto_trace=True
+                )
 
     def stop_prof(self, w_logger: Any, output: Array, step: int) -> Array:
         if step == self.warmup_steps:

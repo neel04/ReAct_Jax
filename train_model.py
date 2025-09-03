@@ -22,6 +22,7 @@ if platform.processor() != "arm": # Nothing on Apple sillicon
             print("No GPU/TPU - assuming CPU.")
 
 from jax import config
+from jax.experimental import multihost_utils
 from jaxtyping import PRNGKeyArray
 from optuna.integration.wandb import WeightsAndBiasesCallback
 
@@ -111,12 +112,12 @@ def main(key: PRNGKeyArray):
                     "\nEmpty W&B Artifact detected. Cannot resume from it. Continuing as normal..."
                 )
 
-        jax.experimental.multihost_utils.sync_global_devices("Sync up all nodes.")  # type: ignore
+        multihost_utils.sync_global_devices("Sync up all nodes.")  # type: ignore
         trainloader = dataset.create_dataloader(
             split="train", slice=":1%", upload_to_hub=False
         )
 
-        jax.experimental.multihost_utils.sync_global_devices("Sync up all nodes.")  # type: ignore
+        multihost_utils.sync_global_devices("Sync up all nodes.")  # type: ignore
         valloader = dataset.create_dataloader(
             split="val", slice=":1%", upload_to_hub=False
         )
@@ -179,10 +180,10 @@ def main(key: PRNGKeyArray):
         print(f"\nValue: {study.best_trial.value}\nParams: {study.best_trial.params}\n")
 
     else:
-        jax.experimental.multihost_utils.sync_global_devices("Sync up all nodes.")  # type: ignore
+        multihost_utils.sync_global_devices("Sync up all nodes.")  # type: ignore
         trainloader = dataset.create_dataloader(split="train", upload_to_hub=True)
 
-        jax.experimental.multihost_utils.sync_global_devices("Sync up all nodes.")  # type: ignore
+        multihost_utils.sync_global_devices("Sync up all nodes.")  # type: ignore
         valloader = dataset.create_dataloader(split="test", upload_to_hub=True)
 
         loggers = UnifiedLogger(level="DEBUG")

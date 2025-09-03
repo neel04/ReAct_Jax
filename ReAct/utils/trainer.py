@@ -8,12 +8,12 @@ import jax.numpy as jnp
 import optax
 import optuna
 import regex as re
-import wandb
 from jaxtyping import Array, Int, PRNGKeyArray, PyTree
 from jmp import Policy
 from optax._src.base import GradientTransformation
 from tqdm.auto import tqdm
 
+import wandb
 from eval import Evaluator
 from inferencer import Inferencer
 from ReAct.model.baseline import GPT
@@ -486,7 +486,7 @@ class Trainer:
                     self.wandb_logger.log(
                         {
                             "Train/loss": loss,
-                            "Train/Lr": self.schedule_fn(epoch + 1 * step).item(),  # type: ignore
+                            "Train/Lr": self.schedule_fn(epoch + 1 * step).item(),
                             "Train/tokens": step * self.args.batch_size * self.args.seqlen,
                         },
                         step=step,
@@ -542,9 +542,15 @@ class Trainer:
                             "Bench/LAMBADA_stderr": lambada_stderr,
                             "Bench/MMLU_Abstract_Alg_acc": mmlu_alg_acc,
                             "Bench/MMLU_Abstract_Alg_stderr": mmlu_alg_stderr,
-                            "Gradients": wandb.Histogram(np_histogram=get_hist(grads)),
-                            "Updates": wandb.Histogram(np_histogram=get_hist(updates)),
-                            "Weights": wandb.Histogram(np_histogram=get_hist(model)),
+                            "Misc/Gradients": wandb.Histogram(
+                                np_histogram=get_hist(grads)
+                            ),
+                            "Misc/Updates": wandb.Histogram(
+                                np_histogram=get_hist(updates)
+                            ),
+                            "Misc/Weights": wandb.Histogram(
+                                np_histogram=get_hist(model)
+                            ),
                         },
                         step=step,
                     )
