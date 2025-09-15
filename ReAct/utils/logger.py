@@ -1,5 +1,7 @@
 import logging
 import os
+import random
+import time
 from typing import Any
 
 import wandb
@@ -43,7 +45,11 @@ class UnifiedLogger:
             # we want to extract the run id, i.e "lxxn0x54"
             wandb_id = args.resume.split("+")[0].split("/")[-1].strip()
 
+        # Stagger across hosts to prevent hitting W&B rate limits
+        time.sleep(random.uniform(0, 240))
+
         wandb.init(
+            entity="neel",
             project="ReAct_Jax",
             config=args,
             group=args.group,
