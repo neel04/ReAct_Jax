@@ -422,8 +422,9 @@ class Trainer:
                 model, opt_state
             )
 
-            self.my_logger.warn(f"Skipping {step_done} steps")
+            self.my_logger.warn(f" +++ Skipping {step_done} steps +++")
             self.trainloader = self.trainloader.skip(step_done)
+            self.my_logger.warn(" +++ Dataset skip complete +++")
 
         print(f"Model: {model}")
 
@@ -433,6 +434,8 @@ class Trainer:
             model=model,
             key=self.key,
         )
+
+        self.my_logger.info("\nBeginning Training...")
 
         for epoch in range(epoch_done, self.args.epochs):
             train_acc, train_loss, train_ppl = [], [], []

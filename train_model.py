@@ -11,9 +11,9 @@ if platform.processor() != "arm": # Nothing on Apple sillicon
     try:
         subprocess.check_output("nvidia-smi")
         print("Nvidia GPU detected!")
-        jax.distributed.initialize(
-            coordinator_address="127.0.0.1:4312", num_processes=1, process_id=0
-        )
+        # jax.distributed.initialize(
+        #     coordinator_address="127.0.0.1:4312", num_processes=1, process_id=0
+        # )
     except Exception:
         if os.path.isdir("/home/tpu-runtime"):
             print("No GPU - assuming TPU.")
