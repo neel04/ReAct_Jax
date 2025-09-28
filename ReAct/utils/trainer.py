@@ -2,6 +2,7 @@ import os
 from functools import partial
 from typing import Any, Callable, Optional, Tuple, Union
 
+from datasets.arrow_dataset import Dataset
 import equinox as eqx
 import jax
 import jax.numpy as jnp
@@ -21,6 +22,7 @@ from ReAct.model.blocks import LinearProj
 from ReAct.model.react import React
 from ReAct.utils.arg_types import TrainingArgs
 from ReAct.utils.helpers import (
+    IterableDatasetWithLen,
     Profiler,
     calc_performance_metrics,
     count_params,
@@ -140,7 +142,7 @@ class Trainer:
         self,
         args: TrainingArgs,
         loggers: Tuple,
-        loaders: Tuple,
+        loaders: Tuple[Dataset | IterableDatasetWithLen, ...],
         decode_fn: Callable,
         dataset_size: Optional[int] = None,
         key: PRNGKeyArray = jax.random.PRNGKey(69),
@@ -408,12 +410,18 @@ class Trainer:
                 raise optuna.exceptions.TrialPruned()
 
     def train(self, trial: Optional[Any] = None) -> float:
-        step_done, epoch_done, val_loss = 0, 0, 999.9
+        step_done, epoch_done, val_loss, num_shards = 0, 0, 999.9, 150
 
         prof = Profiler(self.args.profile)
         opt_state, model = self.init_model(self.key)
         optim, _, _ = self.set_optim_and_scheduler(model)
         filter_spec = self.get_filterspec(model)
+
+        # Get the number of shards in the dataset
+        if hasattr(self.trainloader.dataset, "num_shards"):
+            num_shards = self.trainloader.dataset.num_shards
+        elif hasattr(self.trainloader, "num_shards"):
+            num_shards = self.trainloader.num_shards
 
         if (
             self.args.resume or isinstance(self.args.resume, str)
@@ -423,8 +431,11 @@ class Trainer:
             )
 
             self.my_logger.warn(f" +++ Skipping {step_done} steps +++")
-            self.trainloader = self.trainloader.skip(step_done)
-            self.my_logger.warn(" +++ Dataset skip complete +++")
+
+        self.trainloader = self.trainloader.shard(
+            num_shards=num_shards,
+            index=int((step_done / self.dataset_length) * num_shards),
+        )
 
         print(f"Model: {model}")
 
