@@ -27,6 +27,7 @@ class FineWebDataset(ParentDataset):
         slice: str | None = None,
         upload_to_hub: bool = False,
         streaming: bool = True,
+        start_step: int = 0,
     ):
         """
         Override parent method to use streaming=True and implement train/test split
@@ -54,6 +55,9 @@ class FineWebDataset(ParentDataset):
         dataset = dataset_map_fn(
             partial(self.chunk_examples, max_length=self.max_length)
         )
+
+        if start_step != 0:
+            dataset = dataset.skip(start_step)
 
         dataset = dataset_map_fn(
             partial(

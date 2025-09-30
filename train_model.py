@@ -5,7 +5,7 @@ import jax
 import optuna
 
 from ReAct.data.fineweb import FineWebDataset
-from ReAct.utils.helpers import download_artifact
+from ReAct.utils.helpers import download_artifact, fetch_resume_progress
 
 if platform.processor() != "arm": # Nothing on Apple sillicon
     try:
@@ -180,8 +180,20 @@ def main(key: PRNGKeyArray):
         print(f"\nValue: {study.best_trial.value}\nParams: {study.best_trial.params}\n")
 
     else:
+        start_step = 0
+
+        if args.resume and not args.tune_hyperparams:
+            try:
+                start_step, _ = fetch_resume_progress(args.resume, args.save_dir)
+            except Exception as e:
+                print("\nCouldn't fetch previous checkpoint...")
+                start_step = 0  # continue fresh if things go wrong
+
         multihost_utils.sync_global_devices("Sync up all nodes.")  # type: ignore
-        trainloader = dataset.create_dataloader(split="train", upload_to_hub=True)
+
+        trainloader = dataset.create_dataloader(
+            split="train", upload_to_hub=True, start_step=start_step
+        )
 
         multihost_utils.sync_global_devices("Sync up all nodes.")  # type: ignore
         valloader = dataset.create_dataloader(split="test", upload_to_hub=True)

@@ -173,6 +173,7 @@ class ParentDataset:
         slice: str | None = None,
         upload_to_hub: bool = False,
         streaming: bool = False,
+        start_step: int = 0,
     ) -> Dataset | DatasetDict | DataLoader:
         data_path = Path(f"{os.getenv('DISK_PATH')}/cached_data/owt_{split}.data")
 

@@ -7,6 +7,7 @@ from datasets.dataset_dict import DatasetDict
 import equinox as eqx
 import jax
 import jax.numpy as jnp
+import regex as re
 from jax_array_info import sharding_info
 from jaxtyping import Array, PRNGKeyArray, PyTree
 from torch.utils.data import Dataset
@@ -297,6 +298,62 @@ def download_artifact(artifact_path: str, save_dir: str = "./") -> bool:
 
     print(f"Warning: Artifact {artifact_path} does not exist.\n")
     return False
+
+def fetch_resume_progress(resume: bool | str, save_dir: str) -> tuple[int, int]:
+    """
+    Downloads the latest checkpoint artifact (if a resume string is provided)
+    and extracts the latest epoch and step from files in `save_dir`.
+
+    The `resume` string may be of the form:
+      - "<run_id>" or "entity/project/<run_id>"
+      - "entity/project/<run_id> + <epoch> + <step>"
+
+    Returns:
+      (step, epoch) as integers. Defaults to (0, 0) if nothing found.
+    """
+    if not isinstance(resume, str):
+        return 0, 0
+
+    # Extract the run path/name before any optional + epoch/step suffixes
+    prefix = resume.split("+")[0].strip()
+
+    if len(prefix) == 0:
+        return 0, 0
+
+    # Build full artifact path
+    artifact_path = (
+        f"{prefix}:latest"
+        if prefix.count("/") >= 2
+        else f"neel/ReAct_Jax/{prefix}:latest"
+    )
+
+    # Best-effort download; ignore failures and fall back to parsing numbers
+    _ = download_artifact(artifact_path, save_dir)
+
+    # Inspect local directory for any .eqx files and pick the latest by (epoch, step)
+    try:
+        files = [
+            os.path.join(save_dir, file)
+            for file in os.listdir(save_dir)
+            if file.endswith("eqx")
+        ]
+
+        if len(files) > 0:
+            epoch, step = max(
+                [re.findall(r"\d+", file) for file in files],
+                key=lambda x: (int(x[0]), int(x[1])),
+            )
+            return int(step), int(epoch)
+    except FileNotFoundError:
+        pass
+
+    # Fallback: try to parse epoch and step from the resume string if provided
+    nums = [int(x.strip()) for x in resume.split("+")[1:] if x.strip().isdigit()]
+    if len(nums) >= 2:
+        epoch, step = nums[0], nums[1]
+        return int(step), int(epoch)
+
+    return 0, 0
 
 class IterableDatasetWithLen:
     def __init__(self, dataset: Dataset | DatasetDict, length: int):

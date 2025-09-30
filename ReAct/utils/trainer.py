@@ -323,35 +323,36 @@ class Trainer:
     def resume_training(
         self, model: PyTree, opt_state: eqx.Module
     ) -> tuple[PyTree, PyTree, int, int]:
-        assert isinstance(self.args.resume, str), (
-            "Resume flag should be a string to locate Artifact"
+        """
+        Resume from the latest local checkpoint in `save_dir`.
+        Does not perform any remote downloads; assumes artifacts (if any)
+        were already fetched by the caller before training starts.
+        """
+        if not isinstance(self.args.resume, str):
+            return model, opt_state, 0, 0
+
+        files = [
+            os.path.join(self.args.save_dir, file)
+            for file in os.listdir(self.args.save_dir)
+            if file.endswith("eqx")
+        ]
+
+        if len(files) == 0:
+            # Nothing local to resume from
+            return model, opt_state, 0, 0
+
+        epoch, step = max(
+            [re.findall(r"\d+", file) for file in files],
+            key=lambda x: (int(x[0]), int(x[1])),
         )
 
-        status = download_artifact(
-            "neel/ReAct_Jax/" + self.args.resume + ":latest", self.args.save_dir
+        model, opt_state = load_eqx_obj(
+            f"{self.args.save_dir}model_{epoch}_{step}.eqx", (model, opt_state)
         )
 
-        if status:
-            files = [
-                os.path.join(self.args.save_dir, file)
-                for file in os.listdir(self.args.save_dir)
-                if file.endswith("eqx")
-            ]
-
-            epoch, step = max(
-                [re.findall(r"\d+", file) for file in files],
-                key=lambda x: (int(x[0]), int(x[1])),
-            )
-
-            model, opt_state = load_eqx_obj(
-                f"{self.args.save_dir}model_{epoch}_{step}.eqx", (model, opt_state)
-            )
-
-            self.my_logger.info(
-                f"\n-------- Resuming training from step {step} ---------\n"
-            )
-        else:
-            epoch, step = 0, 0
+        self.my_logger.info(
+            f"\n-------- Resuming training from step {step} ---------\n"
+        )
 
         return model, opt_state, int(step), int(epoch)
 
@@ -410,18 +411,12 @@ class Trainer:
                 raise optuna.exceptions.TrialPruned()
 
     def train(self, trial: Optional[Any] = None) -> float:
-        step_done, epoch_done, val_loss, num_shards = 0, 0, 999.9, 150
+        step_done, epoch_done, val_loss = 0, 0, 999.9
 
         prof = Profiler(self.args.profile)
         opt_state, model = self.init_model(self.key)
         optim, _, _ = self.set_optim_and_scheduler(model)
         filter_spec = self.get_filterspec(model)
-
-        # Get the number of shards in the dataset
-        if hasattr(self.trainloader.dataset, "num_shards"):
-            num_shards = self.trainloader.dataset.num_shards
-        elif hasattr(self.trainloader, "num_shards"):
-            num_shards = self.trainloader.num_shards
 
         if (
             self.args.resume or isinstance(self.args.resume, str)
@@ -431,11 +426,6 @@ class Trainer:
             )
 
             self.my_logger.warn(f" +++ Skipping {step_done} steps +++")
-
-        self.trainloader = self.trainloader.shard(
-            num_shards=num_shards,
-            index=int((step_done / self.dataset_length) * num_shards),
-        )
 
         print(f"Model: {model}")
 
