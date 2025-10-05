@@ -5,37 +5,50 @@ description = "Add your description here"
 readme = "README.md"
 requires-python = ">=3.11"
 dependencies = [
-    "jax",
-    "datasets>=3.1.0",
-    "einops>=0.8.0",
-    "equinox>=0.11.9",
-    "jaxtyping>=0.2.36",
-    "optuna-integration>=4.1.0",
-    "optuna>=4.1.0",
-    "rich>=13.9.4",
-    "scalax>=0.2.5",
-    "tokenizers>=0.20.4",
-    "tqdm>=4.67.1",
-    "transformers>=4.46.3",
-    "nvitop>=1.3.2",
-    "pdbpp>=0.10.3",
+    "jax==0.7.1",
+    "datasets==4.0.0",
+    "einops==0.8.1",
+    "equinox==0.13.0",
+    "jaxtyping==0.3.2",
+    "optuna-integration==4.5.0",
+    "optuna==4.5.0",
+    "rich==14.1.0",
+    "scalax==0.2.5",
+    "tokenizers==0.22.0",
+    "tqdm==4.67.1",
+    "transformers==4.56.0",
+    "nvitop==1.5.3",
+    "pdbpp==0.11.7",
     "jmp",
     "jax-array-info",
     "wandb==0.18.7",
-    "ruff>=0.9.4",
-    "basedpyright>=1.26.0",
-    "jupyter>=1.1.1",
+    "ruff==0.12.11",
+    "basedpyright==1.31.3",
+    "jupyter==1.1.1",
     "optax",
-    "pylsp-rope>=0.1.17",
-    "python-lsp-server>=1.12.2",
-    "hf-xet>=1.1.5",
-    "huggingface-hub[hf-transfer]>=0.34.3",
-    "torch>=2.8.0",
-    "tensorboard>=2.20.0",
-    "tensorboard-plugin-profile>=2.20.6",
+    "pylsp-rope==0.1.17",
+    "python-lsp-server==1.13.1",
+    "hf-xet==1.1.9",
+    "huggingface-hub[hf-transfer]==0.34.4",
+    "torch==2.8.0",
+    "tensorboard==2.20.0",
+    "tensorboard-plugin-profile==2.20.6",
+]
+
+[project.optional-dependencies]
+tpu = [
+    "jax[tpu]==0.7.1",
 ]
 
 [tool.uv.sources]
-jmp = { git = "https://github.com/deepmind/jmp" }
-jax-array-info = { git = "https://github.com/Findus23/jax-array-info.git" }
-optax = { git = "https://github.com/google-deepmind/optax.git" }
+# Use canonical repo URLs and explicit revisions to avoid HTTP redirects
+jmp = { git = "https://github.com/google-deepmind/jmp", rev = "9c1cdbbf78da8b2bfaee475d42611c72626e31d0" }
+jax-array-info = { git = "https://github.com/Findus23/jax-array-info.git", rev = "9f6ab5faaacbb403f7f951945df78d5e39dc8d69" }
+optax = { git = "https://github.com/google-deepmind/optax.git", rev = "e5649e7805cf5c399bdf7e15a0521ce2cc372cd3" }
+libtpu = { index = "jax-tpu" }
+libtpu-nightly = { index = "jax-tpu" }
+
+[[tool.uv.index]]
+name = "jax-tpu"
+url = "https://storage.googleapis.com/jax-releases/libtpu_releases.html"
+format = "flat"
