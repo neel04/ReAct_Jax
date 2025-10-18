@@ -422,7 +422,7 @@ class UnsharedBlock(eqx.Module, Generic[L]):
 
         branches = tuple(apply_fn(i) for i in range(len(layers)))
 
-        return jax.lax.switch(iteration_index, branches, args)
+        return branches[iteration_index](args)
 
 
 class NDRAttentionBlock(eqx.Module):

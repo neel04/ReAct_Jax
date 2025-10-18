@@ -225,6 +225,7 @@ class React(eqx.Module):
 
         interim_thought, input_arr, mask = self.sharding.cast((interim_thought, input_arr, mask))
         
+        @partial(jax.remat, static_argnums=(1,))
         def body_fun(input: Array, idx: int) -> Tuple[Array, Array]:
             latent = self.main_block(
                 input,
@@ -243,13 +244,10 @@ class React(eqx.Module):
 
             return latent, latent
 
-        output, _ = eqx.internal.scan(
-            f=body_fun,
-            init=interim_thought,
-            xs=jnp.arange(iters_to_do), # type: ignore
-            kind="checkpointed",
-            checkpoints=iters_to_do,
-        )
+        output = interim_thought
+
+        for idx in range(iters_to_do):
+            output, _ = body_fun(output, idx)
 
         return output
 
