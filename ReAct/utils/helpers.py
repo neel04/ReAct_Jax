@@ -291,7 +291,7 @@ def download_artifact(artifact_path: str, save_dir: str = "./") -> bool:
 
     if api.artifact_exists(artifact_path):
         print("Downloading artifact...")
-        artifact = api.artifact(artifact_path, "checkpoint")
+        artifact = api.artifact(artifact_path, "OptunaCheckpoint")
         datadir = artifact.download(root=save_dir, skip_cache=True)
         print(f"\nArtifact downloaded at {datadir}. Ensure this chkp is loaded.")
         return True
