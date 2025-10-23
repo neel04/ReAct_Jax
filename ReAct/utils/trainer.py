@@ -546,15 +546,16 @@ class Trainer:
                             "Bench/LAMBADA_stderr": lambada_stderr,
                             "Bench/MMLU_Abstract_Alg_acc": mmlu_alg_acc,
                             "Bench/MMLU_Abstract_Alg_stderr": mmlu_alg_stderr,
-                            "Misc/Gradients": wandb.Histogram(
-                                np_histogram=get_hist(grads)
-                            ),
-                            "Misc/Updates": wandb.Histogram(
-                                np_histogram=get_hist(updates)
-                            ),
-                            "Misc/Weights": wandb.Histogram(
-                                np_histogram=get_hist(model)
-                            ),
+                            # TODO: Renable
+                            # "Misc/Gradients": wandb.Histogram(
+                            #     np_histogram=get_hist(grads)
+                            # ),
+                            # "Misc/Updates": wandb.Histogram(
+                            #     np_histogram=get_hist(updates)
+                            # ),
+                            # "Misc/Weights": wandb.Histogram(
+                            #     np_histogram=get_hist(model)
+                            # ),
                         },
                         step=step,
                     )
