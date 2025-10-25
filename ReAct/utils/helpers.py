@@ -198,13 +198,13 @@ def get_weights(m: PyTree, layer: PyTree):
     ]
 
 @eqx.filter_jit
-def get_hist(tree: PyTree, num_bins: int = 64) -> Any:
+def get_hist(key: PRNGKeyArray, tree: PyTree, num_bins: int = 64) -> Any:
     """
     Compute histogram, handling for NaNs safely.
     Returns: Tuple[Array, Array] but wandbs typehinting covereage is so ass.
     """
-    leaves = get_leaves(tree)
-    
+    leaves = jax.random.choice(key, get_leaves(tree), (8192,), False)
+
     return jnp.histogram(
         leaves, bins=num_bins, range=(jnp.nanmin(leaves), jnp.nanmax(leaves))
     )
