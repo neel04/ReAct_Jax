@@ -6,6 +6,7 @@ import jax
 import jax.numpy as jnp
 from equinox.nn import LayerNorm
 from jaxtyping import Array, PRNGKeyArray, PyTree
+from jmp import Policy
 
 from ReAct.utils.sharding import Sharding
 
