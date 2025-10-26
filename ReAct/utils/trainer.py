@@ -84,19 +84,24 @@ def _compute_softmax_cross_entropy_loss(pred_y: Array, y_one_hot: Array) -> Arra
 
     return loss.mean()
 
-@eqx.filter_jit
+@eqx.filter_jit(donate="all-except-first")
 def make_step(
-    keys: PRNGKeyArray,
-    model: React | GPT,
+    static_inputs: Tuple[
+        PRNGKeyArray,
+        PyTree,
+        Array,
+        Array,
+        Array,
+        int,
+        GradientTransformation,
+        int,
+        React | GPT
+    ],
     opt_state: PyTree,
-    filter_spec: PyTree,
-    x: Array,
-    y: Array,
-    pad_mask: Array,
-    iters_to_do: int,
-    optim: GradientTransformation,
-    num_classes: int,
-):
+) -> Tuple[Array, Tuple[React | GPT, PyTree], PyTree, PyTree]:
+
+    keys, filter_spec, x, y, pad_mask, iters_to_do, optim, num_classes, model = static_inputs
+
     x, y, pad_mask = strategy.shard_cast((x, y, pad_mask))
     model, opt_state = strategy.shard_model((model, opt_state))
     dynamic_model = eqx.filter(model, eqx.is_inexact_array)
@@ -134,7 +139,7 @@ def make_step(
     # shard the updated state as well
     model, opt_state = strategy.shard_model((model, opt_state))
 
-    return loss, model, opt_state, grads, updates
+    return loss, (model, opt_state), grads, updates
 
 
 class Trainer:
@@ -452,17 +457,19 @@ class Trainer:
                 seq, label, pad_mask = policy.cast_to_compute((seq, label, pad_mask))
                 seq, label, pad_mask = strategy.shard_cast((seq, label, pad_mask))
 
-                loss, model, opt_state, grads, updates = make_step(
-                    keys=keys,
-                    model=model,
-                    opt_state=opt_state,
-                    filter_spec=filter_spec,
-                    x=seq,
-                    y=label,
-                    pad_mask=pad_mask,
-                    iters_to_do=self.args.max_iters,
-                    optim=optim,
-                    num_classes=self.args.num_classes,
+                loss, (model, opt_state), grads, updates = make_step(
+                    (
+                        keys,
+                        filter_spec,
+                        seq,
+                        label,
+                        pad_mask,
+                        self.args.max_iters,
+                        optim,
+                        self.args.num_classes,
+                        model
+                    ),
+                    opt_state,
                 )
 
                 loss = prof.stop_prof(
