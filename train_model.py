@@ -24,7 +24,6 @@ if platform.processor() != "arm": # Nothing on Apple sillicon
 from jax import config
 from jax.experimental import multihost_utils
 from jaxtyping import PRNGKeyArray
-from optuna.integration.wandb import WeightsAndBiasesCallback
 
 from ReAct.data.gh_code import GithubCodeDataset
 from ReAct.data.minipile import MiniPileDataset
@@ -143,23 +142,12 @@ def main(key: PRNGKeyArray):
             ),
         )
 
-        wandb_kwargs = {
-            "project": "ReAct_Jax",
-            "config": args,
-            "anonymous": "allow",
-            "entity": "neel",
-        }
-
         trainer_kwargs = {
             "args": args,
             "loaders": (trainloader, valloader),
             "decode_fn": dataset.tok.decode,
             "key": key
         }
-
-        wandbc = WeightsAndBiasesCallback(
-            metric_name="Val/loss", wandb_kwargs=wandb_kwargs, as_multirun=True
-        )
 
         # enqueue a few handpicked hyperparams for trials
         [study.enqueue_trial(hyperparams) for hyperparams in init_hyperparams]
@@ -169,7 +157,7 @@ def main(key: PRNGKeyArray):
                 trial=trial, artifact_name=artifact_name, **trainer_kwargs
             ),
             n_trials=50,
-            callbacks=[wandbc] if jax.process_index() == 0 else None,
+            callbacks=None,
             gc_after_trial=True,
         )
 
