@@ -153,7 +153,7 @@ def main(key: PRNGKeyArray):
         [study.enqueue_trial(hyperparams) for hyperparams in init_hyperparams]
 
         study.optimize(
-            lambda trial: kickoff_optuna(
+            lambda trial: kickoff_optuna(  # pyright: ignore[reportArgumentType]
                 trial=trial, artifact_name=artifact_name, **trainer_kwargs
             ),
             n_trials=50,
@@ -172,7 +172,9 @@ def main(key: PRNGKeyArray):
 
         if args.resume and not args.tune_hyperparams:
             try:
-                start_step, _ = fetch_resume_progress(args.resume, args.save_dir)
+                start_step, _ = fetch_resume_progress(
+                    args.resume, args.save_dir, chkp_type="checkpoint"
+                )
             except Exception as e:
                 print(f"\nCouldn't fetch previous checkpoint... {e}")
                 start_step = 0  # continue fresh if things go wrong

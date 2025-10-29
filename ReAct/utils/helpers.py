@@ -286,12 +286,12 @@ def get_rand_nums(
 
     return dist.astype(int)
 
-def download_artifact(artifact_path: str, save_dir: str = "./") -> bool:
+def download_artifact(artifact_path: str, chkp_type: str = "OptunaCheckpoint", save_dir: str = "./") -> bool:
     api = wandb.Api()
 
     if api.artifact_exists(artifact_path):
         print("Downloading artifact...")
-        artifact = api.artifact(artifact_path, "OptunaCheckpoint")
+        artifact = api.artifact(artifact_path, chkp_type)
         datadir = artifact.download(root=save_dir, skip_cache=True)
         print(f"\nArtifact downloaded at {datadir}. Ensure this chkp is loaded.")
         return True
@@ -299,7 +299,7 @@ def download_artifact(artifact_path: str, save_dir: str = "./") -> bool:
     print(f"Warning: Artifact {artifact_path} does not exist.\n")
     return False
 
-def fetch_resume_progress(resume: bool | str, save_dir: str) -> tuple[int, int]:
+def fetch_resume_progress(resume: bool | str, save_dir: str, chkp_type: str) -> tuple[int, int]:
     """
     Downloads the latest checkpoint artifact (if a resume string is provided)
     and extracts the latest epoch and step from files in `save_dir`.
@@ -328,7 +328,7 @@ def fetch_resume_progress(resume: bool | str, save_dir: str) -> tuple[int, int]:
     )
 
     # Best-effort download; ignore failures and fall back to parsing numbers
-    _ = download_artifact(artifact_path, save_dir)
+    _ = download_artifact(artifact_path, save_dir=save_dir, chkp_type=chkp_type)
 
     # Inspect local directory for any .eqx files and pick the latest by (epoch, step)
     try:
