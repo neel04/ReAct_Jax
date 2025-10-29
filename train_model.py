@@ -174,7 +174,7 @@ def main(key: PRNGKeyArray):
             try:
                 start_step, _ = fetch_resume_progress(args.resume, args.save_dir)
             except Exception as e:
-                print("\nCouldn't fetch previous checkpoint...")
+                print(f"\nCouldn't fetch previous checkpoint... {e}")
                 start_step = 0  # continue fresh if things go wrong
 
         multihost_utils.sync_global_devices("Sync up all nodes.")  # type: ignore
