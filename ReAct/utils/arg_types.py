@@ -64,6 +64,7 @@ class InferenceArgs:
     temperature: float
     top_k: int
     top_p: float
+    rank: int
     repetition_penalty: float
 
 
@@ -83,7 +84,6 @@ class EvaluationArgs:
     baseline: bool
     num_blocks: int
     strategy: str
-    task: str
 
 
 Args = TypeVar("Args", TrainingArgs, EvaluationArgs, InferenceArgs)

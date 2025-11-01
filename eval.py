@@ -186,15 +186,15 @@ class Evaluator:
         self.pad_token = 50257
         self.key = key
         self.args = args
-        self.task = args.bench_task if task else task
-        self.model = self.skeleton_model(args.baseline) if model is None else model
+        self.strategy = get_strategy(self.args.strategy)
+        self.task = task or args.bench_task
 
         tok = Tok(vocab_dir=None, max_length=512)
 
         self.decode_fn = tok.decode
         self.encode_fn = tok.encode
 
-        self.strategy = get_strategy(self.args.strategy)
+        self.model = self.skeleton_model(args.baseline) if model is None else model
 
     def skeleton_model(self, is_baseline: bool) -> GPT | React:
         if not is_baseline:
@@ -236,12 +236,7 @@ class Evaluator:
                 model = _model
 
             case None:
-                model: React | GPT = load_eqx_obj(
-                    self.args.checkpoint_path,
-                    self.model
-                    if self.args.baseline
-                    else eqx.filter(self.model, eqx.is_array),
-                )
+                model: React | GPT = load_eqx_obj(self.args.checkpoint_path, self.model)
 
         lm_obj = MyLM(
             model=model,
@@ -255,7 +250,7 @@ class Evaluator:
         try:
             results = lm_eval.simple_evaluate(
                 model=lm_obj,
-                tasks=self.task.split(","),
+                tasks=self.args.bench_task.split(","),
                 num_fewshot=None,
                 task_manager=task_manager,
             )

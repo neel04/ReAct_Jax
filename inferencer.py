@@ -40,7 +40,8 @@ class Inferencer:
                 drop_rate=0.0,
                 vocab_size=self.args.num_classes,
                 key=self.key,
-                strategy=self.strategy
+                strategy=self.strategy,
+                rank=self.args.rank
             )
         else:
             model = GPT(
@@ -58,7 +59,7 @@ class Inferencer:
 
     def encode_input(self, my_input: str) -> Array:
         encoded = self.encode_fn(my_input)['input_ids']
-        encoded = jnp.asarray([i for i in encoded if i != self.pad_token])
+        encoded = jnp.asarray([i for i in encoded if i != self.pad_token]).astype(int)
 
         return encoded
 
@@ -88,7 +89,7 @@ class Inferencer:
             prompt = my_input
 
         model_input = self.encode_input(prompt)
-    
+
         def generate(model_input: Array, num_tokens: int) -> Array:
             def sample_token(padded_array: Array):
                 pad_mask = jnp.where(padded_array == self.pad_token, 0, 1)
@@ -98,34 +99,34 @@ class Inferencer:
                 if self.args.baseline:
                     logits = inference_model(padded_array, pad_mask, False, self.key)
                 else:
-                    logits = inference_model(padded_array, self.args.max_iters, 
+                    logits = inference_model(padded_array, self.args.max_iters,
                                              pad_mask, False, False, self.key)[0]
-        
+
                 logits = logits[last_tok_idx, :]  # extract the logits for the last token
 
                 # Apply temperature
                 scaled_logits = logits / temperature
-            
+
                 # Apply repetition penalty
                 if model_input.shape[0] > max_repeat_tokens:
                     recent_tokens = model_input[-max_repeat_tokens:]
-                    scaled_logits = jax.vmap(lambda t: jnp.where(t == jnp.arange(logits.shape[0]), 
-                                                                 scaled_logits / repetition_penalty, 
+                    scaled_logits = jax.vmap(lambda t: jnp.where(t == jnp.arange(logits.shape[0]),
+                                                                 scaled_logits / repetition_penalty,
                                                                  scaled_logits))(recent_tokens)
                     scaled_logits = scaled_logits.min(axis=0)
-            
+
                 # Top-k sampling
                 top_k_logits, top_k_indices = jax.lax.top_k(scaled_logits, top_k)
-            
+
                 # Top-p (nucleus) sampling
                 probs = jax.nn.softmax(top_k_logits)
                 cumulative_probs = jnp.cumsum(probs)
                 nucleus = jnp.where(cumulative_probs > top_p, 0.0, probs)
                 nucleus = nucleus / jnp.sum(nucleus)
-            
+
                 # Sample from the nucleus
                 token = jax.random.choice(self.key, top_k_indices, p=nucleus)
-            
+
                 return token
 
             for _ in range(num_tokens):
@@ -141,7 +142,7 @@ class Inferencer:
                 gen = sample_token(padded_array)
 
                 model_input = jnp.concatenate([model_input, gen.reshape(-1)])  # append the generated token for AR
-            
+
                 # Update PRNG key
                 self.key, _ = jax.random.split(self.key)
 
@@ -159,7 +160,7 @@ class Inferencer:
         ), "Trying to do inference on baseline model requires --baseline flag"
 
         model = load_eqx_obj(self.args.checkpoint_path, model)
-        
+
         count_params(model)
 
         output = self.sample_model(
@@ -180,19 +181,19 @@ if __name__ == "__main__":
     key = jax.random.PRNGKey(0)
 
     args = get_inference_args()
-    logger = UnifiedLogger(args, level="DEBUG")
+    logger = UnifiedLogger(level="DEBUG")
     my_logger = logger.my_logger()
 
     my_logger.warning('Make sure to provide the correct args per the model configuration - as it cant be autodetected!')
-    my_logger.warning('These are: max_iters| baseline | num_blocks | width | n_heads')
+    my_logger.warning('These are: max_iters | baseline | num_blocks | width | n_heads')
     print(f"{'-'*50}\n")
-    
+
     assert args.checkpoint_path is not None, "Please provide a checkpoint path"
     assert os.path.exists(args.checkpoint_path), "Please provide a valid checkpoint path | File does not exist"
     assert args.prompt is not None, "Please provide a prompt/input for inference"
-    
+
     inferencer = Inferencer(args, key)
-    
+
     output = inferencer.inference(args.prompt, args.num_tokens)
 
     print(f"\n{'~' * 50}\n")

@@ -336,6 +336,13 @@ def get_inference_args() -> InferenceArgs:
     )
 
     parser.add_argument(
+        "--rank",
+        type=int,
+        default=64,
+        help="Rank for the adapters used in the UT. Default: 64",
+    )
+
+    parser.add_argument(
         "--repetition_penalty",
         type=float,
         default=1.2,
@@ -410,6 +417,13 @@ def get_evaluation_args() -> EvaluationArgs:
         type=int,
         default=1,
         help="Number of attention blocks. Default: 1",
+    )
+
+    parser.add_argument(
+        "--rank",
+        type=int,
+        default=64,
+        help="Rank for the adapters used in the UT. Default: 64",
     )
 
     parser.add_argument(
