@@ -179,6 +179,9 @@ def main(key: PRNGKeyArray):
                 print(f"\nCouldn't fetch previous checkpoint... {e}")
                 start_step = 0  # continue fresh if things go wrong
 
+        loggers = UnifiedLogger(level="DEBUG")
+        my_logger, wandb_logger = loggers.my_logger(), loggers.wandb_logger(args)
+
         multihost_utils.sync_global_devices("Sync up all nodes.")  # type: ignore
 
         trainloader = dataset.create_dataloader(
@@ -187,9 +190,6 @@ def main(key: PRNGKeyArray):
 
         multihost_utils.sync_global_devices("Sync up all nodes.")  # type: ignore
         valloader = dataset.create_dataloader(split="test", upload_to_hub=True)
-
-        loggers = UnifiedLogger(level="DEBUG")
-        my_logger, wandb_logger = loggers.my_logger(), loggers.wandb_logger(args)
 
         trainer = Trainer(
             args,
