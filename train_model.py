@@ -89,9 +89,10 @@ def main(key: PRNGKeyArray):
         },
     ]
 
-    if args.tune_hyperparams:
-        args.exp_logging = False if jax.process_index() != 0 else args.exp_logging
+    # Don't log if not on process index 0
+    args.exp_logging = False if jax.process_index() != 0 else args.exp_logging
 
+    if args.tune_hyperparams:
         # Rename the group to seperate sweeps from normal runs.
         args.group = "Sweeps_base" if args.baseline else f"Sweeps_{args.max_iters}i"
         args.group += args.sweep_metadata # append metadata on end
