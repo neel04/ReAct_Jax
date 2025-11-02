@@ -172,7 +172,118 @@ class MyLM(TemplateLM):
         return output
 
     def generate_until(self, requests, disable_tqdm: bool = False) -> list[str]:
-        raise NotImplementedError
+        results: list[str] = []
+
+        for request in tqdm(requests, disable=disable_tqdm):
+            context, gen_kwargs = request.args
+
+            assert isinstance(gen_kwargs, dict), "generate_until kwargs must be a dict"
+            allowed = {"until", "max_gen_toks", "do_sample", "temperature"}
+            unexpected = set(gen_kwargs) - allowed
+            assert not unexpected, f"Unsupported generation kwargs: {unexpected}"
+
+            do_sample = bool(gen_kwargs.get("do_sample", False))
+            assert not do_sample, "Sampling kwargs are unsupported"
+
+            temperature = gen_kwargs.get("temperature", None)
+            if temperature is not None:
+                assert float(temperature) in {0.0, 1.0}, (
+                    "Only deterministic temperatures supported"
+                )
+
+            until_value = gen_kwargs.get("until", [])
+
+            if isinstance(until_value, str):
+                until = [until_value]
+            elif until_value is None:
+                until = []
+            else:
+                until = list(until_value)
+
+            eos_decoded = self.decode_fn([self.eot_token_id])
+            if eos_decoded and eos_decoded not in until:
+                until.append(eos_decoded)
+
+            max_gen_toks = int(gen_kwargs.get("max_gen_toks", self.args.num_tokens))
+
+            context_tokens = jnp.asarray(self.tok_encode(context), dtype=jnp.int32)
+            if context_tokens.size == 0:
+                context_tokens = jnp.asarray([self.prefix_token_id], dtype=jnp.int32)
+
+            generated_tokens: list[int] = []
+            current_tokens = context_tokens
+            output_text = ""
+
+            for _ in range(max_gen_toks):
+                seq_len = int(current_tokens.shape[0])
+
+                if seq_len >= self.args.seqlen:
+                    input_seq = current_tokens[-self.args.seqlen :]
+                    pad_mask = jnp.ones(self.args.seqlen, dtype=jnp.int32)
+                    last_index = self.args.seqlen - 1
+                else:
+                    pad_len = self.args.seqlen - seq_len
+                    input_seq = jnp.pad(
+                        current_tokens,
+                        (0, pad_len),
+                        constant_values=self.eot_token_id,
+                    )
+                    pad_mask = jnp.concatenate([
+                        jnp.ones(seq_len, dtype=jnp.int32),
+                        jnp.zeros(pad_len, dtype=jnp.int32),
+                    ])
+                    last_index = max(seq_len - 1, 0)
+
+                forward_key = jax.random.PRNGKey(0)
+                if self.args.baseline:
+                    logits = self.model(input_seq, pad_mask, False, forward_key)
+                else:
+                    logits = self.model(
+                        input_seq,
+                        self.args.max_iters,
+                        pad_mask,
+                        False,
+                        False,
+                        forward_key,
+                    )[0]
+
+                logits = logits[last_index, :]
+                next_token = int(jnp.argmax(logits))
+
+                if next_token == self.eot_token_id:
+                    break
+
+                generated_tokens.append(next_token)
+                current_tokens = jnp.concatenate([
+                    current_tokens,
+                    jnp.asarray([next_token], dtype=jnp.int32),
+                ])
+
+                decoded = self.decode_fn(generated_tokens)
+                trimmed = decoded
+                stop_hit = False
+                for term in until:
+                    if term and term in trimmed:
+                        trimmed = trimmed.split(term)[0]
+                        stop_hit = True
+                        break
+
+                output_text = trimmed
+
+                if stop_hit:
+                    break
+
+            if generated_tokens and not output_text:
+                final_decoded = self.decode_fn(generated_tokens)
+                for term in until:
+                    if term:
+                        final_decoded = final_decoded.split(term)[0]
+                output_text = final_decoded
+
+            results.append(output_text)
+
+        return results
+
 
 class Evaluator:
     def __init__(
