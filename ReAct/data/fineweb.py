@@ -1,9 +1,8 @@
 from functools import partial
 from typing import Callable
 
-from datasets import load_dataset
-from datasets.dataset_dict import DatasetDict
-from torch.utils.data import Dataset
+from datasets.arrow_dataset import Dataset as HFDataset
+from datasets.load import load_dataset
 
 from ReAct.utils.helpers import IterableDatasetWithLen
 
@@ -42,10 +41,12 @@ class FineWebDataset(ParentDataset):
             verification_mode="no_checks",
             trust_remote_code=True,
             streaming=True
-        ).select_columns(self.col_name)
+        )
 
-        def dataset_map_fn(func: Callable) -> Dataset | DatasetDict:
-            return dataset.map( # type: ignore
+        dataset = dataset.select_columns(self.col_name)
+
+        def dataset_map_fn(func: Callable) -> HFDataset:
+            return dataset.map(  # type: ignore
                 func,
                 batched=True,
                 batch_size=self.bsz,

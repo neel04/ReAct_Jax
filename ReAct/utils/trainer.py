@@ -2,13 +2,14 @@ import os
 from functools import partial
 from typing import Any, Callable, Optional, Tuple, Union
 
-from datasets.arrow_dataset import Dataset
 import equinox as eqx
 import jax
 import jax.numpy as jnp
 import optax
 import optuna
 import regex as re
+from datasets.arrow_dataset import Dataset
+from jax.experimental import multihost_utils
 from jaxtyping import Array, Int, PRNGKeyArray, PyTree
 from jmp import Policy
 from optax._src.base import GradientTransformation
@@ -26,7 +27,6 @@ from ReAct.utils.helpers import (
     Profiler,
     calc_performance_metrics,
     count_params,
-    download_artifact,
     get_hist,
     get_weights,
     load_eqx_obj,
@@ -233,7 +233,6 @@ class Trainer:
                     adam_b1=self.args.beta_1,
                     adam_b2=self.args.beta_2,
                     nesterov=self.args.nesterov,
-                    adaptive=self.args.muon_adaptive,
                 )
 
             case _:
@@ -365,7 +364,7 @@ class Trainer:
     def compute_metrics(
         self,
         keys: PRNGKeyArray,
-        model: eqx.Module,
+        model: React | GPT,
         is_baseline: bool,
         input_arr: Array,
         label: Array,
@@ -383,6 +382,9 @@ class Trainer:
         keys = keys[:input_arr.shape[0], ...] # take a batch_size sized slice of the keys
 
         if is_baseline:
+            assert isinstance(model, GPT), (
+                f"Requested `baseline`, however provided type: {type(model)} object"
+            )
             pred_y = jax.vmap(model, in_axes=(0, 0, None, 0))(input_arr, pad_mask, False, keys)
         else:
             pred_y = jax.vmap(model, in_axes=(0, None, 0, None, None, 0))(input_arr, eval_iters, pad_mask, False, False, keys)[0] # type:ignore

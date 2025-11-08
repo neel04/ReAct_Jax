@@ -48,7 +48,7 @@ class UnifiedLogger:
         # Stagger across hosts to prevent hitting W&B rate limits
         time.sleep(random.uniform(0, 240))
 
-        wandb.init(
+        run = wandb.init(
             entity="neel",
             project="ReAct_Jax",
             config=args,
@@ -57,17 +57,17 @@ class UnifiedLogger:
             resume="allow",
             id=wandb_id,
             reinit=True,
-            allow_val_change=True
+            allow_val_change=True,
         )
 
-        wandb.run.log_code(
+        run.log_code(
             "../",
             include_fn=lambda path: path.endswith(".py")
             or path.endswith(".ipynb")
             or path.endswith(".sh"),
         )
 
-        return wandb
+        return run
 
     def init_wandb_sweep(self) -> str:
         '''

@@ -195,7 +195,7 @@ def main(key: PRNGKeyArray):
         trainer = Trainer(
             args,
             loggers=(my_logger, wandb_logger),
-            loaders=(trainloader, valloader),
+            loaders=(trainloader, valloader),  # pyright: ignore[reportArgumentType]
             decode_fn=dataset.tok.decode,
             key=key
         )

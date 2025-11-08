@@ -3,6 +3,7 @@ import os
 from logging import Logger
 from typing import Any, Callable, List, Optional, Tuple, TypeVar
 
+from datasets.arrow_dataset import Dataset
 from datasets.dataset_dict import DatasetDict
 import equinox as eqx
 import jax
@@ -10,7 +11,6 @@ import jax.numpy as jnp
 import regex as re
 from jax_array_info import sharding_info
 from jaxtyping import Array, PRNGKeyArray, PyTree
-from torch.utils.data import Dataset
 
 import wandb
 

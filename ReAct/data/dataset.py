@@ -3,15 +3,17 @@ from functools import partial
 from pathlib import Path
 from typing import Any, Callable, Dict, List, Tuple, cast
 
-import datasets
 import jax
 import numpy as np
 from datasets.arrow_dataset import Dataset
 from datasets.dataset_dict import DatasetDict
+from datasets.exceptions import DatasetNotFoundError
 from datasets.load import load_dataset, load_from_disk
 from jaxtyping import Array
 from numpy._typing import NDArray
 from torch.utils.data import DataLoader
+
+from ReAct.utils.helpers import IterableDatasetWithLen
 
 from .tokenizer import Tok
 
@@ -174,7 +176,7 @@ class ParentDataset:
         upload_to_hub: bool = False,
         streaming: bool = False,
         start_step: int = 0,
-    ) -> Dataset | DatasetDict | DataLoader:
+    ) -> Dataset | DatasetDict | DataLoader | IterableDatasetWithLen:
         data_path = Path(f"{os.getenv('DISK_PATH')}/cached_data/owt_{split}.data")
 
         split, slice = self.produce_splits(split, slice)
@@ -196,7 +198,7 @@ class ParentDataset:
             dataset.set_format(type="numpy")
 
             return dataset
-        except (FileNotFoundError, datasets.exceptions.DatasetNotFoundError):
+        except (FileNotFoundError, DatasetNotFoundError):
             try:
                 print(f"Loading dataset from {data_path}...")
                 dataset = self.load_data(data_path)
