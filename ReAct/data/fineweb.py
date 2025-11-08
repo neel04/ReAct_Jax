@@ -3,6 +3,7 @@ from typing import Callable
 
 from datasets.arrow_dataset import Dataset as HFDataset
 from datasets.load import load_dataset
+import jax
 
 from ReAct.utils.helpers import IterableDatasetWithLen
 
@@ -20,6 +21,17 @@ class FineWebDataset(ParentDataset):
             bsz=batch_size,
         )
 
+    def map_factory(self, dataset):
+        def dataset_map_fn(func: Callable) -> HFDataset:
+            return dataset.map(  # type: ignore
+                func,
+                batched=True,
+                batch_size=self.bsz,
+                drop_last_batch=True,
+            )
+
+        return dataset_map_fn
+
     def create_dataloader(
         self,
         split: str,
@@ -34,24 +46,40 @@ class FineWebDataset(ParentDataset):
 
         For eval, we use ~1% of data (~1B tokens) which should be sufficient.
         """
+        # No need for data preprocessing on non-primary processes
+        if jax.process_index() != 0:
+            total_batches = 147639585 // self.bsz
+            eval_samples = int(total_batches * 0.01)
+
+            if split == "train":
+                _length = total_batches - eval_samples
+            else:
+                _length = eval_samples
+
+            if slice:
+                taken_samples = int((int(slice[1:-1])) / 100 * _length)
+                _length = taken_samples
+
+            # Pass on a dummy dataset instead
+            return IterableDatasetWithLen(
+                HFDataset.from_dict({"text": "Dummy dataset :)"}), _length
+            )
+
         dataset = load_dataset(
             self.tgt_hf_repo,
             name=self.hf_subset_name,
             split="train",
             verification_mode="no_checks",
             trust_remote_code=True,
-            streaming=True
+            streaming=True,
         )
+
+        total_batches = dataset.info.splits["train"].num_examples // self.bsz  # type: ignore
+        eval_samples = int(total_batches * 0.01)  # 1% for eval
 
         dataset = dataset.select_columns(self.col_name)
 
-        def dataset_map_fn(func: Callable) -> HFDataset:
-            return dataset.map(  # type: ignore
-                func,
-                batched=True,
-                batch_size=self.bsz,
-                drop_last_batch=True,
-            )
+        dataset_map_fn = self.map_factory(dataset)
 
         dataset = dataset_map_fn(
             partial(self.chunk_examples, max_length=self.max_length)
@@ -67,9 +95,6 @@ class FineWebDataset(ParentDataset):
                 pad_tok=self.pad_tok,
             )
         )
-
-        total_batches = dataset.info.splits["train"].num_examples // self.bsz
-        eval_samples = int(total_batches * 0.01)  # 1% for eval
 
         if split == "train":
             dataset = dataset.skip(eval_samples)
@@ -91,3 +116,4 @@ class FineWebDataset(ParentDataset):
         print(f"Created streaming {split} dataset from FinewWeb")
 
         return IterableDatasetWithLen(dataset, _length)
+

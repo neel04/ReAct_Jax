@@ -1,14 +1,16 @@
 import math
 import os
 from logging import Logger
-from typing import Any, Callable, List, Optional, Tuple, TypeVar
+from typing import Any, Callable, Iterator, List, Optional, Tuple, TypeVar
 
-from datasets.arrow_dataset import Dataset
-from datasets.dataset_dict import DatasetDict
 import equinox as eqx
 import jax
 import jax.numpy as jnp
 import regex as re
+from datasets.arrow_dataset import Dataset
+from datasets.dataset_dict import DatasetDict, IterableDatasetDict
+from datasets.iterable_dataset import IterableDataset
+from jax.experimental import multihost_utils
 from jax_array_info import sharding_info
 from jaxtyping import Array, PRNGKeyArray, PyTree
 
@@ -356,7 +358,11 @@ def fetch_resume_progress(resume: bool | str, save_dir: str, chkp_type: str) -> 
     return 0, 0
 
 class IterableDatasetWithLen:
-    def __init__(self, dataset: Dataset | DatasetDict, length: int):
+    def __init__(
+        self,
+        dataset: Dataset | DatasetDict | IterableDataset | IterableDatasetDict,
+        length: int,
+    ):
         self.dataset = dataset
         self._length = length
 
@@ -369,3 +375,34 @@ class IterableDatasetWithLen:
     def __iter__(self):
         for item in self.dataset:
             yield item
+
+def broadcast_batch(
+    loader: Dataset
+    | DatasetDict
+    | IterableDataset
+    | IterableDatasetDict
+    | IterableDatasetWithLen,
+    batch_size: int,
+    seqlen: int,
+) -> Iterator[dict[str, tuple[Array, Array, Array]]]:
+    """
+    Ensures only process 0 touches the real loader while all hosts receive
+    identical arrays via `broadcast_one_to_all`.
+    """
+    is_primary = jax.process_index() == 0
+
+    iterator = loader if is_primary else range(len(loader))  # pyright: ignore[reportArgumentType]
+
+    zero_batch = jnp.zeros((batch_size, seqlen), dtype=jnp.int32)
+
+    for batch in iterator:
+        if is_primary:
+            seq, label, pad_mask = jnp.asarray(batch["text"])  # type: ignore[index]
+        else:
+            seq = label = pad_mask = zero_batch
+
+        seq, label, pad_mask = multihost_utils.broadcast_one_to_all(
+            (seq, label, pad_mask), is_source=is_primary
+        )
+
+        yield {"text": (seq, label, pad_mask)}

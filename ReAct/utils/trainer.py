@@ -25,6 +25,7 @@ from ReAct.utils.arg_types import TrainingArgs
 from ReAct.utils.helpers import (
     IterableDatasetWithLen,
     Profiler,
+    broadcast_batch,
     calc_performance_metrics,
     count_params,
     get_hist,
@@ -185,8 +186,12 @@ class Trainer:
         metrics_sum = jnp.zeros(3)  # [acc, loss, ppl]
         num_batches = len(loader)
 
-        for _, batch in tqdm(enumerate(loader), total=len(loader), desc='Validating'):
-            seq, label, pad_mask = jnp.asarray(batch['text'])
+        for _, batch in tqdm(
+            enumerate(broadcast_batch(loader, self.args.batch_size, self.args.seqlen)),
+            total=num_batches,
+            desc="Validating",
+        ):
+            seq, label, pad_mask = batch["text"]
             seq, label, pad_mask = policy.cast_to_compute((seq, label, pad_mask))
             seq, label, pad_mask = strategy.shard_cast((seq, label, pad_mask))
 
@@ -451,11 +456,19 @@ class Trainer:
             epoch_key = jnp.array([epoch, epoch + 1]).astype(jnp.uint32)
             keys = jax.random.split(epoch_key, self.args.batch_size)
 
-            for step, batch in tqdm(enumerate(self.trainloader), total=self.dataset_length, desc=f'Epoch {epoch}'):
+            for step, batch in tqdm(
+                enumerate(
+                    broadcast_batch(
+                        self.trainloader, self.args.batch_size, self.args.seqlen
+                    )
+                ),
+                total=self.dataset_length,
+                desc=f"Epoch {epoch}",
+            ):
                 step += step_done  # for multiple epochs
                 prof.start_prof(step)
 
-                seq, label, pad_mask = jnp.asarray(batch["text"])
+                seq, label, pad_mask = batch["text"]
                 seq, label, pad_mask = policy.cast_to_compute((seq, label, pad_mask))
                 seq, label, pad_mask = strategy.shard_cast((seq, label, pad_mask))
 
@@ -601,7 +614,7 @@ class Trainer:
                         max_new_tokens=64,
                     )
 
-                    jax.experimental.multihost_utils.sync_global_devices(  # type: ignore
+                    multihost_utils.sync_global_devices(  # type: ignore
                         "Sync up all nodes after inference."
                     )
 
