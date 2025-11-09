@@ -262,8 +262,8 @@ class AttentionBlock(eqx.Module):
 
         inp += self.attn_gate(
             query=x,
-            key_=inp,
-            value=inp,
+            key_=x,
+            value=x,
             mask=self._make_self_attention_mask(mask),
             inference=enable_dropout,
             process_heads=self.process_heads,
@@ -689,8 +689,8 @@ class AdaptableAttentionBlock(eqx.Module):
 
         inp += self.attn_gate(
             query=x,
-            key_=inp,
-            value=inp,
+            key_=x,
+            value=x,
             mask=self._make_self_attention_mask(mask),
             inference=enable_dropout,
             process_heads=self.process_heads,
