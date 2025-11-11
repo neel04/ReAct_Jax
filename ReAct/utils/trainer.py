@@ -384,8 +384,6 @@ class Trainer:
         model = strategy.shard_model(model)
         input_arr, label, pad_mask = strategy.shard_cast((input_arr, label, pad_mask))
 
-        keys = keys[:input_arr.shape[0], ...] # take a batch_size sized slice of the keys
-
         if is_baseline:
             assert isinstance(model, GPT), (
                 f"Requested `baseline`, however provided type: {type(model)} object"

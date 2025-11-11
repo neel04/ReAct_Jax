@@ -2,6 +2,7 @@ from functools import partial
 from typing import Callable
 
 from datasets.arrow_dataset import Dataset as HFDataset
+from datasets.iterable_dataset import IterableDataset
 from datasets.load import load_dataset
 import jax
 
@@ -22,7 +23,7 @@ class FineWebDataset(ParentDataset):
         )
 
     def map_factory(self, dataset):
-        def dataset_map_fn(func: Callable) -> HFDataset:
+        def dataset_map_fn(func: Callable) -> IterableDataset:
             return dataset.map(  # type: ignore
                 func,
                 batched=True,
@@ -65,7 +66,7 @@ class FineWebDataset(ParentDataset):
                 HFDataset.from_dict({"text": "Dummy dataset :)"}), _length
             )
 
-        dataset = load_dataset(
+        dataset: IterableDataset = load_dataset(  # pyright: ignore[reportAssignmentType]
             self.tgt_hf_repo,
             name=self.hf_subset_name,
             split="train",
@@ -73,6 +74,8 @@ class FineWebDataset(ParentDataset):
             trust_remote_code=True,
             streaming=True,
         )
+
+        dataset = dataset.shuffle(seed=42, buffer_size=1024)
 
         total_batches = dataset.info.splits["train"].num_examples // self.bsz  # type: ignore
         eval_samples = int(total_batches * 0.01)  # 1% for eval
