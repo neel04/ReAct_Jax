@@ -75,7 +75,7 @@ class FineWebDataset(ParentDataset):
             streaming=True,
         )
 
-        dataset = dataset.shuffle(seed=42, buffer_size=1024)
+        dataset = dataset.shuffle(seed=42, buffer_size=2 ** 12)
 
         total_batches = dataset.info.splits["train"].num_examples // self.bsz  # type: ignore
         eval_samples = int(total_batches * 0.01)  # 1% for eval

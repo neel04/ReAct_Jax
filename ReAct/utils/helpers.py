@@ -13,6 +13,7 @@ from datasets.iterable_dataset import IterableDataset
 from jax.experimental import multihost_utils
 from jax_array_info import sharding_info
 from jaxtyping import Array, PRNGKeyArray, PyTree
+from torch.utils.data import DataLoader as TorchDataLoader
 
 import wandb
 
@@ -357,7 +358,7 @@ def fetch_resume_progress(resume: bool | str, save_dir: str, chkp_type: str) -> 
 
     return 0, 0
 
-class IterableDatasetWithLen:
+class IterableDatasetWithLen(IterableDataset):
     def __init__(
         self,
         dataset: Dataset | DatasetDict | IterableDataset | IterableDatasetDict,
@@ -376,6 +377,24 @@ class IterableDatasetWithLen:
         for item in self.dataset:
             yield item
 
+def _build_torch_prefetch_loader(
+    loader: Dataset
+    | DatasetDict
+    | IterableDataset
+    | IterableDatasetDict
+    | IterableDatasetWithLen,
+    prefetch_size: int,
+) -> TorchDataLoader:
+    return TorchDataLoader(
+        loader,  # pyright: ignore[reportArgumentType]
+        batch_size=1,
+        num_workers=32,
+        prefetch_factor=prefetch_size,
+        persistent_workers=True,
+        pin_memory=False,
+    )
+
+
 def broadcast_batch(
     loader: Dataset
     | DatasetDict
@@ -384,14 +403,21 @@ def broadcast_batch(
     | IterableDatasetWithLen,
     batch_size: int,
     seqlen: int,
+    prefetch_size: int = 256,
 ) -> Iterator[dict[str, tuple[Array, Array, Array]]]:
     """
     Ensures only process 0 touches the real loader while all hosts receive
-    identical arrays via `broadcast_one_to_all`.
+    identical arrays via `broadcast_one_to_all`. Optionally prefetches
+    `prefetch_size` batches ahead on the primary host. When possible, a
+    multi-worker torch DataLoader sustains throughput on the primary host.
     """
     is_primary = jax.process_index() == 0
 
-    iterator = loader if is_primary else range(len(loader))  # pyright: ignore[reportArgumentType]
+    if is_primary:
+        torch_loader = _build_torch_prefetch_loader(loader, prefetch_size)
+        iterator: Iterator[Any] = iter(torch_loader)
+    else:
+        iterator = iter(range(len(loader)))  # pyright: ignore[reportArgumentType]
 
     zero_batch = jnp.zeros((batch_size, seqlen), dtype=jnp.int32)
 
@@ -403,6 +429,11 @@ def broadcast_batch(
 
         seq, label, pad_mask = multihost_utils.broadcast_one_to_all(
             (seq, label, pad_mask), is_source=is_primary
+
+        )
+
+        seq, label, pad_mask = jax.tree_util.tree_map(
+            lambda x: x.squeeze(), (seq, label, pad_mask)
         )
 
         yield {"text": (seq, label, pad_mask)}
