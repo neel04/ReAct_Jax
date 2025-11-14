@@ -1,12 +1,12 @@
 [project]
 name = "react-jax"
-version = "0.1.0"
+version = "0.1.1"
 description = "Add your description here"
 readme = "README.md"
 requires-python = ">=3.11"
 dependencies = [
     "jax==0.7.1",
-    "datasets==4.0.0",
+    "datasets==4.4.1",
     "einops==0.8.1",
     "equinox==0.13.0",
     "jaxtyping==0.3.2",
@@ -21,9 +21,9 @@ dependencies = [
     "pdbpp==0.11.7",
     "jmp",
     "jax-array-info",
-    "wandb==0.18.7",
-    "ruff==0.12.11",
-    "basedpyright==1.31.3",
+    "wandb==0.23.0",
+    "ruff",
+    "basedpyright",
     "jupyter==1.1.1",
     "optax",
     "pylsp-rope==0.1.17",
@@ -31,8 +31,8 @@ dependencies = [
     "hf-xet==1.1.9",
     "huggingface-hub[hf-transfer]==0.34.4",
     "torch==2.8.0",
-    "tensorboard==2.20.0",
-    "tensorboard-plugin-profile==2.20.6",
+    "protobuf>=5.29.5",
+    "xprof>=2.21.1",
 ]
 
 [project.optional-dependencies]
