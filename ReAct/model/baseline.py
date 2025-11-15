@@ -2,12 +2,11 @@ from typing import Any, Optional
 
 import equinox as eqx
 import jax
-import jax.numpy as jnp
 from jaxtyping import Array, PRNGKeyArray, PyTree
 
 from ReAct.utils.sharding import Sharding
 
-from .blocks import AttentionBlock, LinearProj
+from .blocks import AttentionBlock, FastEmbedding, LinearProj
 
 # ruff: noqa: E402, E731
 
@@ -83,7 +82,7 @@ class GPT(eqx.Module):
     __name__ = "GPT"
 
     sharding: Sharding = eqx.field(static=True)
-    embed_layer: eqx.nn.Embedding
+    embed_layer: FastEmbedding
     embed_ln: eqx.nn.LayerNorm
     main_block: VanillaModule
     out_head: LinearProj
@@ -102,13 +101,8 @@ class GPT(eqx.Module):
         self.sharding = strategy
         keys = jax.random.split(key, 3)
 
-        # Custom initialization for the Embedding Layer
-        embed_weights: Array = jax.random.normal(
-            key, (vocab_size, width), dtype=jnp.float32
-        ) * ((2 / (5 * width)) ** 0.5)
-
         self.embed_ln = eqx.nn.LayerNorm(width)
-        self.embed_layer = eqx.nn.Embedding(weight=embed_weights)
+        self.embed_layer = FastEmbedding(vocab_size, width, keys[0], strategy)
 
         self.main_block = VanillaModule(
             seqlen,
