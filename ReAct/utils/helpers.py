@@ -388,7 +388,7 @@ def _build_torch_prefetch_loader(
     return TorchDataLoader(
         loader,  # pyright: ignore[reportArgumentType]
         batch_size=1,
-        num_workers=32,
+        num_workers=32 if os.cpu_count() >= 16 else 1,
         prefetch_factor=prefetch_size,
         persistent_workers=True,
         pin_memory=False,
@@ -403,7 +403,7 @@ def broadcast_batch(
     | IterableDatasetWithLen,
     batch_size: int,
     seqlen: int,
-    prefetch_size: int = 256,
+    prefetch_size: int = 128,
 ) -> Iterator[dict[str, tuple[Array, Array, Array]]]:
     """
     Ensures only process 0 touches the real loader while all hosts receive
