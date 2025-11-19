@@ -35,8 +35,6 @@ from ReAct.utils.helpers import (
     save_eqx_obj,
 )
 from ReAct.utils.losses import (
-    _cross_entropy_with_logits_bwd,
-    _cross_entropy_with_logits_fwd,
     cross_entropy_with_logits,
 )
 from ReAct.utils.muon_modded import muon
@@ -48,7 +46,6 @@ policy = Policy(compute_dtype=half, param_dtype=half, output_dtype=half)
 
 # Assemble stable CE (w/ z-loss) from PaLM
 ce_loss = cross_entropy_with_logits
-ce_loss.defvjp(_cross_entropy_with_logits_fwd, _cross_entropy_with_logits_bwd)
 
 def _iters_fwd(
     model: React, input_arr: Array, pad_mask: Array, iters_to_do: int, key: PRNGKeyArray
@@ -87,21 +84,13 @@ def _compute_softmax_cross_entropy_loss(pred_y: Array, y_one_hot: Array) -> Arra
 
 @eqx.filter_jit(donate="all-except-first")
 def make_step(
-    static_inputs: Tuple[
-        PRNGKeyArray,
-        PyTree,
-        Array,
-        Array,
-        Array,
-        int,
-        GradientTransformation,
-        int,
-        React | GPT
-    ],
+    static_inputs: Tuple[PyTree, int, GradientTransformation, int, React | GPT],
     opt_state: PyTree,
+    batch_inputs: Tuple[Array, Array, Array, PRNGKeyArray],  # x, y, mask, key
 ) -> Tuple[Array, Tuple[React | GPT, PyTree], PyTree, PyTree]:
 
-    keys, filter_spec, x, y, pad_mask, iters_to_do, optim, num_classes, model = static_inputs
+    filter_spec, iters_to_do, optim, num_classes, model = static_inputs
+    x, y, pad_mask, keys = batch_inputs
 
     x, y, pad_mask = strategy.shard_cast((x, y, pad_mask))
     model, opt_state = strategy.shard_model((model, opt_state))
@@ -451,8 +440,9 @@ class Trainer:
         for epoch in range(epoch_done, self.args.epochs):
             train_acc, train_loss, train_ppl = [], [], []
 
-            epoch_key = jnp.array([epoch, epoch + 1]).astype(jnp.uint32)
-            keys = jax.random.split(epoch_key, self.args.batch_size)
+            keys = jax.random.split(
+                jax.random.fold_in(jax.random.PRNGKey(0), epoch), self.args.batch_size
+            )
 
             for step, batch in tqdm(
                 enumerate(
@@ -465,6 +455,7 @@ class Trainer:
             ):
                 step += step_done  # for multiple epochs
                 prof.start_prof(step)
+                step_keys = jax.vmap(lambda x: jax.random.fold_in(x, step))(keys)
 
                 seq, label, pad_mask = batch["text"]
                 seq, label, pad_mask = policy.cast_to_compute((seq, label, pad_mask))
@@ -472,17 +463,14 @@ class Trainer:
 
                 loss, (model, opt_state), grads, updates = make_step(
                     (
-                        keys,
                         filter_spec,
-                        seq,
-                        label,
-                        pad_mask,
                         self.args.max_iters,
                         optim,
                         self.args.num_classes,
-                        model
+                        model,
                     ),
                     opt_state,
+                    (seq, label, pad_mask, step_keys),
                 )
 
                 loss = prof.stop_prof(
@@ -491,7 +479,7 @@ class Trainer:
 
                 if step % 100 == 0:
                     accuracy, loss, perplexity = self.compute_metrics(
-                        keys=keys,
+                        keys=step_keys,
                         model=model,
                         is_baseline=self.args.baseline,
                         input_arr=seq,
@@ -528,7 +516,7 @@ class Trainer:
                     cum_train_ppl = sum(train_ppl) / len(train_ppl)
 
                     # clear the metrics
-                    train_acc, train_loss, train_ppl = [], [], []
+                    _ = train_acc.clear(), train_loss.clear(), train_ppl.clear()
 
                     # Eval on benchmark
                     eval_results = evaluator.run_lm_evaluation(model)
@@ -551,7 +539,7 @@ class Trainer:
                         self.args.baseline,
                         self.valloader,
                         self.args.max_iters,
-                        keys,
+                        step_keys,
                     )
 
                     self.wandb_logger.log(
@@ -568,17 +556,17 @@ class Trainer:
                             "Bench/MMLU_Abstract_Alg_stderr": mmlu_alg_stderr,
                             "Misc/Gradients": wandb.Histogram(
                                 np_histogram=get_hist(
-                                    keys[step % self.args.batch_size], grads
+                                    step_keys, grads
                                 )
                             ),
                             "Misc/Updates": wandb.Histogram(
                                 np_histogram=get_hist(
-                                    keys[step % self.args.batch_size], updates
+                                    step_keys, updates
                                 )
                             ),
                             "Misc/Weights": wandb.Histogram(
                                 np_histogram=get_hist(
-                                    keys[step % self.args.batch_size], model
+                                    step_keys, model
                                 )
                             ),
                         },
@@ -610,10 +598,6 @@ class Trainer:
                         val_sample_x,
                         metadata={"type": "val", "step": step},
                         max_new_tokens=64,
-                    )
-
-                    multihost_utils.sync_global_devices(  # type: ignore
-                        "Sync up all nodes after inference."
                     )
 
                 if not self.args.tune_hyperparams and (step + 1) % self.args.save_interval == 0:

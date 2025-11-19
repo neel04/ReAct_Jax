@@ -385,10 +385,13 @@ def _build_torch_prefetch_loader(
     | IterableDatasetWithLen,
     prefetch_size: int,
 ) -> TorchDataLoader:
+    core_count = os.cpu_count() // 2 if os.cpu_count() >= 16 else 1  # pyright: ignore[reportOptionalOperand]
+    print(f"Using {core_count} cores for the dataloader!")
+
     return TorchDataLoader(
         loader,  # pyright: ignore[reportArgumentType]
         batch_size=1,
-        num_workers=32 if os.cpu_count() >= 16 else 1,
+        num_workers=core_count,
         prefetch_factor=prefetch_size,
         persistent_workers=True,
         pin_memory=False,
