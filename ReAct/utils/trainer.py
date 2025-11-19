@@ -1,3 +1,4 @@
+import gc
 import os
 from functools import partial
 from typing import Any, Callable, Optional, Tuple, Union
@@ -35,6 +36,8 @@ from ReAct.utils.helpers import (
     save_eqx_obj,
 )
 from ReAct.utils.losses import (
+    _cross_entropy_with_logits_bwd,
+    _cross_entropy_with_logits_fwd,
     cross_entropy_with_logits,
 )
 from ReAct.utils.muon_modded import muon
@@ -46,6 +49,7 @@ policy = Policy(compute_dtype=half, param_dtype=half, output_dtype=half)
 
 # Assemble stable CE (w/ z-loss) from PaLM
 ce_loss = cross_entropy_with_logits
+ce_loss.defvjp(_cross_entropy_with_logits_fwd, _cross_entropy_with_logits_bwd)
 
 def _iters_fwd(
     model: React, input_arr: Array, pad_mask: Array, iters_to_do: int, key: PRNGKeyArray
@@ -478,6 +482,11 @@ class Trainer:
                 )  # end trace if profiled
 
                 if step % 100 == 0:
+                    # Re-obtain batch since we `donate`-ed it
+                    seq, label, pad_mask = batch["text"]
+                    seq, label, pad_mask = policy.cast_to_compute((seq, label, pad_mask))
+                    seq, label, pad_mask = strategy.shard_cast((seq, label, pad_mask))
+
                     accuracy, loss, perplexity = self.compute_metrics(
                         keys=step_keys,
                         model=model,
@@ -508,6 +517,8 @@ class Trainer:
                         self.my_logger.warning(f"\nLoss is NaN at step {step}")
                         self.wandb_logger.finish()
                         return loss
+
+                    gc.collect()
 
                 if step % self.args.log_interval == 0 and len(train_acc) > 0:
                     # Compute cumulatives
@@ -556,17 +567,17 @@ class Trainer:
                             "Bench/MMLU_Abstract_Alg_stderr": mmlu_alg_stderr,
                             "Misc/Gradients": wandb.Histogram(
                                 np_histogram=get_hist(
-                                    step_keys, grads
+                                    step_keys[0], grads
                                 )
                             ),
                             "Misc/Updates": wandb.Histogram(
                                 np_histogram=get_hist(
-                                    step_keys, updates
+                                    step_keys[1], updates
                                 )
                             ),
                             "Misc/Weights": wandb.Histogram(
                                 np_histogram=get_hist(
-                                    step_keys, model
+                                    step_keys[2], model
                                 )
                             ),
                         },
@@ -599,6 +610,8 @@ class Trainer:
                         metadata={"type": "val", "step": step},
                         max_new_tokens=64,
                     )
+
+                    multihost_utils.sync_global_devices("post-val sync")
 
                 if not self.args.tune_hyperparams and (step + 1) % self.args.save_interval == 0:
                     filepath = f"{self.args.save_dir}model_{epoch}_{step}.eqx"

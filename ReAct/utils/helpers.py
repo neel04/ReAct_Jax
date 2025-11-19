@@ -23,6 +23,14 @@ class Profiler:
     def __init__(
         self, activate_profiler: bool = True, logdir: str = "./profiles/"
     ) -> None:
+        self.options = jax.profiler.ProfileOptions()
+        self.options.host_tracer_level = 2
+        self.options.device_tracer_level = 1
+        self.options.python_tracer_level = 1
+        self.options.advanced_configuration = {
+            "tpu_trace_mode": "TRACE_COMPUTE_AND_SYNC",
+        }
+
         self.warmup_steps = 100
         self.activate_profiler = activate_profiler
         self.logdir = logdir
@@ -32,15 +40,18 @@ class Profiler:
             if self.activate_profiler:
                 print(f"Started TensorBoard Profiler at: {self.logdir}")
                 jax.profiler.start_trace(
-                    self.logdir, create_perfetto_link=True, create_perfetto_trace=True
+                    self.logdir,
+                    create_perfetto_link=True,
+                    create_perfetto_trace=True,
+                    profiler_options=self.options,
                 )
 
     def stop_prof(self, w_logger: Any, output: Array, step: int) -> Array:
         if step == self.warmup_steps:
             if self.activate_profiler:
-                output = output.block_until_ready() # wait for output
+                output = output.block_until_ready()  # wait for output
                 jax.profiler.stop_trace()
-                print(f'Stopped Profiler at: {self.logdir}')
+                print(f"Stopped Profiler at: {self.logdir}")
                 self.upload_to_wandb(w_logger)
 
             self.activate_profiler = False
@@ -385,7 +396,9 @@ def _build_torch_prefetch_loader(
     | IterableDatasetWithLen,
     prefetch_size: int,
 ) -> TorchDataLoader:
-    core_count = os.cpu_count() // 2 if os.cpu_count() >= 16 else 1  # pyright: ignore[reportOptionalOperand]
+    core_count = 32 if os.cpu_count() >= 32 else 0  # type: ignore
+    prefetch_size: int = None if core_count == 0 else prefetch_size  # type: ignore
+
     print(f"Using {core_count} cores for the dataloader!")
 
     return TorchDataLoader(
@@ -393,7 +406,7 @@ def _build_torch_prefetch_loader(
         batch_size=1,
         num_workers=core_count,
         prefetch_factor=prefetch_size,
-        persistent_workers=True,
+        persistent_workers=True if core_count > 0 else False,
         pin_memory=False,
     )
 

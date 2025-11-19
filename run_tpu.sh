@@ -4,6 +4,7 @@ BRANCH="dev"
 # Define path for RAM disk
 export DISK_PATH="$HOME/workspace"
 export JAX_COMPILATION_CACHE_DIR="/tmp/jax_cache"
+export XLA_PYTHON_CLIENT_MEM_FRACTION=.95
 
 # Export environment variables pointing to the ramdisk
 export TOKENIZERS_PARALLELISM=false
@@ -20,87 +21,61 @@ echo "RAM disk mounted."
 
 # Install gsutil if necessary (part of google-cloud-cli)
 if ! command -v gsutil &> /dev/null; then
-    echo "gsutil not found, installing google-cloud-cli..."
-    sudo apt-get update
-    sudo apt-get install -y google-cloud-cli
+echo "gsutil not found, installing google-cloud-cli..."
+sudo apt-get update
+sudo apt-get install -y google-cloud-cli
 fi
-
-# Prepopulate RAM disk with bucket contents
-sleep 20 && sudo apt-get update && sleep 20
-sudo apt-get install -y p7zip-full
-echo "Copying contents from gs://hf-data-bucket to $DISK_PATH..."
-gsutil -m cp -r gs://hf-data-bucket/hf_data.7z "$DISK_PATH/"
-cd workspace/; 7za x hf_data.7z -mmt=on > /dev/null; cd .. # Unzipping the compressed dataset
-echo "Copy complete."
 
 # Adjust ownership to the current user
 sudo chown -R $(whoami):$(whoami) "$DISK_PATH"
 
 # Other environment variables
-export HF_DATASETS_IN_MEMORY_MAX_SIZE=10000000000 # 10GB
 export jax_threefry_partitionable=1
 export WANDB_API_KEY=78c7285b02548bf0c06dca38776c08bb6018593f
 export HF_TOKEN=$(echo "aGZfandzQmFOaU1lbmduQkJDQm5HeHhVYmlxWm1YQnF0Q2xTaA==" | base64 -d)
 export JAX_TRACEBACK_FILTERING=off
 export DISABLE_MULTIPROC=1
 export LMEVAL_HASHMM=0 #TODO: Remove at some point
+export WANDB_INIT_TIMEOUT=240
 
 # arguments for train_model.py
-TRAIN_ARGS="--save_dir ./ReAct/outputs/ --dataset owt --group owt_repro --exp_logging \
+TRAIN_ARGS="--save_dir ./ReAct/outputs/ --dataset fineweb --group fineweb_100B \
 --log_interval 1500 --save_interval 10000 --seqlen 512 --num_classes 50304 \
 --num_blocks 18 --width 1024 --n_heads 16 --epochs 1 --max_iters 3 \
---batch_size 512 --accum_steps 1 --warmup_steps 1000 \
---lr 9e-4 --beta_1 0.9 --beta_2 0.98 --nesterov \
---weight_decay 3e-3 --drop_rate 0.00 --optimizer_type adamw \
---tune_hyperparams --sweep_metadata _64_OnlyA_ABBA --resume --rank 64"
+--batch_size 128 --accum_steps 4 --warmup_steps 300 \
+--lr 6e-4 --beta_1 0.65 --beta_2 0.8 --nesterov \
+--weight_decay 6e-3 --drop_rate 0.00 --optimizer_type adamw \
+--rank 64 --strategy megatron --model_axis 2"
+
 
 git clone -b $BRANCH https://github.com/neel04/ReAct_Jax.git
-
-FLAG_FILE="./env_flag"
 
 git config --global safe.directory '*'
 cd ReAct_Jax/
 git pull --all
 cd ..
 
-if [ ! -f "$FLAG_FILE" ]; then
-    echo "Setting up environment..."
-    sudo apt-get update -y
-    sudo apt-get install neovim tmux -y
-    
-    # Set default python to python3
-    sudo ln -sf /usr/bin/python3 /usr/bin/python
+echo "Setting up environment..."
+sudo apt-get update -y
+sudo apt-get install neovim tmux -y
 
-    # Create virtual environment
-    pip3 install uv
-    source ~/.profile
-    uv venv 'main_env' --python 3.11
-    source main_env/bin/activate
+# Set default python to python3
+sudo ln -sf /usr/bin/python3 /usr/bin/python
 
-    uv pip install --no-cache-dir "jax[tpu]==0.6.2" -f https://storage.googleapis.com/jax-releases/libtpu_releases.html --prerelease allow
-    uv pip install -q transformers datasets==3.6.0 scalax tokenizers icecream wandb einops torch tqdm jaxtyping optuna equinox rich
-    uv pip install -U optuna-integration plotly pdbpp
-    uv pip install git+https://github.com/neel04/lm-evaluation-harness.git@debug/mp # TODO: Remove my fork
-    uv pip install git+https://github.com/google-deepmind/optax.git
-    uv pip install git+https://github.com/deepmind/jmp
-    uv pip install git+https://github.com/Findus23/jax-array-info.git
-    uv pip install -q tensorflow tensorboard-plugin-profile etils importlib_resources "cloud-tpu-profiler>=2.3.0"
+# Install uv and sync project dependencies (including TPU extra)
+pip3 install -q uv
+source ~/.profile
+pushd ReAct_Jax >/dev/null
+uv sync --extra tpu --python 3.11
+uv pip install git+https://github.com/neel04/lm-evaluation-harness.git@debug/mp # TODO: Remove my fork
+popd >/dev/null
 
-    # ------------------
-    # Create the flag file
-    touch "$FLAG_FILE"
-else
-    echo "Reusing existing venv..."
-fi
-
-echo "Executing train_model.py"
-source main_env/bin/activate
+# ------------------
+# Create the flag file
+echo "Reusing existing venv..."
 
 echo "Executing train_model.py inside uv venv..."
 cd ReAct_Jax/
-python3 train_model.py $TRAIN_ARGS
+uv run train_model.py $TRAIN_ARGS
 
 echo "Finished training!"
-
-#sudo umount "$DISK_PATH"
-#rm -rf "$DISK_PATH"

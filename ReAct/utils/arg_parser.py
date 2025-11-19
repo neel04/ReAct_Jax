@@ -31,7 +31,7 @@ def parse_args() -> TrainingArgs:
         "--strategy",
         type=str,
         default="ddp",
-        help="Parallelization strategy to use. Check `sharding.py` for more info",
+        help="Parallelization strategy to use. Options: ddp | simple mp | megatron",
     )
 
     parser.add_argument(
@@ -430,7 +430,7 @@ def get_evaluation_args() -> EvaluationArgs:
         "--strategy",
         type=str,
         default="ddp",
-        help="Strategy to use when inferencing. DDP should be enough",
+        help="Strategy to use when inferencing/evaluating. Options: ddp | simple mp | megatron",
     )
 
     parser.add_argument(

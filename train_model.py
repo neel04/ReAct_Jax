@@ -70,21 +70,21 @@ def main(key: PRNGKeyArray):
     # ========= Training/Hypertuning =========
     init_hyperparams = [
         {
-            "lr": 1.5e-4,
+            "lr": 2e-4,
             "drop_rate": 0.00,
-            "weight_decay": 5e-3,
+            "weight_decay": 1e-3,
             "warmup_steps": 300,
             "beta_1": 0.75,
             "beta_2": 0.5,
             "nesterov": True,
         },
         {
-            "lr": 1.5e-3,
-            "drop_rate": 0.01,
-            "weight_decay": 9e-4,
+            "lr": 4e-4,
+            "drop_rate": 0.00,
+            "weight_decay": 5e-3,
             "warmup_steps": 500,
-            "beta_1": 0.95,
-            "beta_2": 0.9,
+            "beta_1": 0.65,
+            "beta_2": 0.8,
             "nesterov": False,
         },
     ]

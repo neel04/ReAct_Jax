@@ -75,8 +75,6 @@ class FineWebDataset(ParentDataset):
             streaming=True,
         )
 
-        dataset = dataset.shuffle(seed=42, buffer_size=2 ** 8)
-
         total_batches = dataset.info.splits["train"].num_examples // self.bsz  # type: ignore
         eval_samples = int(total_batches * 0.01)  # 1% for eval
 
@@ -117,6 +115,8 @@ class FineWebDataset(ParentDataset):
         dataset.with_format(type="numpy") # type: ignore
 
         print(f"Created streaming {split} dataset from FinewWeb")
+
+        dataset = dataset.shuffle(seed=42, buffer_size=2 ** 8)
 
         return IterableDatasetWithLen(dataset, _length)
 
