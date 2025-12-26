@@ -17,7 +17,7 @@ class FineWebDataset(ParentDataset):
             hf_username="Neel-Gupta",
             hf_dataset="fineweb",
             tgt_hf_repo="HuggingFaceFW/fineweb",
-            hf_subset_name="sample-350BT",
+            hf_subset_name="sample-100BT",
             max_length=seqlen,
             bsz=batch_size,
         )
@@ -43,13 +43,13 @@ class FineWebDataset(ParentDataset):
     ):
         """
         Override parent method to use streaming=True and implement train/test split
-        using take/skip for the massive FinewWeb dataset (~80B tokens).
+        using take/skip for the massive FinewWeb dataset (~100B tokens).
 
         For eval, we use ~1% of data (~1B tokens) which should be sufficient.
         """
         # No need for data preprocessing on non-primary processes
         if jax.process_index() != 0:
-            total_batches = 518458467 // self.bsz  # type: ignore
+            total_batches = 147639585 // self.bsz
             eval_samples = int(total_batches * 0.01)
 
             if split == "train":
