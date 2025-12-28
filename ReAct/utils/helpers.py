@@ -6,6 +6,7 @@ from typing import Any, Callable, Iterator, List, Optional, Tuple, TypeVar
 import equinox as eqx
 import jax
 import jax.numpy as jnp
+import numpy as np
 import regex as re
 from datasets.arrow_dataset import Dataset
 from datasets.dataset_dict import DatasetDict, IterableDatasetDict
@@ -223,6 +224,34 @@ def get_hist(key: PRNGKeyArray, tree: PyTree, num_bins: int = 64) -> Any:
         leaves, bins=num_bins, range=(jnp.nanmin(leaves), jnp.nanmax(leaves))
     )
 
+
+@eqx.filter_jit
+def chunked_histogram(key: PRNGKeyArray, tree: PyTree, num_bins: int = 64):
+    """
+    Compute histogram in a blockwise fashion.
+    """
+    # 1. Global Pass: Find global Min/Max
+    # Map each leaf to its scalar min/max
+    mins = jax.tree.map(jnp.nanmin, tree)
+    maxs = jax.tree.map(jnp.nanmax, tree)
+
+    # Reduce scalar leaves to global scalars
+    g_min = jax.tree_util.tree_reduce(jnp.fmin, mins, initializer=jnp.inf)
+    g_max = jax.tree_util.tree_reduce(jnp.fmax, maxs, initializer=-jnp.inf)
+
+    # 2. Local Pass: Compute histogram for each leaf using GLOBAL range
+    def leaf_hist(leaf: PyTree):
+        counts, _ = jnp.histogram(leaf, bins=num_bins, range=(g_min, g_max))
+        return counts.astype(jnp.float32)
+
+    # Map to get counts per leaf, then reduce (sum) them
+    leaf_counts = jax.tree.map(leaf_hist, tree)
+    total_counts = jax.tree_util.tree_reduce(jnp.add, leaf_counts)
+
+    # Recreate bin edges (cheap linear space)
+    bin_edges = jnp.linspace(g_min, g_max, num_bins + 1)
+
+    return total_counts, bin_edges
 
 def save_eqx_obj(save_dir: str, filename: str, obj: tuple):
     if not os.path.exists(save_dir):

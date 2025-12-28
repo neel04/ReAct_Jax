@@ -28,6 +28,7 @@ from ReAct.utils.helpers import (
     Profiler,
     broadcast_batch,
     calc_performance_metrics,
+    chunked_histogram,
     count_params,
     get_hist,
     get_weights,
@@ -566,19 +567,13 @@ class Trainer:
                             "Bench/MMLU_Abstract_Alg_acc": mmlu_alg_acc,
                             "Bench/MMLU_Abstract_Alg_stderr": mmlu_alg_stderr,
                             "Misc/Gradients": wandb.Histogram(
-                                np_histogram=get_hist(
-                                    step_keys[0], grads
-                                )
+                                np_histogram=chunked_histogram(step_keys[0], grads)
                             ),
                             "Misc/Updates": wandb.Histogram(
-                                np_histogram=get_hist(
-                                    step_keys[1], updates
-                                )
+                                np_histogram=chunked_histogram(step_keys[1], updates)
                             ),
                             "Misc/Weights": wandb.Histogram(
-                                np_histogram=get_hist(
-                                    step_keys[2], model
-                                )
+                                np_histogram=chunked_histogram(step_keys[2], model)
                             ),
                         },
                         step=step,
