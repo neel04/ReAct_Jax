@@ -37,8 +37,7 @@ from ReAct.utils.helpers import (
     save_eqx_obj,
 )
 from ReAct.utils.losses import (
-    _cross_entropy_with_logits_bwd,
-    _cross_entropy_with_logits_fwd,
+    cross_entropy_with_lm_head_blockwise,
     cross_entropy_with_logits,
 )
 from ReAct.utils.muon_modded import muon
@@ -48,29 +47,32 @@ get_linear_weights = partial(get_weights, layer=LinearProj)
 half, full = jnp.bfloat16, jnp.float32
 policy = Policy(compute_dtype=half, param_dtype=half, output_dtype=half)
 
-# Assemble stable CE (w/ z-loss) from PaLM
-ce_loss = cross_entropy_with_logits
-ce_loss.defvjp(_cross_entropy_with_logits_fwd, _cross_entropy_with_logits_bwd)
+# Stable CE (w/ z-loss). Use blockwise LM-head version for training.
+train_ce_loss = cross_entropy_with_lm_head_blockwise
+eval_ce_loss = cross_entropy_with_logits
 
 def _iters_fwd(
     model: React, input_arr: Array, pad_mask: Array, iters_to_do: int, key: PRNGKeyArray
 ) -> Array:
     # Only n passes, but track the gradient
-    output, _ = model(
+    output = model(
         input_arr,
         iters_to_do=iters_to_do,
         pad_mask=pad_mask,
         prev_thought=False,
         is_training=True,
         key=key,
+        return_logits=False,
     )
+
+    assert isinstance(output, Array) # ensure no logits are produced
 
     return output
 
 def _vanilla_fwd(
     model: GPT, input_arr: Array, pad_mask: Array, iters_to_do: int, key: PRNGKeyArray
 ) -> Array:
-    return model(input_arr, pad_mask, enable_dropout=True, key=key)
+    return model(input_arr, pad_mask, enable_dropout=True, key=key, return_logits=False)
 
 
 @eqx.filter_jit
@@ -82,10 +84,15 @@ def forward(model: React | GPT, args: Tuple[Any, ...]) -> Array:
 
 
 @eqx.filter_jit
-def _compute_softmax_cross_entropy_loss(pred_y: Array, y_one_hot: Array) -> Array:
-    loss, _  = ce_loss(pred_y, y_one_hot) # (batch_size, seqlen)
+def _compute_softmax_cross_entropy_loss(
+    pred_embeddings: Array,
+    lm_head_weight: Array,
+    lm_head_bias: Array,
+    labels: Array,
+) -> Array:
+    loss, _ = train_ce_loss(pred_embeddings, lm_head_weight, lm_head_bias, labels)
 
-    return loss.mean()
+    return loss
 
 @eqx.filter_jit(donate="all-except-first")
 def make_step(
@@ -115,13 +122,11 @@ def make_step(
         """
         Computes the loss of the model w.r.t the input.
         """
-        pred_y = forward(model, args=(x, pad_mask, iters_to_do, keys))  # (batch_size, seqlen, num_classes)
+        pred_embeddings = forward(model, args=(x, pad_mask, iters_to_do, keys))  # (batch_size, seqlen, width)
 
-        y_one_hot = jax.nn.one_hot(
-            y, num_classes=num_classes
-        )  # (batch_size, seqlen, num_classes)
-
-        loss = _compute_softmax_cross_entropy_loss(pred_y, y_one_hot)
+        loss = _compute_softmax_cross_entropy_loss(
+            pred_embeddings, model.out_head.weight, model.out_head.bias, y
+        )
 
         return loss
 
@@ -393,7 +398,7 @@ class Trainer:
 
         # compute loss
         y_one_hot = jax.nn.one_hot(label, num_classes=num_classes) # (batch_size, seqlen, num_classes)
-        loss = ce_loss(pred_y, y_one_hot)[0].mean()
+        loss = eval_ce_loss(pred_y, y_one_hot)[0].mean()
 
         # compute perplexity
         perplexity = jnp.exp(loss)
@@ -567,13 +572,13 @@ class Trainer:
                             "Bench/MMLU_Abstract_Alg_acc": mmlu_alg_acc,
                             "Bench/MMLU_Abstract_Alg_stderr": mmlu_alg_stderr,
                             "Misc/Gradients": wandb.Histogram(
-                                np_histogram=chunked_histogram(step_keys[0], grads)
+                                np_histogram=chunked_histogram(step_keys[0], grads)  # pyright: ignore[reportArgumentType]
                             ),
                             "Misc/Updates": wandb.Histogram(
-                                np_histogram=chunked_histogram(step_keys[1], updates)
+                                np_histogram=chunked_histogram(step_keys[1], updates)  # pyright: ignore[reportArgumentType]
                             ),
                             "Misc/Weights": wandb.Histogram(
-                                np_histogram=chunked_histogram(step_keys[2], model)
+                                np_histogram=chunked_histogram(step_keys[2], model)  # pyright: ignore[reportArgumentType]
                             ),
                         },
                         step=step,

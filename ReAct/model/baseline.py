@@ -120,7 +120,13 @@ class GPT(eqx.Module):
 
     @eqx.filter_jit
     def __call__(
-        self, input_arr: Array, pad_mask: Array, enable_dropout: bool, key: PRNGKeyArray
+        self,
+        input_arr: Array,
+        pad_mask: Array,
+        enable_dropout: bool,
+        key: PRNGKeyArray,
+        *,
+        return_logits: bool = True,
     ) -> Array:
         embed_fn = lambda x: self.embed_ln(self.embed_layer(x))
 
@@ -132,4 +138,7 @@ class GPT(eqx.Module):
 
         output = self.main_block(input_arr, pad_mask, enable_dropout, key)
 
-        return self.out_head(output)
+        if return_logits:
+            return self.out_head(output)
+
+        return output

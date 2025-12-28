@@ -261,7 +261,9 @@ class React(eqx.Module):
         prev_thought: bool = False,
         is_training: bool = True,
         key: PRNGKeyArray = jax.random.PRNGKey(0),
-    ) -> Tuple[Array, Array]:
+        *,
+        return_logits: bool = True,
+    ) -> Tuple[Array, Array] | Array:
 
         embed_fn = lambda x: self.embed_ln(self.embed_layer(x))
 
@@ -281,4 +283,7 @@ class React(eqx.Module):
 
         output = jax.vmap(self.unemb_ln)(output)
 
-        return self.out_head(output), output
+        if return_logits:
+            return self.out_head(output), output
+
+        return output
