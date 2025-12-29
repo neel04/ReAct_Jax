@@ -96,13 +96,15 @@ def _compute_softmax_cross_entropy_loss(
 
 @eqx.filter_jit(donate="all-except-first")
 def make_step(
-    static_inputs: Tuple[PyTree, int, GradientTransformation, int, React | GPT],
+    static_inputs: Tuple[
+        PyTree, int, GradientTransformation, int, React | GPT, PRNGKeyArray
+    ],
     opt_state: PyTree,
-    batch_inputs: Tuple[Array, Array, Array, PRNGKeyArray],  # x, y, mask, key
+    batch_inputs: Tuple[Array, Array, Array],  # x, y, mask, key
 ) -> Tuple[Array, Tuple[React | GPT, PyTree], PyTree, PyTree]:
 
-    filter_spec, iters_to_do, optim, num_classes, model = static_inputs
-    x, y, pad_mask, keys = batch_inputs
+    filter_spec, iters_to_do, optim, num_classes, model, keys = static_inputs
+    x, y, pad_mask = batch_inputs
 
     x, y, pad_mask = strategy.shard_cast((x, y, pad_mask))
     model, opt_state = strategy.shard_model((model, opt_state))
@@ -478,9 +480,10 @@ class Trainer:
                         optim,
                         self.args.num_classes,
                         model,
+                        step_keys,
                     ),
                     opt_state,
-                    (seq, label, pad_mask, step_keys),
+                    (seq, label, pad_mask),
                 )
 
                 loss = prof.stop_prof(
