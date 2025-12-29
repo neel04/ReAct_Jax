@@ -422,8 +422,7 @@ class UnsharedBlock(eqx.Module, Generic[L]):
 
         with jax.ensure_compile_time_eval():
             branches = tuple(apply_fn(i) for i in range(len(layers)))
-
-            return branches[iteration_index](args)
+            return jax.lax.switch(iteration_index, branches, args)
 
 class NDRAttentionBlock(eqx.Module):
     """CopyGated Augmented block inspired by Csordas et al."""
