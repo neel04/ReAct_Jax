@@ -119,7 +119,7 @@ def cross_entropy_with_lm_head_blockwise(
     lm_head_bias: Array,
     labels: Array,
     z_loss: float = 1e-4,
-    block_size: int = 4096,
+    block_size: int = 2048,
     dtype: Optional[jnp.dtype] = jnp.float32,
 ) -> Tuple[Array, Array]:
     """Blockwise CE that consumes embeddings and LM head weights."""
