@@ -6,7 +6,6 @@ import jax
 import jax.numpy as jnp
 from equinox.nn import LayerNorm
 from jaxtyping import Array, PRNGKeyArray, PyTree
-from jmp import Policy
 
 from ReAct.utils.sharding import Sharding
 
@@ -226,7 +225,6 @@ class React(eqx.Module):
 
         interim_thought, input_arr, mask = self.sharding.cast((interim_thought, input_arr, mask))
         
-        @partial(jax.remat, static_argnums=(1,))
         def body_fun(input: Array, idx: int) -> Tuple[Array, Array]:
             latent = self.main_block(
                 input,
@@ -245,10 +243,13 @@ class React(eqx.Module):
 
             return latent, latent
 
-        output = interim_thought
-
-        for idx in range(iters_to_do):
-            output, _ = body_fun(output, idx)
+        output, _ = eqx.internal.scan(
+            body_fun,
+            interim_thought,
+            jnp.arange(iters_to_do),  # pyright: ignore[reportArgumentType]
+            kind="checkpointed",
+            checkpoints=iters_to_do
+        )
 
         return output
 
