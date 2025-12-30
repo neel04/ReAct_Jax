@@ -400,7 +400,7 @@ class UnsharedBlock(eqx.Module, Generic[L]):
     def apply_layer(
         self,
         name: str,
-        iteration_index: int | Array,
+        iteration_index: int,
         args: Tuple,
         modifier_fn: Callable = lambda x: x,
     ) -> Array:
@@ -421,8 +421,7 @@ class UnsharedBlock(eqx.Module, Generic[L]):
             return layer_apply
 
         with jax.ensure_compile_time_eval():
-            branches = tuple(apply_fn(i) for i in range(len(layers)))
-            return branches[iteration_index](args)
+            return eqx.filter_jit(apply_fn(iteration_index))(args)
 
 class NDRAttentionBlock(eqx.Module):
     """CopyGated Augmented block inspired by Csordas et al."""
