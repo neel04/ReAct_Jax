@@ -244,12 +244,10 @@ class React(eqx.Module):
 
             return latent, latent
 
-        output, _ = jax.lax.scan(
-            body_fun,
-            interim_thought,
-            jnp.arange(iters_to_do),  # pyright: ignore[reportArgumentType]
-            unroll=True
-        )
+        output = interim_thought
+
+        for idx in range(iters_to_do):
+            output, _ = body_fun(output, idx)
 
         return output
 
