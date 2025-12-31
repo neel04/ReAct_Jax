@@ -178,8 +178,8 @@ def parse_args() -> TrainingArgs:
     parser.add_argument(
         "--bench_task",
         type=str,
-        default="lambada_openai,mmlu_abstract_algebra",
-        help="Task to benchmark during training. Defauls: lambada_openai and MMLU (Abstract Algebra)",
+        default="lambada_openai,winogrande",
+        help="Task to benchmark during training. Defauls: lambada_openai and winogrande",
     )
 
     parser.add_argument(
@@ -436,8 +436,8 @@ def get_evaluation_args() -> EvaluationArgs:
     parser.add_argument(
         "--bench_task",
         type=str,
-        default="lambada_openai,mmlu_abstract_algebra",
-        help="Task to benchmark during training. Defauls: lambada_openai and MMLU (Abstract Algebra)",
+        default="lambada_openai,winogrande",
+        help="Task to benchmark during training. Defauls: lambada_openai and winogrande",
     )
 
     args = parser.parse_args()
