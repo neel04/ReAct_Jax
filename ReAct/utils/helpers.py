@@ -1,12 +1,13 @@
 import math
 import os
+from contextlib import contextmanager
 from logging import Logger
+from pathlib import Path
 from typing import Any, Callable, Iterator, List, Optional, Tuple, TypeVar
 
 import equinox as eqx
 import jax
 import jax.numpy as jnp
-import numpy as np
 import regex as re
 from datasets.arrow_dataset import Dataset
 from datasets.dataset_dict import DatasetDict, IterableDatasetDict
@@ -19,6 +20,15 @@ from torch.utils.data import DataLoader as TorchDataLoader
 import wandb
 
 T = TypeVar('T')
+
+@contextmanager
+def temp_cwd(path: Path):
+    prev_cwd = Path.cwd()
+    os.chdir(path)
+    try:
+        yield
+    finally:
+        os.chdir(prev_cwd)
 
 class Profiler:
     def __init__(
@@ -433,12 +443,39 @@ def _build_torch_prefetch_loader(
     return TorchDataLoader(
         loader,  # pyright: ignore[reportArgumentType]
         batch_size=1,
-        num_workers=core_count,
-        prefetch_factor=prefetch_size,
-        persistent_workers=True if core_count > 0 else False,
+        num_workers=0,
+        # prefetch_factor=prefetch_size,
+        # persistent_workers=True if core_count > 0 else False,
         pin_memory=False,
     )
 
+def block_prefetcher(loader: Iterator[Any], prefetch_size: int = 512):
+    sentinel = object()
+
+    def fill_buffer():
+        buffer = []
+
+        for _ in range(prefetch_size):
+            try:
+                buffer.append(next(loader))
+            except StopIteration:
+                break
+
+        buffer.append(sentinel)
+        return buffer
+
+    buffer = fill_buffer()
+
+    while True:
+        for item in buffer:
+            if item is sentinel:
+                break
+            yield item
+
+        if len(buffer) <= 1:
+            break
+
+        buffer = fill_buffer()
 
 def broadcast_batch(
     loader: Dataset
@@ -459,8 +496,7 @@ def broadcast_batch(
     is_primary = jax.process_index() == 0
 
     if is_primary:
-        torch_loader = _build_torch_prefetch_loader(loader, prefetch_size)
-        iterator: Iterator[Any] = iter(torch_loader)
+        iterator: Iterator[Any] = block_prefetcher(iter(loader)) # FIX: Bypasses torch dataloader
     else:
         iterator = iter(range(len(loader)))  # pyright: ignore[reportArgumentType]
 

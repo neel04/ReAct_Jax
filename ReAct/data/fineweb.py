@@ -1,15 +1,18 @@
+import os
 from functools import partial
+from pathlib import Path
 from typing import Callable
 
+import jax
+import torch.multiprocessing as multiprocessing
 from datasets.arrow_dataset import Dataset as HFDataset
 from datasets.iterable_dataset import IterableDataset
 from datasets.load import load_dataset
-import jax
+from huggingface_hub import snapshot_download
 
-from ReAct.utils.helpers import IterableDatasetWithLen
+from ReAct.utils.helpers import IterableDatasetWithLen, temp_cwd
 
 from .dataset import ParentDataset
-
 
 class FineWebDataset(ParentDataset):
     def __init__(self, seqlen: int, batch_size: int) -> None:
@@ -32,6 +35,23 @@ class FineWebDataset(ParentDataset):
             )
 
         return dataset_map_fn
+
+    def predownload_dataset(self) -> None:
+        disk_path = os.getenv("DISK_PATH")
+
+        if not disk_path:
+            raise EnvironmentError("DISK_PATH is not set.")
+
+        base_dir = Path(disk_path)
+        base_dir.mkdir(parents=True, exist_ok=True)
+
+        with temp_cwd(base_dir):
+            snapshot_download(
+                repo_id="HuggingFaceFW/fineweb",
+                repo_type="dataset",
+                local_dir="./fineweb-sample-100BT",
+                allow_patterns=["sample/100BT/*"],
+            )
 
     def create_dataloader(
         self,
@@ -66,16 +86,34 @@ class FineWebDataset(ParentDataset):
                 HFDataset.from_dict({"text": "Dummy dataset :)"}), _length
             )
 
-        dataset: IterableDataset = load_dataset(  # pyright: ignore[reportAssignmentType]
-            self.tgt_hf_repo,
-            name=self.hf_subset_name,
-            split="train",
-            verification_mode="no_checks",
-            trust_remote_code=True,
-            streaming=True,
-        )
+        disk_path = os.getenv("DISK_PATH")
+        local_dir = Path(disk_path) / "fineweb-sample-100BT" if disk_path else None
 
-        total_batches = dataset.info.splits["train"].num_examples // self.bsz  # type: ignore
+        if local_dir and not local_dir.exists():
+            try:
+                self.predownload_dataset()
+            except Exception as exc:
+                print(f"Predownload failed, falling back to HF streaming: {exc}")
+
+        if local_dir and local_dir.exists():
+            dataset: IterableDataset = load_dataset(  # pyright: ignore[reportAssignmentType]
+                "parquet",
+                data_dir=str(local_dir),
+                split="train",
+                verification_mode="no_checks",
+                streaming=True,
+            )
+        else:
+            dataset = load_dataset(  # pyright: ignore[reportAssignmentType]
+                self.tgt_hf_repo,
+                name=self.hf_subset_name,
+                split="train",
+                verification_mode="no_checks",
+                trust_remote_code=True,
+                streaming=True,
+            )
+
+        total_batches = 147639585 // self.bsz
         eval_samples = int(total_batches * 0.01)  # 1% for eval
 
         dataset = dataset.select_columns(self.col_name)
@@ -119,4 +157,3 @@ class FineWebDataset(ParentDataset):
         dataset = dataset.shuffle(seed=42, buffer_size=2 ** 8)
 
         return IterableDatasetWithLen(dataset, _length)
-
