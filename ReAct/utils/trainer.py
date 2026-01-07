@@ -470,7 +470,7 @@ class Trainer:
 
                 loss, (model, opt_state), grads, updates = make_step(
                     (
-                        filter_spec,
+                        self.get_filterspec(model, step),
                         self.args.max_iters,
                         optim,
                         self.args.num_classes,

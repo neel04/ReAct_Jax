@@ -59,6 +59,8 @@ def _init_weight(input_dim: int, output_dim: int, key: PRNGKeyArray) -> Array:
         key, (input_dim, output_dim), minval=-lim, maxval=lim
     ) * math.sqrt(1 / (3 * input_dim))
 
+def _zero_init(input_dim: int, output_dim: int) -> Array:
+    return jnp.zeros((input_dim, output_dim))
 
 class LinearProj(eqx.Module):
     bias: jax.Array
@@ -334,7 +336,7 @@ class ABBA(eqx.Module):
         self.B_1 = _init_weight(in_dim, rank, key1)
         self.A_1 = _init_weight(rank, out_dim, key2)
 
-        self.B_2 = _init_weight(in_dim, rank, key3)
+        self.B_2 = _zero_init(in_dim, rank)
         self.A_2 = _init_weight(rank, out_dim, key4)
 
     def __call__(self, x: Float[Array, "... in_dim"]) -> Float[Array, "... out_dim"]:
