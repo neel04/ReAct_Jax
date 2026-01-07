@@ -264,6 +264,7 @@ def get_leaves(x: T) -> T:
         jax.tree_util.tree_flatten(x, eqx.is_array)[0]
     )[0]
 
+@eqx.filter_jit(donate="all-except-first")
 def load_eqx_obj(filepath: str, obj: PyTree[Any]) -> PyTree[Any]:
     return eqx.tree_deserialise_leaves(path_or_file=filepath, like=obj)
 

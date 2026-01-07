@@ -136,7 +136,7 @@ def main(key: PRNGKeyArray):
                 consider_endpoints=True,
                 multivariate=True,
                 warn_independent_sampling=True,
-                n_startup_trials=10,
+                n_startup_trials=20,
             ),
             pruner=optuna.pruners.PercentilePruner(
                 percentile=25.0, n_startup_trials=5, n_min_trials=5, n_warmup_steps=1500
