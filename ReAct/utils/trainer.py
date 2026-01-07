@@ -30,7 +30,6 @@ from ReAct.utils.helpers import (
     calc_performance_metrics,
     chunked_histogram,
     count_params,
-    get_hist,
     get_weights,
     load_eqx_obj,
     megatron_init,
@@ -53,7 +52,12 @@ ce_loss = cross_entropy_with_logits
 ce_loss.defvjp(_cross_entropy_with_logits_fwd, _cross_entropy_with_logits_bwd)
 
 def _iters_fwd(
-    model: React, input_arr: Array, pad_mask: Array, iters_to_do: int, key: PRNGKeyArray
+    model: React,
+    input_arr: Array,
+    pad_mask: Array,
+    iters_to_do: int,
+    stop_grad: bool,
+    key: PRNGKeyArray,
 ) -> Array:
     # Only n passes, but track the gradient
     output, _ = model(
@@ -62,13 +66,19 @@ def _iters_fwd(
         pad_mask=pad_mask,
         prev_thought=False,
         is_training=True,
+        stop_grad=stop_grad,
         key=key,
     )
 
     return output
 
 def _vanilla_fwd(
-    model: GPT, input_arr: Array, pad_mask: Array, iters_to_do: int, key: PRNGKeyArray
+    model: GPT,
+    input_arr: Array,
+    pad_mask: Array,
+    iters_to_do: int,
+    stop_grad: bool,
+    key: PRNGKeyArray,
 ) -> Array:
     return model(input_arr, pad_mask, enable_dropout=True, key=key)
 
@@ -76,9 +86,9 @@ def _vanilla_fwd(
 @eqx.filter_jit
 def forward(model: React | GPT, args: Tuple[Any, ...]) -> Array:
     if isinstance(model, React):
-        return jax.vmap(_iters_fwd, in_axes=(None, 0, 0, None, 0))(model, *args)
+        return jax.vmap(_iters_fwd, in_axes=(None, 0, 0, None, None, 0))(model, *args)
     else:
-        return jax.vmap(_vanilla_fwd, in_axes=(None, 0, 0, None, 0))(model, *args)
+        return jax.vmap(_vanilla_fwd, in_axes=(None, 0, 0, None, None, 0))(model, *args)
 
 
 @eqx.filter_jit
@@ -90,13 +100,13 @@ def _compute_softmax_cross_entropy_loss(pred_y: Array, y_one_hot: Array) -> Arra
 @eqx.filter_jit(donate="all-except-first")
 def make_step(
     static_inputs: Tuple[
-        PyTree, int, GradientTransformation, int, React | GPT, PRNGKeyArray
+        PyTree, int, GradientTransformation, int, React | GPT, bool, PRNGKeyArray
     ],
     opt_state: PyTree,
     batch_inputs: Tuple[Array, Array, Array],  # x, y, mask, key
 ) -> Tuple[Array, Tuple[React | GPT, PyTree], PyTree, PyTree]:
 
-    filter_spec, iters_to_do, optim, num_classes, model, keys = static_inputs
+    filter_spec, iters_to_do, optim, num_classes, model, stop_grad, keys = static_inputs
     x, y, pad_mask = batch_inputs
 
     x, y, pad_mask = strategy.shard_cast((x, y, pad_mask))
@@ -111,13 +121,16 @@ def make_step(
         y: Array,
         pad_mask: Array,
         iters_to_do: int,
+        stop_grad: bool,
         num_classes: int,
         keys: PRNGKeyArray,
     ) -> Array:
         """
         Computes the loss of the model w.r.t the input.
         """
-        pred_y = forward(model, args=(x, pad_mask, iters_to_do, keys))  # (batch_size, seqlen, num_classes)
+        pred_y = forward(
+            model, args=(x, pad_mask, iters_to_do, stop_grad, keys)
+        )  # (batch_size, seqlen, num_classes)
 
         y_one_hot = jax.nn.one_hot(
             y, num_classes=num_classes
@@ -127,7 +140,9 @@ def make_step(
 
         return loss
 
-    loss, grads = compute_loss(model, x, y, pad_mask, iters_to_do, num_classes, keys)
+    loss, grads = compute_loss(
+        model, x, y, pad_mask, iters_to_do, stop_grad, num_classes, keys
+    )
     grads = strategy.shard_model_cast(grads)  # cast to bfloat16
     updates, opt_state = optim.update(grads, opt_state, dynamic_model)
     updates = strategy.shard_model(updates)
@@ -462,6 +477,7 @@ class Trainer:
             ):
                 step += step_done  # for multiple epochs
                 prof.start_prof(step)
+                stop_grad = step >= 15_000
                 step_keys = jax.vmap(lambda x: jax.random.fold_in(x, step))(keys)
 
                 seq, label, pad_mask = batch["text"]
@@ -470,11 +486,12 @@ class Trainer:
 
                 loss, (model, opt_state), grads, updates = make_step(
                     (
-                        self.get_filterspec(model, step),
+                        filter_spec,
                         self.args.max_iters,
                         optim,
                         self.args.num_classes,
                         model,
+                        stop_grad,
                         step_keys,
                     ),
                     opt_state,

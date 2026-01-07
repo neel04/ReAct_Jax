@@ -469,7 +469,13 @@ def broadcast_batch(
 
     for batch in iterator:
         if is_primary:
-            seq, label, pad_mask = jnp.asarray(batch["text"])  # type: ignore[index]
+            extracted_batch = batch["text"]
+
+            extracted_batch = (
+                extracted_batch[0] if len(extracted_batch) != 3 else extracted_batch
+            )
+
+            seq, label, pad_mask = jnp.asarray(extracted_batch)
         else:
             seq = label = pad_mask = zero_batch
 

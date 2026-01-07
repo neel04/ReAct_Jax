@@ -110,6 +110,7 @@ class RecurrentModule(eqx.Module):
         pad_mask: Array,
         enable_dropout: bool,
         iteration_index: int,
+        stop_grad: bool,
         key: PRNGKeyArray,
     ) -> Array:
 
@@ -130,7 +131,14 @@ class RecurrentModule(eqx.Module):
 
             blck_global_idx = idx + (self.max_iters * iteration_index)
 
-            x = layer(x, iteration_index, pad_mask, enable_dropout, keys[blck_global_idx])
+            x = layer(
+                x,
+                iteration_index,
+                pad_mask,
+                enable_dropout,
+                stop_grad,
+                keys[blck_global_idx],
+            )
 
             x = self.unshared_layers.apply_layer(
                 "post_ln", iteration_index, (x,), eqx.filter_vmap
@@ -218,6 +226,7 @@ class React(eqx.Module):
         mask: Array,
         iters_to_do: int,
         enable_dropout: bool,
+        stop_grad: bool,
         key: PRNGKeyArray,
     ) -> Array:
         
@@ -233,6 +242,7 @@ class React(eqx.Module):
                 mask,
                 enable_dropout,
                 idx,
+                stop_grad,
                 keys[idx],
             )  # (seqlen, width)
 
@@ -262,6 +272,7 @@ class React(eqx.Module):
         key: PRNGKeyArray = jax.random.PRNGKey(0),
         *,
         return_logits: bool = True,
+        stop_grad: bool = False
     ) -> Tuple[Array, Array] | Array:
 
         embed_fn = lambda x: self.embed_ln(self.embed_layer(x))
@@ -277,7 +288,13 @@ class React(eqx.Module):
         input_arr, interim_thought = self.sharding.cast((input_arr, interim_thought))
 
         output = self.iterate_for_steps(
-            interim_thought, input_arr, pad_mask, iters_to_do, is_training, key
+            interim_thought,
+            input_arr,
+            pad_mask,
+            iters_to_do,
+            is_training,
+            stop_grad,
+            key,
         )  # (batch, seqlen, bottleneck)
 
         output = jax.vmap(self.unemb_ln)(output)

@@ -303,7 +303,7 @@ class CopyGate(eqx.Module):
     def __call__(
         self, input: Array, key: PRNGKeyArray, enable_dropout: bool = True
     ) -> Array:
-        return jax.nn.sigmoid(self.gating_layer(input, enable_dropout, key))
+        return jax.nn.sigmoid(self.gating_layer(input, enable_dropout, key=key))
 
 
 class ABBA(eqx.Module):
@@ -386,7 +386,8 @@ class UnsharedBlock(eqx.Module, Generic[L]):
 
         self.layers = {
             name: tuple(
-                self.init_layer(layer_init, keys, i) for i in range(num_repeats)
+                self.init_layer(layer_init, keys, i)  # pyright: ignore[reportArgumentType]
+                for i in range(num_repeats)
             )
             for name, layer_init in layers.items()
         }
@@ -659,13 +660,20 @@ class AdaptableAttentionBlock(eqx.Module):
 
         return mask
 
-    def _apply_lora(self, name: str, idx: int) -> Callable[[Array], Array]:
+    def _apply_lora(
+        self, name: str, idx: int, stop_grad: bool = False
+    ) -> Callable[[Array], Array]:
         """
         Helper function that applies non-linear LoRA-like transformation
         """
 
         def _apply(x: Array) -> Array:
-            return self.act(self.unshared_layers.apply_layer(name, idx, (x,)))
+            out = self.act(self.unshared_layers.apply_layer(name, idx, (x,)))
+
+            if stop_grad:
+                return out
+            else:
+                return jax.lax.stop_gradient(out)
 
         return _apply
 
@@ -676,6 +684,7 @@ class AdaptableAttentionBlock(eqx.Module):
         it_idx: int,  # iteration index
         mask: Array,
         enable_dropout: bool,
+        stop_grad: bool,
         key: PRNGKeyArray,
     ) -> Float[Array, "seqlen in_dim"]:
         key_1, key_2 = jax.random.split(key, 2)
@@ -684,7 +693,7 @@ class AdaptableAttentionBlock(eqx.Module):
 
         x = jax.vmap(self.ln1)(inp)
 
-        attn_lora = self._apply_lora("Attn_adapter_A", it_idx)(x)
+        attn_lora = self._apply_lora("Attn_adapter_A", it_idx, stop_grad)(x)
 
         inp += self.attn_gate(
             query=x,
@@ -700,7 +709,7 @@ class AdaptableAttentionBlock(eqx.Module):
 
         x = jax.vmap(self.ln2)(inp)
 
-        mlp_lora = self._apply_lora("MLP_adapter_A", it_idx)(x)
+        mlp_lora = self._apply_lora("MLP_adapter_A", it_idx, stop_grad)(x)
 
         inp += self.mlp(x, enable_dropout=True, key=key_2) + mlp_lora
 
