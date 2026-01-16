@@ -4,6 +4,8 @@ import random
 import time
 from typing import Any
 
+import jax
+
 import wandb
 
 
@@ -46,7 +48,8 @@ class UnifiedLogger:
             wandb_id = args.resume.split("+")[0].split("/")[-1].strip()
 
         # Stagger across hosts to prevent hitting W&B rate limits
-        time.sleep(random.uniform(0, 240))
+        if jax.default_backend() != "cpu":
+            time.sleep(random.uniform(0, 240))
 
         run = wandb.init(
             entity="neel",
