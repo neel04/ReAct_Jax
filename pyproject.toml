@@ -33,6 +33,7 @@ dependencies = [
     "torch==2.8.0",
     "protobuf>=5.29.5",
     "xprof>=2.21.1",
+    "tensorboard>=2.20.0",
 ]
 
 [project.optional-dependencies]

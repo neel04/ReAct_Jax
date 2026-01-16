@@ -254,12 +254,15 @@ class React(eqx.Module):
 
             return latent, latent
 
+        history = []
+
         output = interim_thought
 
         for idx in range(iters_to_do):
             output, _ = body_fun(output, idx)
+            history.append(output)
 
-        return output
+        return jnp.stack(history)
 
     @eqx.filter_jit
     def __call__(
@@ -297,9 +300,9 @@ class React(eqx.Module):
             key,
         )  # (batch, seqlen, bottleneck)
 
-        output = jax.vmap(self.unemb_ln)(output)
+        output = jax.vmap(jax.vmap(self.unemb_ln))(output)
 
         if return_logits:
-            return self.out_head(output), output
+            return jax.vmap(self.out_head)(output), output
 
         return output

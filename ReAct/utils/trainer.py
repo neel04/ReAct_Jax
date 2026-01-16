@@ -93,7 +93,11 @@ def forward(model: React | GPT, args: Tuple[Any, ...]) -> Array:
 
 @eqx.filter_jit
 def _compute_softmax_cross_entropy_loss(pred_y: Array, y_one_hot: Array) -> Array:
-    loss, _  = ce_loss(pred_y, y_one_hot) # (batch_size, seqlen)
+    loss, _ = jax.vmap(ce_loss, in_axes=(1, None))(
+        pred_y, y_one_hot
+    )  # (batch_size, seqlen)
+
+    loss = jnp.einsum("ijk,i -> jk", loss, jnp.asarray([0.2, 0.3, 0.5]))
 
     return loss.mean()
 
@@ -406,11 +410,11 @@ class Trainer:
         y_hat = jax.nn.softmax(pred_y, axis=-1).argmax(-1)
 
         # compute accuracy
-        accuracy = jnp.mean(y_hat == label)
+        accuracy = jnp.mean(y_hat[:, -1, ...] == label)
 
         # compute loss
         y_one_hot = jax.nn.one_hot(label, num_classes=num_classes) # (batch_size, seqlen, num_classes)
-        loss = ce_loss(pred_y, y_one_hot)[0].mean()
+        loss = _compute_softmax_cross_entropy_loss(pred_y, y_one_hot)
 
         # compute perplexity
         perplexity = jnp.exp(loss)

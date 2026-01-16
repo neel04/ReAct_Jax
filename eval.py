@@ -64,7 +64,7 @@ class MyLM(TemplateLM):
                     key,
                 )[0]
 
-            return jax.nn.log_softmax(logits, axis=-1)
+            return jax.nn.log_softmax(logits[-1], axis=-1)
 
         probs = fwd(seq, pad_mask, key)
 

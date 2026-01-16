@@ -99,10 +99,16 @@ class Inferencer:
                 if self.args.baseline:
                     logits = inference_model(padded_array, pad_mask, False, self.key)
                 else:
-                    logits = inference_model(padded_array, self.args.max_iters,
-                                             pad_mask, False, False, self.key)[0]
+                    logits = inference_model(
+                        padded_array,
+                        self.args.max_iters,
+                        pad_mask,
+                        False,
+                        False,
+                        self.key,
+                    )[0]
 
-                logits = logits[last_tok_idx, :]  # extract the logits for the last token
+                logits = logits[-1, last_tok_idx, :]  # extract the logits for the last token
 
                 # Apply temperature
                 scaled_logits = logits / temperature
