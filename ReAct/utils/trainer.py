@@ -24,6 +24,7 @@ from ReAct.model.blocks import LinearProj
 from ReAct.model.react import React
 from ReAct.utils.arg_types import TrainingArgs
 from ReAct.utils.helpers import (
+    BENCHMARK_CONFIG,
     IterableDatasetWithLen,
     Profiler,
     broadcast_batch,
@@ -557,17 +558,34 @@ class Trainer:
                     # Eval on benchmark
                     eval_results = evaluator.run_lm_evaluation(model)
 
-                    lambada, winogrande = self.args.bench_task.split(",")
+                    # Dynamically extract metrics for all configured benchmark tasks
+                    bench_tasks = [t.strip() for t in self.args.bench_task.split(",")]
 
-                    lambada_ppl = eval_results[lambada]["perplexity,none"]
-                    lambada_stderr = eval_results[lambada]["perplexity_stderr,none"]
+                    bench_metrics: dict[str, float | None] = {}
 
-                    winogrande_acc = eval_results[winogrande]["acc,none"]
-                    winogrande_stderr = eval_results[winogrande]["acc_stderr,none"]
+                    for task in bench_tasks:
+                        if task not in BENCHMARK_CONFIG:
+                            self.my_logger.warning(
+                                f"Unknown benchmark task '{task}', skipping. "
+                                f"Add it to BENCHMARK_CONFIG in trainer.py"
+                            )
+                            continue
 
-                    self.my_logger.info(
-                        f"LAMBADA ppl: {lambada_ppl} | stderr: {lambada_stderr}"
-                    )
+                        config = BENCHMARK_CONFIG[task]
+                        task_results = eval_results.get(task, {})
+
+                        # Extract metric and stderr, handling None for failed evals
+                        metric_val = task_results.get(config["metric"])
+                        stderr_val = task_results.get(config["stderr"])
+
+                        bench_metrics[f"Bench/{config['label']}"] = metric_val
+                        bench_metrics[f"Bench/{config['label_stderr']}"] = stderr_val
+
+                        # Log each benchmark result
+                        metric_type = "ppl" if "ppl" in config["label"] else "acc"
+                        self.my_logger.info(
+                            f"{task} {metric_type}: {metric_val} | stderr: {stderr_val}"
+                        )
 
                     ## Validation
                     (val_acc, val_loss, val_ppl), val_sample = self.evaluate_acc(
@@ -586,10 +604,7 @@ class Trainer:
                             "Val/acc": val_acc,
                             "Val/loss": val_loss,
                             "Val/ppl": val_ppl,
-                            "Bench/LAMBADA_ppl": lambada_ppl,
-                            "Bench/LAMBADA_stderr": lambada_stderr,
-                            "Bench/winogrande_acc": winogrande_acc,
-                            "Bench/winogrande_stderr": winogrande_stderr,
+                            **bench_metrics,  # Dynamic benchmark metrics
                             "Misc/Gradients": wandb.Histogram(
                                 np_histogram=chunked_histogram(step_keys[0], grads)  # pyright: ignore[reportArgumentType]
                             ),

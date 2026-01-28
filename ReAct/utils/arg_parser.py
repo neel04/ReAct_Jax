@@ -179,7 +179,9 @@ def parse_args() -> TrainingArgs:
         "--bench_task",
         type=str,
         default="lambada_openai,winogrande",
-        help="Task to benchmark during training. Defauls: lambada_openai and winogrande",
+        help="Comma-separated benchmark tasks (1-4). Supported: lambada_openai, "
+        "lambada_standard, winogrande, hellaswag, piqa, arc_easy, arc_challenge, "
+        "boolq, openbookqa. Default: lambada_openai,winogrande",
     )
 
     parser.add_argument(
@@ -437,7 +439,9 @@ def get_evaluation_args() -> EvaluationArgs:
         "--bench_task",
         type=str,
         default="lambada_openai,winogrande",
-        help="Task to benchmark during training. Defauls: lambada_openai and winogrande",
+        help="Comma-separated benchmark tasks (1-4). Supported: lambada_openai, "
+        "lambada_standard, winogrande, hellaswag, piqa, arc_easy, arc_challenge, "
+        "boolq, openbookqa. Default: lambada_openai,winogrande",
     )
 
     args = parser.parse_args()

@@ -20,6 +20,68 @@ import wandb
 
 T = TypeVar('T')
 
+# Benchmark task configuration: maps task names to their metrics and W&B labels
+# This BS is just to maintain bwd compatibility 💔
+# labels are used for W&B logging
+BENCHMARK_CONFIG: dict[str, dict[str, str]] = {
+    # Perplexity-based benchmarks
+    "lambada_openai": {
+        "metric": "perplexity,none",
+        "stderr": "perplexity_stderr,none",
+        "label": "LAMBADA_ppl",
+        "label_stderr": "LAMBADA_stderr",
+    },
+    "lambada_standard": {
+        "metric": "perplexity,none",
+        "stderr": "perplexity_stderr,none",
+        "label": "LAMBADA_std_ppl",
+        "label_stderr": "LAMBADA_std_stderr",
+    },
+    # Accuracy-based benchmarks
+    "winogrande": {
+        "metric": "acc,none",
+        "stderr": "acc_stderr,none",
+        "label": "winogrande_acc",
+        "label_stderr": "winogrande_stderr",
+    },
+    "hellaswag": {
+        "metric": "acc_norm,none",
+        "stderr": "acc_norm_stderr,none",
+        "label": "hellaswag_acc",
+        "label_stderr": "hellaswag_stderr",
+    },
+    "piqa": {
+        "metric": "acc_norm,none",
+        "stderr": "acc_norm_stderr,none",
+        "label": "piqa_acc",
+        "label_stderr": "piqa_stderr",
+    },
+    "arc_easy": {
+        "metric": "acc_norm,none",
+        "stderr": "acc_norm_stderr,none",
+        "label": "arc_easy_acc",
+        "label_stderr": "arc_easy_stderr",
+    },
+    "arc_challenge": {
+        "metric": "acc_norm,none",
+        "stderr": "acc_norm_stderr,none",
+        "label": "arc_challenge_acc",
+        "label_stderr": "arc_challenge_stderr",
+    },
+    "boolq": {
+        "metric": "acc,none",
+        "stderr": "acc_stderr,none",
+        "label": "boolq_acc",
+        "label_stderr": "boolq_stderr",
+    },
+    "openbookqa": {
+        "metric": "acc_norm,none",
+        "stderr": "acc_norm_stderr,none",
+        "label": "openbookqa_acc",
+        "label_stderr": "openbookqa_stderr",
+    },
+}
+
 class Profiler:
     def __init__(
         self, activate_profiler: bool = True, logdir: str = "./profiles/"
