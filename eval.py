@@ -56,15 +56,15 @@ class MyLM(TemplateLM):
                 logits = self.model(seq, pad_mask, False, key)
             else:
                 logits = self.model(
-                    seq,
-                    self.args.max_iters,
-                    pad_mask,
-                    False,
-                    False,
-                    key,
-                )[0]
+                    input_arr=seq,
+                    iters_to_do=self.args.max_iters,
+                    pad_mask=pad_mask,
+                    prev_thought=False,
+                    is_training=False,
+                    key=key,
+                )[0][-1]
 
-            return jax.nn.log_softmax(logits[-1], axis=-1)
+            return jax.nn.log_softmax(logits, axis=-1)
 
         probs = fwd(seq, pad_mask, key)
 

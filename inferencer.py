@@ -106,9 +106,9 @@ class Inferencer:
                         False,
                         False,
                         self.key,
-                    )[0]
+                    )[0][-1]
 
-                logits = logits[-1, last_tok_idx, :]  # extract the logits for the last token
+                logits = logits[last_tok_idx, :]  # extract the logits for the last token
 
                 # Apply temperature
                 scaled_logits = logits / temperature

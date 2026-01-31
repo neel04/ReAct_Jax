@@ -94,9 +94,14 @@ def forward(model: React | GPT, args: Tuple[Any, ...]) -> Array:
 
 @eqx.filter_jit
 def _compute_softmax_cross_entropy_loss(pred_y: Array, y_one_hot: Array) -> Array:
-    loss, _ = jax.vmap(ce_loss, in_axes=(1, None))(
-        pred_y, y_one_hot
-    )  # (batch_size, seqlen)
+    if pred_y.ndim == 3: # baseline path
+        loss, _ = ce_loss(pred_y, y_one_hot)  # (batch_size, seqlen)
+        return loss.mean()
+
+    # UT path
+    assert pred_y.ndim == 4, "pred_y must have shape (batch, iters, seqlen, vocab)."
+
+    loss, _ = jax.vmap(ce_loss, in_axes=(1, None))(pred_y, y_one_hot)
 
     loss = jnp.einsum("ijk,i -> jk", loss, jnp.asarray([0.2, 0.3, 0.5]))
 
@@ -327,7 +332,7 @@ class Trainer:
         weights = get_linear_weights(model)
 
         new_weights = [
-            megatron_init(weight, subkey)
+            megatron_init(weight, key=subkey)
             for weight, subkey in zip(weights, jax.random.split(key, len(weights)))
         ]
 
@@ -410,8 +415,12 @@ class Trainer:
 
         y_hat = jax.nn.softmax(pred_y, axis=-1).argmax(-1)
 
-        # compute accuracy
-        accuracy = jnp.mean(y_hat[:, -1, ...] == label)
+        if is_baseline:
+            # y_hat: (batch, seqlen)
+            accuracy = jnp.mean(y_hat == label)
+        else:
+            # (batch, iters, seqlen) -> (batch, seqlen)
+            accuracy = jnp.mean(y_hat[:, -1, ...] == label)
 
         # compute loss
         y_one_hot = jax.nn.one_hot(label, num_classes=num_classes) # (batch_size, seqlen, num_classes)

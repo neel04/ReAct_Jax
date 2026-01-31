@@ -247,11 +247,33 @@ def get_spec_on_larger_dim(leaf: PyTree, key: str = "model") -> List[str | None]
     return p_spec
 
 
-def megatron_init(weight: Array, key: PRNGKeyArray) -> Array:
+def l2_normalize(x: Array, eps: float) -> Array:
+    denom = jnp.sqrt(jnp.sum(jnp.square(x), axis=-1, keepdims=True) + eps)
+    return x / denom
+
+
+def megatron_init(
+    weight: Array | None = None,
+    *,
+    input_dim: int | None = None,
+    output_dim: int | None = None,
+    key: PRNGKeyArray,
+) -> Array:
     """
     Init all the weights with the Megatron paper init
     """
-    dims = weight.shape
+    assert (input_dim is None) == (output_dim is None), (
+        "input_dim and output_dim must be provided together."
+    )
+
+    if weight is not None:
+        dims = weight.shape
+    else:
+        assert input_dim is not None and output_dim is not None, (
+            "input_dim and output_dim are required when weight is None."
+        )
+        dims = (input_dim, output_dim)
+
     stddev = (0.33 / dims[0]) ** 0.5
     lim = 1 / math.sqrt(dims[1])
 

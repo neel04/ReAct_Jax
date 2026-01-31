@@ -10,6 +10,7 @@ from jaxtyping import Array, Float, Int, PRNGKeyArray
 from jmp import Policy
 
 from ReAct.model._attn import AdaptableMultiheadAttention
+from ReAct.utils.helpers import megatron_init
 from ReAct.utils.sharding import Sharding, get_strategy
 
 ArrayMap = Callable[[Array], Array]
@@ -333,11 +334,11 @@ class ABBA(eqx.Module):
         self.rank = rank
         self.s_abb = 1 / rank
 
-        self.B_1 = _init_weight(in_dim, rank, key1)
-        self.A_1 = _init_weight(rank, out_dim, key2)
+        self.B_1 = megatron_init(input_dim=in_dim, output_dim=rank, key=key1)
+        self.A_1 = megatron_init(input_dim=rank, output_dim=out_dim, key=key2)
 
         self.B_2 = _zero_init(in_dim, rank)
-        self.A_2 = _init_weight(rank, out_dim, key4)
+        self.A_2 = megatron_init(input_dim=rank, output_dim=out_dim, key=key4)
 
     def __call__(self, x: Float[Array, "... in_dim"]) -> Float[Array, "... out_dim"]:
         A_kr: Float[Array, "r_1*r_2 out_dim"] = self.rowwise_khatri_rao(
@@ -603,6 +604,7 @@ class AdaptableAttentionBlock(eqx.Module):
             use_value_bias=True,
             use_output_bias=True,
             dropout_p=drop_rate,
+            qk_norm=True,
             key=key1,
         )
 

@@ -16,6 +16,8 @@ from equinox.nn._linear import Linear
 from equinox.nn._misc import named_scope
 from jaxtyping import Array, Bool, Float, PRNGKeyArray
 
+from ReAct.utils.helpers import l2_normalize
+
 # ruff: noqa: F722
 
 ArrayMap = Callable[[Array], Array]
@@ -36,9 +38,14 @@ def dot_product_attention_weights(
     query: Float[Array, "q_seq qk_size"],
     key: Float[Array, "kv_seq qk_size"],
     mask: Bool[Array, "q_seq kv_seq"] | None = None,
+    *,
+    scale: float | Array | None = None,
 ) -> Float[Array, "q_seq kv_seq"]:
-    query = query / math.sqrt(query.shape[-1])
-    logits = jnp.einsum("sd,Sd->sS", query, key)
+    if scale is None:
+        scale = 1 / math.sqrt(query.shape[-1])
+
+    logits = jnp.einsum("sd,Sd->sS", query, key) * scale
+
     if mask is not None:
         if mask.shape != logits.shape:
             raise ValueError(
@@ -64,8 +71,9 @@ def dot_product_attention(
     *,
     key: PRNGKeyArray | None = None,
     inference: bool | None = None,
+    scale: float | Array | None = None,
 ) -> Float[Array, "q_seq v_size"]:
-    weights = dot_product_attention_weights(query, key_, mask)
+    weights = dot_product_attention_weights(query, key_, mask, scale=scale)
     if dropout is not None:
         weights = dropout(weights, key=key, inference=inference)
     attn = jnp.einsum("sS,Sd->sd", weights, value)
@@ -174,6 +182,9 @@ class AdaptableMultiheadAttention(Module, strict=True):
     use_key_bias: bool = field(static=True)
     use_value_bias: bool = field(static=True)
     use_output_bias: bool = field(static=True)
+    qk_norm: bool = field(static=True)
+    qk_norm_eps: float = field(static=True)
+    qk_norm_scale: float | None = field(static=True)
 
     def __init__(
         self,
@@ -191,6 +202,9 @@ class AdaptableMultiheadAttention(Module, strict=True):
         dropout_p: float = 0.0,
         inference: bool = False,
         dtype=None,
+        qk_norm: bool = False,
+        qk_norm_eps: float = 1e-6,
+        qk_norm_scale: float | None = None,
         *,
         act: ArrayMap,
         key: PRNGKeyArray,
@@ -219,6 +233,11 @@ class AdaptableMultiheadAttention(Module, strict=True):
         - `dtype`: The dtype to use for all trainable parameters in this layer.
             Defaults to either `jax.numpy.float32` or `jax.numpy.float64` depending
             on whether JAX is in 64-bit mode.
+        - `qk_norm`: If `True`, L2-normalizes query/key per head before attention and
+            uses `qk_norm_scale` as the logit scale. This is QK-norm.
+        - `qk_norm_eps`: Epsilon added to the normalization denominator.
+        - `qk_norm_scale`: Optional logit scale when using QK-norm. If `None`, defaults
+            to `sqrt(qk_size)`.
         - `key`: A `jax.random.PRNGKey` used to provide randomness for parameter
             initialisation. (Keyword only argument.)
         - `act`: Activation function. Used only for the LoRA-like op
@@ -276,6 +295,14 @@ class AdaptableMultiheadAttention(Module, strict=True):
         self.use_key_bias = use_key_bias
         self.use_value_bias = use_value_bias
         self.use_output_bias = use_output_bias
+        self.qk_norm = qk_norm
+        self.qk_norm_eps = qk_norm_eps
+        self.qk_norm_scale = (
+            qk_norm_scale if qk_norm else None
+        )
+
+        if self.qk_norm and self.qk_norm_scale is None:
+            self.qk_norm_scale = math.sqrt(qk_size)
 
     @named_scope("AdaptableMultiHeadAttention")
     def __call__(
@@ -365,8 +392,14 @@ class AdaptableMultiheadAttention(Module, strict=True):
                     "process_heads must not change the shape of the heads."
                 )
 
+        if self.qk_norm:
+            query_heads = l2_normalize(query_heads, self.qk_norm_eps)
+            key_heads = l2_normalize(key_heads, self.qk_norm_eps)
         attn_fn = partial(
-            dot_product_attention, dropout=self.dropout, inference=inference
+            dot_product_attention,
+            dropout=self.dropout,
+            inference=inference,
+            scale=self.qk_norm_scale,
         )
         keys = None if key is None else jax.random.split(key, query_heads.shape[1])
         if mask is not None and mask.ndim == 3:

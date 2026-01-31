@@ -70,13 +70,13 @@ def main(key: PRNGKeyArray):
     # ========= Training/Hypertuning =========
     init_hyperparams = [
         {
-            "lr": 2e-4,
+            "lr": 2.5e-4,
             "drop_rate": 0.00,
-            "weight_decay": 1e-3,
+            "weight_decay": 2e-3,
             "warmup_steps": 300,
-            "beta_1": 0.75,
-            "beta_2": 0.5,
-            "nesterov": True,
+            "beta_1": 0.65,
+            "beta_2": 0.9,
+            "nesterov": False,
         },
         {
             "lr": 4e-4,
@@ -136,7 +136,7 @@ def main(key: PRNGKeyArray):
                 consider_endpoints=True,
                 multivariate=True,
                 warn_independent_sampling=True,
-                n_startup_trials=20,
+                n_startup_trials=15,
             ),
             pruner=optuna.pruners.PercentilePruner(
                 percentile=25.0, n_startup_trials=5, n_min_trials=5, n_warmup_steps=1500
