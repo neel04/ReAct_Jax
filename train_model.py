@@ -5,7 +5,11 @@ import jax
 import optuna
 
 from ReAct.data.fineweb import FineWebDataset
-from ReAct.utils.helpers import download_artifact, fetch_resume_progress
+from ReAct.utils.helpers import (
+    download_artifact,
+    fetch_resume_progress,
+    sweep_prefixes,
+)
 
 if platform.processor() != "arm": # Nothing on Apple sillicon
     try:
@@ -94,14 +98,12 @@ def main(key: PRNGKeyArray):
 
     if args.tune_hyperparams:
         # Rename the group to seperate sweeps from normal runs.
-        args.group = "Sweeps_base" if args.baseline else f"Sweeps_{args.max_iters}i"
-        args.group += args.sweep_metadata # append metadata on end
-
-        artifact_name = (
-            f"Sweeps_{args.max_iters}i{args.sweep_metadata}"
-            if not args.baseline
-            else f"Sweeps_baseline{args.sweep_metadata}"
+        group_prefix, artifact_prefix, optuna_prefix, study_prefix = sweep_prefixes(
+            args=args
         )
+
+        args.group = f"{group_prefix}{args.sweep_metadata}"
+        artifact_name = f"{artifact_prefix}{args.sweep_metadata}"
 
         if args.resume:
             try:
@@ -123,10 +125,16 @@ def main(key: PRNGKeyArray):
         )
 
         # Create optuna hypertununing study
-        storage = f"sqlite:///chkp_{args.max_iters}i_{args.num_blocks}L_{args.width}{args.sweep_metadata}.db"
+        storage = (
+            f"sqlite:///{optuna_prefix}_{args.num_blocks}L_"
+            f"{args.width}{args.sweep_metadata}.db"
+        )
 
         study = optuna.create_study(
-            study_name=f"Sweeps_{args.max_iters}i_{args.num_blocks}L_{args.width}{args.sweep_metadata}",
+            study_name=(
+                f"{study_prefix}_{args.num_blocks}L_{args.width}"
+                f"{args.sweep_metadata}"
+            ),
             direction="minimize",
             load_if_exists=True,
             storage=storage,
@@ -240,7 +248,10 @@ def kickoff_optuna(trial, artifact_name: str, **trainer_kwargs):
     args = trainer_kwargs["args"]
 
     # Store the optuna checkpoint progress
-    optuna_chkp_path = f"chkp_{args.max_iters}i_{args.num_blocks}L_{args.width}{args.sweep_metadata}.db"
+    _, _, optuna_prefix, _ = sweep_prefixes(args=args)
+    optuna_chkp_path = (
+        f"{optuna_prefix}_{args.num_blocks}L_{args.width}{args.sweep_metadata}.db"
+    )
 
     if os.path.isfile(optuna_chkp_path) and args.exp_logging:
         artifact = Artifact(name=artifact_name, type="OptunaCheckpoint")

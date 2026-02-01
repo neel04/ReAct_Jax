@@ -6,7 +6,6 @@ from typing import Any, Callable, Iterator, List, Optional, Tuple, TypeVar
 import equinox as eqx
 import jax
 import jax.numpy as jnp
-import numpy as np
 import regex as re
 from datasets.arrow_dataset import Dataset
 from datasets.dataset_dict import DatasetDict, IterableDatasetDict
@@ -17,6 +16,7 @@ from jaxtyping import Array, PRNGKeyArray, PyTree
 from torch.utils.data import DataLoader as TorchDataLoader
 
 import wandb
+from ReAct.utils.arg_types import TrainingArgs
 
 T = TypeVar('T')
 
@@ -81,6 +81,29 @@ BENCHMARK_CONFIG: dict[str, dict[str, str]] = {
         "label_stderr": "openbookqa_stderr",
     },
 }
+
+def sweep_prefixes(args: TrainingArgs) -> tuple[str, str, str, str]:
+    match (args.baseline, args.naive):
+        case (True, False):
+            group_prefix = "Sweeps_base"
+            artifact_prefix = "Sweeps_baseline"
+            optuna_prefix = f"chkp_{args.max_iters}i"
+            study_prefix = f"Sweeps_{args.max_iters}i"
+        case (False, True):
+            group_prefix = "Sweeps_naive"
+            artifact_prefix = "Sweeps_naive"
+            optuna_prefix = "chkp_naive"
+            study_prefix = "Sweeps_naive"
+        case (False, False):
+            group_prefix = f"Sweeps_{args.max_iters}i"
+            artifact_prefix = f"Sweeps_{args.max_iters}i"
+            optuna_prefix = f"chkp_{args.max_iters}i"
+            study_prefix = f"Sweeps_{args.max_iters}i"
+        case _:
+            assert False, "baseline and naive are mutually exclusive"
+
+    return group_prefix, artifact_prefix, optuna_prefix, study_prefix
+
 
 class Profiler:
     def __init__(

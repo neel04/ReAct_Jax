@@ -7,8 +7,7 @@ import jax.numpy as jnp
 from jaxtyping import Array, PRNGKeyArray
 
 from ReAct.data.tokenizer import Tok
-from ReAct.model.baseline import GPT
-from ReAct.model.react import React
+from ReAct.model.factory import Model, build_model
 from ReAct.utils.arg_parser import get_inference_args
 from ReAct.utils.arg_types import Args
 from ReAct.utils.helpers import count_params, load_eqx_obj
@@ -29,33 +28,13 @@ class Inferencer:
 
         self.strategy = get_strategy('ddp')
 
-    def skeleton_model(self, is_baseline: bool) -> GPT | React:
-        if not is_baseline:
-            model = React(
-                n_heads=self.args.n_heads,
-                seqlen=self.args.seqlen,
-                max_iters=self.args.max_iters,
-                num_blocks=self.args.num_blocks,
-                width=self.args.width,
-                drop_rate=0.0,
-                vocab_size=self.args.num_classes,
-                key=self.key,
-                strategy=self.strategy,
-                rank=self.args.rank
-            )
-        else:
-            model = GPT(
-                n_heads=self.args.n_heads,
-                seqlen=self.args.seqlen,
-                num_blocks=self.args.num_blocks,
-                width=self.args.width,
-                drop_rate=0.0,
-                vocab_size=self.args.num_classes,
-                key=self.key,
-                strategy=self.strategy
-            )
-
-        return model
+    def skeleton_model(self) -> Model:
+        return build_model(
+            args=self.args,
+            key=self.key,
+            strategy=self.strategy,
+            drop_rate=0.0,
+        )
 
     def encode_input(self, my_input: str) -> Array:
         encoded = self.encode_fn(my_input)['input_ids']
@@ -159,7 +138,7 @@ class Inferencer:
         return self.decode_fn(generated_output[-num_tokens:])
 
     def inference(self, my_input: str, num_tokens: int = 32):
-        model = self.skeleton_model(self.args.baseline)
+        model = self.skeleton_model()
 
         assert (
             model.__name__ == "GPT" if args.baseline else model.__name__ == "ReAct"
@@ -191,7 +170,7 @@ if __name__ == "__main__":
     my_logger = logger.my_logger()
 
     my_logger.warning('Make sure to provide the correct args per the model configuration - as it cant be autodetected!')
-    my_logger.warning('These are: max_iters | baseline | num_blocks | width | n_heads')
+    my_logger.warning("These are: max_iters | baseline | naive | num_blocks | width | n_heads")
     print(f"{'-'*50}\n")
 
     assert args.checkpoint_path is not None, "Please provide a checkpoint path"

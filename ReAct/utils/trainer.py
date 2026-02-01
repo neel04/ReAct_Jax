@@ -1,7 +1,7 @@
 import gc
 import os
 from functools import partial
-from typing import Any, Callable, Optional, Tuple, Union
+from typing import Any, Callable, Optional, Tuple
 
 import equinox as eqx
 import jax
@@ -21,7 +21,7 @@ from eval import Evaluator
 from inferencer import Inferencer
 from ReAct.model.baseline import GPT
 from ReAct.model.blocks import LinearProj
-from ReAct.model.react import React
+from ReAct.model.factory import Model, UTModel, build_model, resolve_model_kind
 from ReAct.utils.arg_types import TrainingArgs
 from ReAct.utils.helpers import (
     BENCHMARK_CONFIG,
@@ -53,7 +53,7 @@ ce_loss = cross_entropy_with_logits
 ce_loss.defvjp(_cross_entropy_with_logits_fwd, _cross_entropy_with_logits_bwd)
 
 def _iters_fwd(
-    model: React,
+    model: UTModel,
     input_arr: Array,
     pad_mask: Array,
     iters_to_do: int,
@@ -85,11 +85,9 @@ def _vanilla_fwd(
 
 
 @eqx.filter_jit
-def forward(model: React | GPT, args: Tuple[Any, ...]) -> Array:
-    if isinstance(model, React):
-        return jax.vmap(_iters_fwd, in_axes=(None, 0, 0, None, None, 0))(model, *args)
-    else:
-        return jax.vmap(_vanilla_fwd, in_axes=(None, 0, 0, None, None, 0))(model, *args)
+def forward(model: Model, args: Tuple[Any, ...]) -> Array:
+    fwd_fn = _vanilla_fwd if isinstance(model, GPT) else _iters_fwd
+    return jax.vmap(fwd_fn, in_axes=(None, 0, 0, None, None, 0))(model, *args)
 
 
 @eqx.filter_jit
@@ -110,11 +108,11 @@ def _compute_softmax_cross_entropy_loss(pred_y: Array, y_one_hot: Array) -> Arra
 @eqx.filter_jit(donate="all-except-first")
 def make_step(
     static_inputs: Tuple[
-        PyTree, int, GradientTransformation, int, React | GPT, bool, PRNGKeyArray
+        PyTree, int, GradientTransformation, int, Model, bool, PRNGKeyArray
     ],
     opt_state: PyTree,
     batch_inputs: Tuple[Array, Array, Array],  # x, y, mask, key
-) -> Tuple[Array, Tuple[React | GPT, PyTree], PyTree, PyTree]:
+) -> Tuple[Array, Tuple[Model, PyTree], PyTree, PyTree]:
 
     filter_spec, iters_to_do, optim, num_classes, model, stop_grad, keys = static_inputs
     x, y, pad_mask = batch_inputs
@@ -126,7 +124,7 @@ def make_step(
     @eqx.filter_jit
     @eqx.filter_value_and_grad
     def compute_loss(
-        model: React | GPT,
+        model: Model,
         x: Array,
         y: Array,
         pad_mask: Array,
@@ -195,7 +193,7 @@ class Trainer:
 
     def evaluate_acc(
         self,
-        model: Union[React, GPT],
+        model: Model,
         is_baseline: bool,
         loader: Any,
         eval_iters: int,
@@ -299,34 +297,19 @@ class Trainer:
 
         return filter_spec
 
-    def init_model(self, key: PRNGKeyArray) -> Tuple[PyTree, Union[React, GPT]]:
+    def init_model(self, key: PRNGKeyArray) -> Tuple[PyTree, Model]:
+        model_kind = resolve_model_kind(
+            baseline=self.args.baseline,
+            naive=self.args.naive,
+        )
+        if model_kind == "baseline":
+            self.max_iters = 1  # baseline model only does one pass
 
-        if self.args.baseline:
-            self.max_iters = 1 # baseline model only does one pass
-
-            model = GPT(
-                self.args.n_heads,
-                self.args.seqlen,
-                self.args.num_blocks,
-                self.args.width,
-                self.args.drop_rate,
-                self.args.num_classes,
-                key,
-                strategy
-            )
-        else:
-            model = React(
-                self.args.rank,
-                self.args.n_heads,
-                self.args.seqlen,
-                self.args.max_iters,
-                self.args.num_blocks,
-                self.args.width,
-                self.args.drop_rate,
-                self.args.num_classes,
-                key,
-                strategy
-            )
+        model = build_model(
+            args=self.args,
+            key=key,
+            strategy=strategy,
+        )
 
         # custom weight init
         weights = get_linear_weights(model)
@@ -390,7 +373,7 @@ class Trainer:
     def compute_metrics(
         self,
         keys: PRNGKeyArray,
-        model: React | GPT,
+        model: Model,
         is_baseline: bool,
         input_arr: Array,
         label: Array,

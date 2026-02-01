@@ -13,6 +13,8 @@ from tqdm import tqdm
 
 from inferencer import Tok
 from ReAct.model.baseline import GPT
+from ReAct.model.factory import Model, build_model
+from ReAct.model.naive_ut import React as NaiveReact
 from ReAct.model.react import React
 from ReAct.utils.arg_parser import get_evaluation_args
 from ReAct.utils.arg_types import EvaluationArgs
@@ -290,7 +292,7 @@ class Evaluator:
         self,
         args: EvaluationArgs,
         task: str,
-        model: str | React | GPT | None = None,
+        model: str | Model | None = None,
         *,
         key: PRNGKeyArray,
     ):
@@ -305,35 +307,15 @@ class Evaluator:
         self.decode_fn = tok.decode
         self.encode_fn = tok.encode
 
-        self.model = self.skeleton_model(args.baseline) if model is None else model
+        self.model = self.skeleton_model() if model is None else model
 
-    def skeleton_model(self, is_baseline: bool) -> GPT | React:
-        if not is_baseline:
-            model = React(
-                rank=self.args.rank,
-                n_heads=self.args.n_heads,
-                seqlen=self.args.seqlen,
-                max_iters=self.args.max_iters,
-                num_blocks=self.args.num_blocks,
-                width=self.args.width,
-                drop_rate=0.0,
-                vocab_size=self.args.num_classes,
-                key=self.key,
-                strategy=self.strategy,
-            )
-        else:
-            model = GPT(
-                n_heads=self.args.n_heads,
-                seqlen=self.args.seqlen,
-                num_blocks=self.args.num_blocks,
-                width=self.args.width,
-                drop_rate=0.0,
-                vocab_size=self.args.num_classes,
-                key=self.key,
-                strategy=self.strategy,
-            )
-
-        return model
+    def skeleton_model(self) -> Model:
+        return build_model(
+            args=self.args,
+            key=self.key,
+            strategy=self.strategy,
+            drop_rate=0.0,
+        )
 
     def encode_input(self, my_input: str, obey_maxlen: bool = True) -> Array:
         encoded = self.encode_fn(my_input, obey_maxlen=obey_maxlen)["input_ids"]
@@ -341,13 +323,13 @@ class Evaluator:
 
         return encoded
 
-    def run_lm_evaluation(self, _model: React | GPT | None = None):
+    def run_lm_evaluation(self, _model: Model | None = None):
         match _model:
-            case React() | GPT():
+            case React() | NaiveReact() | GPT():
                 model = _model
 
             case None:
-                model: React | GPT = load_eqx_obj(self.args.checkpoint_path, self.model)
+                model: Model = load_eqx_obj(self.args.checkpoint_path, self.model)
 
         lm_obj = MyLM(
             model=model,
@@ -384,7 +366,9 @@ if __name__ == "__main__":
     my_logger.warning(
         "Make sure to provide the correct args per the model configuration - as it cant be autodetected!"
     )
-    my_logger.warning("These are: max_iters | baseline | num_blocks | width | n_heads")
+    my_logger.warning(
+        "These are: max_iters | baseline | naive | num_blocks | width | n_heads"
+    )
     print(f"{'-' * 50}\n")
 
     assert args.checkpoint_path is not None, "Please provide a checkpoint path"

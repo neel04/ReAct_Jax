@@ -39,6 +39,7 @@ class TrainingArgs:
     bench_task: str
     resume: bool | str
     baseline: bool
+    naive: bool
     tune_hyperparams: bool
     sweep_metadata: str
     accum_steps: int
@@ -57,6 +58,7 @@ class InferenceArgs:
     n_heads: int
     width: int
     baseline: bool
+    naive: bool
     num_blocks: int
     system_prompt: str
     prompt: str
@@ -82,6 +84,7 @@ class EvaluationArgs:
     n_heads: int
     width: int
     baseline: bool
+    naive: bool
     num_blocks: int
     strategy: str
 

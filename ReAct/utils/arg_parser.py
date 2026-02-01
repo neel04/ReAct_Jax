@@ -193,11 +193,19 @@ def parse_args() -> TrainingArgs:
         'epoch & step number with a +. \nExample arg: "neel/ReAct_Jax/6ktmhalt/ + 0 + 200"',
     )
 
-    parser.add_argument(
+    model_group = parser.add_mutually_exclusive_group()
+    model_group.add_argument(
         "--baseline",
         action="store_true",
         default=False,
         help="Train baseline vanilla transformer model. Default: False",
+    )
+
+    model_group.add_argument(
+        "--naive",
+        action="store_true",
+        default=False,
+        help="Train naive UT (simplified ReAct). Default: False",
     )
 
     parser.add_argument(
@@ -284,11 +292,19 @@ def get_inference_args() -> InferenceArgs:
         "--width", type=int, default=384, help="Width dimension. Default: 384"
     )
 
-    parser.add_argument(
+    model_group = parser.add_mutually_exclusive_group()
+    model_group.add_argument(
         "--baseline",
         action="store_true",
         default=False,
         help="Train baseline vanilla transformer model. Default: False",
+    )
+
+    model_group.add_argument(
+        "--naive",
+        action="store_true",
+        default=False,
+        help="Use naive UT (simplified ReAct). Default: False",
     )
 
     parser.add_argument(
@@ -407,11 +423,19 @@ def get_evaluation_args() -> EvaluationArgs:
         "--width", type=int, default=384, help="Width dimension. Default: 384"
     )
 
-    parser.add_argument(
+    model_group = parser.add_mutually_exclusive_group()
+    model_group.add_argument(
         "--baseline",
         action="store_true",
         default=False,
         help="Train baseline vanilla transformer model. Default: False",
+    )
+
+    model_group.add_argument(
+        "--naive",
+        action="store_true",
+        default=False,
+        help="Use naive UT (simplified ReAct). Default: False",
     )
 
     parser.add_argument(
