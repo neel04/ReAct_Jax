@@ -19,8 +19,16 @@ RETRIES=-1  # -1 means infinite retries
 DEFAULT_VM_NAME="smallnode"
 DEFAULT_LOGFILE="out.log"
 
-# Your specific command - with proper escaping
-DEFAULT_COMMAND='tmux kill-server; sudo rm -rf ./ReAct_Jax/ReAct/outputs/; sudo rm -rf *; curl -L https://gist.githubusercontent.com/neel04/9c26d460793466187b5dd8ffb2e4d90b/raw/run_uv.sh -o run.sh; sleep 1s && tmux new-session -d "source run.sh 2>&1 | tee out.log";'
+if [ -n "$NGROK_URL" ]; then
+  DEFAULT_COMMAND="tmux kill-server; \
+    sudo rm -rf ./ReAct_Jax/ReAct/outputs/; \
+    sudo rm -rf *; \
+    wget -r -nH --cut-dirs=0 -P ./ReAct_Jax $NGROK_URL; \
+    curl -L $NGROK_URL/run_tpu.sh -o run.sh; \
+    sleep 1s && tmux new-session -d \"source run.sh 2>&1 | tee $DEFAULT_LOGFILE\";"
+else
+  DEFAULT_COMMAND='tmux kill-server; sudo rm -rf ./ReAct_Jax/ReAct/outputs/; sudo rm -rf *; curl -L https://gist.githubusercontent.com/neel04/9c26d460793466187b5dd8ffb2e4d90b/raw/run_uv.sh -o run.sh; sleep 1s && tmux new-session -d "source run.sh 2>&1 | tee out.log";'
+fi
 
 # Track UNAVAILABLE error occurrences
 UNAVAILABLE_ERROR_COUNT=0
@@ -179,6 +187,15 @@ function run_command_on_vm() {
   return $exit_code
 }
 
+# Function to kill TPU processes on all workers
+function kill_tpu_processes_on_vm() {
+  echo "Killing TPU processes on all workers for $VM_NAME..."
+  gcloud compute tpus tpu-vm ssh "$USERNAME@$VM_NAME" \
+    --zone="$ZONE" \
+    --worker=all \
+    --command="sudo kill -9 \$(sudo lsof -t /dev/accel* /dev/vfio/* 2>/dev/null)"
+}
+
 # Function to delete and recreate VM
 function delete_and_recreate_vm() {
   echo "Deleting VM $VM_NAME for recreation..."
@@ -208,7 +225,7 @@ function check_logfile_for_errors() {
    gcloud_output=$(gcloud compute tpus tpu-vm ssh "$USERNAME@$VM_NAME" \
        --zone="$ZONE" \
        --worker=all \
-       --command="if grep -q 'RAW: Raising signal 6 with default behavior' '$LOGFILE' 2>/dev/null; then echo '$error_flag'; elif grep -q 'absl::Status: UNAVAILABLE:\|absl::Status: DEADLINE_EXCEEDED:' '$LOGFILE' 2>/dev/null; then echo '$unavailable_flag'; fi")
+       --command="if grep -q 'RAW: Raising signal 6 with default behavior' '$LOGFILE' 2>/dev/null; then echo '$error_flag'; elif grep -q 'absl::Status: UNAVAILABLE:\|absl::Status: DEADLINE_EXCEEDED:\|Not attempting to load libtpu.so' '$LOGFILE' 2>/dev/null; then echo '$unavailable_flag'; fi")
 
    echo "gcloud output: $gcloud_output"
    
@@ -216,6 +233,7 @@ function check_logfile_for_errors() {
    if [[ "$gcloud_output" == *"$error_flag"* ]]; then
        echo "Found RAW signal error pattern in $LOGFILE on at least one worker. Restarting after 60 seconds..."
        sleep 60
+       kill_tpu_processes_on_vm
        run_command_on_vm
        return $?
    fi
@@ -228,10 +246,12 @@ function check_logfile_for_errors() {
        if [ $UNAVAILABLE_ERROR_COUNT -eq 1 ]; then
            echo "First UNAVAILABLE error - restarting command after 60 seconds..."
            sleep 60
+           kill_tpu_processes_on_vm
            run_command_on_vm
            return $?
        else
            echo "Second UNAVAILABLE error detected - deleting and recreating VM..."
+           kill_tpu_processes_on_vm
            delete_and_recreate_vm
            return $?
        fi
