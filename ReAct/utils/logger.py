@@ -1,10 +1,16 @@
 import os
+import random
+import time
 from typing import Any
+
+import jax
+
 import wandb
 import logging
 
 from argparse import Namespace
 from typing import Any, Callable, Optional
+
 
 class UnifiedLogger:
     '''
@@ -44,7 +50,12 @@ class UnifiedLogger:
             # we want to extract the run id, i.e "lxxn0x54"
             wandb_id = args.resume.split("+")[0].split("/")[-1].strip()
 
-        wandb.init(
+        # Stagger across hosts to prevent hitting W&B rate limits
+        if jax.default_backend() != "cpu":
+            time.sleep(random.uniform(0, 240))
+
+        run = wandb.init(
+            entity="neel",
             project="ReAct_Jax",
             config=args,
             group=args.group,
@@ -52,17 +63,17 @@ class UnifiedLogger:
             resume="allow",
             id=wandb_id,
             reinit=True,
-            allow_val_change=True
+            allow_val_change=True,
         )
 
-        wandb.run.log_code(
+        run.log_code(
             "../",
             include_fn=lambda path: path.endswith(".py")
             or path.endswith(".ipynb")
             or path.endswith(".sh"),
         )
 
-        return wandb
+        return run
 
     def init_wandb_sweep(self) -> str:
         '''

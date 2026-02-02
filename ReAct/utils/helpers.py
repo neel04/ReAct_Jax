@@ -1,42 +1,154 @@
 import math
 import os
 from logging import Logger
-from typing import Any, Callable, List, Optional, Tuple, TypeVar
+from typing import Any, Callable, Iterator, List, Optional, Tuple, TypeVar
 
 import equinox as eqx
 import jax
 import jax.numpy as jnp
+import regex as re
+from datasets.arrow_dataset import Dataset
+from datasets.dataset_dict import DatasetDict, IterableDatasetDict
+from datasets.iterable_dataset import IterableDataset
+from jax.experimental import multihost_utils
 from jax_array_info import sharding_info
 from jaxtyping import Array, PRNGKeyArray, PyTree
+from torch.utils.data import DataLoader as TorchDataLoader
 
 import wandb
+from ReAct.utils.arg_types import TrainingArgs
 
 T = TypeVar('T')
+
+# Benchmark task configuration: maps task names to their metrics and W&B labels
+# This BS is just to maintain bwd compatibility 💔
+# labels are used for W&B logging
+BENCHMARK_CONFIG: dict[str, dict[str, str]] = {
+    # Perplexity-based benchmarks
+    "lambada_openai": {
+        "metric": "perplexity,none",
+        "stderr": "perplexity_stderr,none",
+        "label": "LAMBADA_ppl",
+        "label_stderr": "LAMBADA_stderr",
+    },
+    "lambada_standard": {
+        "metric": "perplexity,none",
+        "stderr": "perplexity_stderr,none",
+        "label": "LAMBADA_std_ppl",
+        "label_stderr": "LAMBADA_std_stderr",
+    },
+    # Accuracy-based benchmarks
+    "winogrande": {
+        "metric": "acc,none",
+        "stderr": "acc_stderr,none",
+        "label": "winogrande_acc",
+        "label_stderr": "winogrande_stderr",
+    },
+    "hellaswag": {
+        "metric": "acc_norm,none",
+        "stderr": "acc_norm_stderr,none",
+        "label": "hellaswag_acc",
+        "label_stderr": "hellaswag_stderr",
+    },
+    "piqa": {
+        "metric": "acc_norm,none",
+        "stderr": "acc_norm_stderr,none",
+        "label": "piqa_acc",
+        "label_stderr": "piqa_stderr",
+    },
+    "arc_easy": {
+        "metric": "acc_norm,none",
+        "stderr": "acc_norm_stderr,none",
+        "label": "arc_easy_acc",
+        "label_stderr": "arc_easy_stderr",
+    },
+    "arc_challenge": {
+        "metric": "acc_norm,none",
+        "stderr": "acc_norm_stderr,none",
+        "label": "arc_challenge_acc",
+        "label_stderr": "arc_challenge_stderr",
+    },
+    "boolq": {
+        "metric": "acc,none",
+        "stderr": "acc_stderr,none",
+        "label": "boolq_acc",
+        "label_stderr": "boolq_stderr",
+    },
+    "openbookqa": {
+        "metric": "acc_norm,none",
+        "stderr": "acc_norm_stderr,none",
+        "label": "openbookqa_acc",
+        "label_stderr": "openbookqa_stderr",
+    },
+}
+
+def sweep_prefixes(args: TrainingArgs) -> tuple[str, str, str, str]:
+    match (args.baseline, args.naive):
+        case (True, False):
+            group_prefix = "Sweeps_base"
+            artifact_prefix = "Sweeps_baseline"
+            optuna_prefix = f"chkp_{args.max_iters}i"
+            study_prefix = f"Sweeps_{args.max_iters}i"
+        case (False, True):
+            group_prefix = "Sweeps_naive"
+            artifact_prefix = "Sweeps_naive"
+            optuna_prefix = "chkp_naive"
+            study_prefix = "Sweeps_naive"
+        case (False, False):
+            group_prefix = f"Sweeps_{args.max_iters}i"
+            artifact_prefix = f"Sweeps_{args.max_iters}i"
+            optuna_prefix = f"chkp_{args.max_iters}i"
+            study_prefix = f"Sweeps_{args.max_iters}i"
+        case _:
+            assert False, "baseline and naive are mutually exclusive"
+
+    return group_prefix, artifact_prefix, optuna_prefix, study_prefix
+
 
 class Profiler:
     def __init__(
         self, activate_profiler: bool = True, logdir: str = "./profiles/"
     ) -> None:
-        self.warmup_steps = 50
+        self.options = jax.profiler.ProfileOptions()
+        self.options.host_tracer_level = 2
+        self.options.device_tracer_level = 1
+        self.options.python_tracer_level = 1
+        self.options.advanced_configuration = {
+            "tpu_trace_mode": "TRACE_COMPUTE_AND_SYNC",
+        }
+
+        self.warmup_steps = 100
         self.activate_profiler = activate_profiler
         self.logdir = logdir
 
     def start_prof(self, step: int) -> None:
         if step == self.warmup_steps:
             if self.activate_profiler:
-                print(f'Started TensorBoard Profiler at: {self.logdir}')
-                jax.profiler.start_trace(self.logdir)
+                print(f"Started TensorBoard Profiler at: {self.logdir}")
+                jax.profiler.start_trace(
+                    self.logdir,
+                    create_perfetto_link=True,
+                    create_perfetto_trace=True,
+                    profiler_options=self.options,
+                )
 
-    def stop_prof(self, output: Array, step: int) -> Array:
+    def stop_prof(self, w_logger: Any, output: Array, step: int) -> Array:
         if step == self.warmup_steps:
             if self.activate_profiler:
-                output = output.block_until_ready() # wait for output
+                output = output.block_until_ready()  # wait for output
                 jax.profiler.stop_trace()
-                print(f'Stopped Profiler at: {self.logdir}')
+                print(f"Stopped Profiler at: {self.logdir}")
+                self.upload_to_wandb(w_logger)
 
             self.activate_profiler = False
 
         return output
+
+    def upload_to_wandb(self, w_logger: Any):
+        print("Uploading to W&B...")
+        artifact = wandb.Artifact('tb_profile', type='profile')
+        artifact.add_dir("profiles/")
+        w_logger.log_artifact(artifact)
 
 def convert_flops(params: int) -> str:
     if params == 0:
@@ -158,11 +270,33 @@ def get_spec_on_larger_dim(leaf: PyTree, key: str = "model") -> List[str | None]
     return p_spec
 
 
-def megatron_init(weight: Array, key: PRNGKeyArray) -> Array:
+def l2_normalize(x: Array, eps: float) -> Array:
+    denom = jnp.sqrt(jnp.sum(jnp.square(x), axis=-1, keepdims=True) + eps)
+    return x / denom
+
+
+def megatron_init(
+    weight: Array | None = None,
+    *,
+    input_dim: int | None = None,
+    output_dim: int | None = None,
+    key: PRNGKeyArray,
+) -> Array:
     """
     Init all the weights with the Megatron paper init
     """
-    dims = weight.shape
+    assert (input_dim is None) == (output_dim is None), (
+        "input_dim and output_dim must be provided together."
+    )
+
+    if weight is not None:
+        dims = weight.shape
+    else:
+        assert input_dim is not None and output_dim is not None, (
+            "input_dim and output_dim are required when weight is None."
+        )
+        dims = (input_dim, output_dim)
+
     stddev = (0.33 / dims[0]) ** 0.5
     lim = 1 / math.sqrt(dims[1])
 
@@ -186,17 +320,45 @@ def get_weights(m: PyTree, layer: PyTree):
     ]
 
 @eqx.filter_jit
-def get_hist(tree: PyTree, num_bins: int = 64) -> Any:
+def get_hist(key: PRNGKeyArray, tree: PyTree, num_bins: int = 64) -> Any:
     """
     Compute histogram, handling for NaNs safely.
     Returns: Tuple[Array, Array] but wandbs typehinting covereage is so ass.
     """
-    leaves = get_leaves(tree)
-    
+    leaves = jax.random.choice(key, get_leaves(tree), (8192,), False)
+
     return jnp.histogram(
         leaves, bins=num_bins, range=(jnp.nanmin(leaves), jnp.nanmax(leaves))
     )
 
+
+@eqx.filter_jit
+def chunked_histogram(key: PRNGKeyArray, tree: PyTree, num_bins: int = 64):
+    """
+    Compute histogram in a blockwise fashion.
+    """
+    # 1. Global Pass: Find global Min/Max
+    # Map each leaf to its scalar min/max
+    mins = jax.tree.map(jnp.nanmin, tree)
+    maxs = jax.tree.map(jnp.nanmax, tree)
+
+    # Reduce scalar leaves to global scalars
+    g_min = jax.tree_util.tree_reduce(jnp.fmin, mins, initializer=jnp.inf)
+    g_max = jax.tree_util.tree_reduce(jnp.fmax, maxs, initializer=-jnp.inf)
+
+    # 2. Local Pass: Compute histogram for each leaf using GLOBAL range
+    def leaf_hist(leaf: PyTree):
+        counts, _ = jnp.histogram(leaf, bins=num_bins, range=(g_min, g_max))
+        return counts.astype(jnp.float32)
+
+    # Map to get counts per leaf, then reduce (sum) them
+    leaf_counts = jax.tree.map(leaf_hist, tree)
+    total_counts = jax.tree_util.tree_reduce(jnp.add, leaf_counts)
+
+    # Recreate bin edges (cheap linear space)
+    bin_edges = jnp.linspace(g_min, g_max, num_bins + 1)
+
+    return total_counts, bin_edges
 
 def save_eqx_obj(save_dir: str, filename: str, obj: tuple):
     if not os.path.exists(save_dir):
@@ -209,6 +371,7 @@ def get_leaves(x: T) -> T:
         jax.tree_util.tree_flatten(x, eqx.is_array)[0]
     )[0]
 
+@eqx.filter_jit(donate="all-except-first")
 def load_eqx_obj(filepath: str, obj: PyTree[Any]) -> PyTree[Any]:
     return eqx.tree_deserialise_leaves(path_or_file=filepath, like=obj)
 
@@ -229,19 +392,22 @@ def count_params(model: eqx.Module) -> None:
     )
 
     unshared_params = 0
-    num_params /= 1_000_000
-    non_embed_params /= 1_000_000
 
     if hasattr(model.main_block, "unshared_layers"):
-        unshared_params += params_fn(model.main_block.unshared_layers) / 1_000_000
+        unshared_params += params_fn(model.main_block.unshared_layers)
 
-    if hasattr((layers := model.main_block.attention_layers)[0], "unshared_layers"):
-        unshared_params += (params_fn(layers[0].unshared_layers) / 1_000_000) * len(layers)
+    if hasattr(model.main_block, "attention_layers"):
+        if hasattr(model.main_block.attention_layers, "unshared_layers"):
+            unshared_params += params_fn(model.main_block.attention_layers.unshared_layers)
 
     if hasattr(model, "unshared_layers"):
-        unshared_params += params_fn(model.unshared_layers) / 1_000_000
+        unshared_params += params_fn(model.unshared_layers)
 
-    print(f"\nUnshared Parameters: {unshared_params}M")
+    num_params /= 1_000_000
+    non_embed_params /= 1_000_000
+    unshared_params /= 1_000_000
+
+    print(f"\nUnshared Parameters: {unshared_params:.2f}M")
     print(
         f"Model # of parameters: {num_params:.2f}M\n# of recurrent parameters: {non_embed_params:.2f}M\n"
     )
@@ -271,12 +437,162 @@ def get_rand_nums(
 
     return dist.astype(int)
 
-def download_artifact(artifact_path: str):
+def download_artifact(artifact_path: str, chkp_type: str = "OptunaCheckpoint", save_dir: str = "./") -> bool:
     api = wandb.Api()
 
     if api.artifact_exists(artifact_path):
-        artifact = api.artifact(artifact_path)
-        datadir = artifact.download(root="./", skip_cache=True)
+        print("Downloading artifact...")
+        artifact = api.artifact(artifact_path, chkp_type)
+        datadir = artifact.download(root=save_dir, skip_cache=True)
         print(f"\nArtifact downloaded at {datadir}. Ensure this chkp is loaded.")
+        return True
+
+    print(f"Warning: Artifact {artifact_path} does not exist.\n")
+    return False
+
+def fetch_resume_progress(resume: bool | str, save_dir: str, chkp_type: str) -> tuple[int, int]:
+    """
+    Downloads the latest checkpoint artifact (if a resume string is provided)
+    and extracts the latest epoch and step from files in `save_dir`.
+
+    The `resume` string may be of the form:
+      - "<run_id>" or "entity/project/<run_id>"
+      - "entity/project/<run_id> + <epoch> + <step>"
+
+    Returns:
+      (step, epoch) as integers. Defaults to (0, 0) if nothing found.
+    """
+    if not isinstance(resume, str):
+        return 0, 0
+
+    # Extract the run path/name before any optional + epoch/step suffixes
+    prefix = resume.split("+")[0].strip()
+
+    if len(prefix) == 0:
+        return 0, 0
+
+    # Build full artifact path
+    artifact_path = (
+        f"{prefix}:latest"
+        if prefix.count("/") >= 2
+        else f"neel/ReAct_Jax/{prefix}:latest"
+    )
+
+    # Best-effort download; ignore failures and fall back to parsing numbers
+    _ = download_artifact(artifact_path, save_dir=save_dir, chkp_type=chkp_type)
+
+    # Inspect local directory for any .eqx files and pick the latest by (epoch, step)
+    try:
+        files = [
+            os.path.join(save_dir, file)
+            for file in os.listdir(save_dir)
+            if file.endswith("eqx")
+        ]
+
+        if len(files) > 0:
+            epoch, step = max(
+                [re.findall(r"\d+", file) for file in files],
+                key=lambda x: (int(x[0]), int(x[1])),
+            )
+            return int(step), int(epoch)
+    except FileNotFoundError:
+        pass
+
+    # Fallback: try to parse epoch and step from the resume string if provided
+    nums = [int(x.strip()) for x in resume.split("+")[1:] if x.strip().isdigit()]
+    if len(nums) >= 2:
+        epoch, step = nums[0], nums[1]
+        return int(step), int(epoch)
+
+    return 0, 0
+
+class IterableDatasetWithLen(IterableDataset):
+    def __init__(
+        self,
+        dataset: Dataset | DatasetDict | IterableDataset | IterableDatasetDict,
+        length: int,
+    ):
+        self.dataset = dataset
+        self._length = length
+
+    def __len__(self) -> int:
+        return self._length
+
+    def __getattr__(self, name: str):
+        return getattr(self.dataset, name)
+
+    def __iter__(self):
+        for item in self.dataset:
+            yield item
+
+def _build_torch_prefetch_loader(
+    loader: Dataset
+    | DatasetDict
+    | IterableDataset
+    | IterableDatasetDict
+    | IterableDatasetWithLen,
+    prefetch_size: int,
+) -> TorchDataLoader:
+    core_count = 32 if os.cpu_count() >= 32 else 0  # type: ignore
+    prefetch_size: int = None if core_count == 0 else prefetch_size  # type: ignore
+
+    print(f"Using {core_count} cores for the dataloader!")
+
+    return TorchDataLoader(
+        loader,  # pyright: ignore[reportArgumentType]
+        batch_size=1,
+        num_workers=core_count,
+        prefetch_factor=prefetch_size,
+        persistent_workers=True if core_count > 0 else False,
+        pin_memory=False,
+    )
+
+
+def broadcast_batch(
+    loader: Dataset
+    | DatasetDict
+    | IterableDataset
+    | IterableDatasetDict
+    | IterableDatasetWithLen,
+    batch_size: int,
+    seqlen: int,
+    prefetch_size: int = 128,
+) -> Iterator[dict[str, tuple[Array, Array, Array]]]:
+    """
+    Ensures only process 0 touches the real loader while all hosts receive
+    identical arrays via `broadcast_one_to_all`. Optionally prefetches
+    `prefetch_size` batches ahead on the primary host. When possible, a
+    multi-worker torch DataLoader sustains throughput on the primary host.
+    """
+    is_primary = jax.process_index() == 0
+
+    if is_primary:
+        torch_loader = _build_torch_prefetch_loader(loader, prefetch_size)
+        iterator: Iterator[Any] = iter(torch_loader)
     else:
-        print(f"Warning: Artifact {artifact_path} does not exist.\n")
+        iterator = iter(range(len(loader)))  # pyright: ignore[reportArgumentType]
+
+    zero_batch = jnp.zeros((batch_size, seqlen), dtype=jnp.int32)
+
+    for batch in iterator:
+        if is_primary:
+            extracted_batch = batch["text"]
+
+            extracted_batch = (
+                extracted_batch[0] if len(extracted_batch) != 3 else extracted_batch
+            )
+
+            seq, label, pad_mask = jnp.asarray(extracted_batch)
+        else:
+            seq = label = pad_mask = zero_batch
+
+        seq, label, pad_mask = multihost_utils.broadcast_one_to_all(
+            (seq, label, pad_mask), is_source=is_primary
+
+        )
+
+        seq, label, pad_mask = jax.tree_util.tree_map(
+            lambda x: x.squeeze(), (seq, label, pad_mask)
+        )
+
+        yield {"text": (seq, label, pad_mask)}

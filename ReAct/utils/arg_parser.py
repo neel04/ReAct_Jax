@@ -1,8 +1,20 @@
 import argparse
 from argparse import Namespace
 
+from ReAct.utils.arg_types import (
+    EvaluationArgs,
+    InferenceArgs,
+    TrainingArgs,
+    from_namespace,
+)
 
-def parse_args() -> Namespace:
+
+def parse_args() -> TrainingArgs:
+    """Parse command line arguments for training.
+
+    Returns:
+        TrainingArgs: The parsed arguments as a structured dataclass.
+    """
     description = "Training script - kicks off training of the model"
     epilog = "Hyperparameters defaults may not be optimal. Please use --help to check available options."
 
@@ -20,7 +32,7 @@ def parse_args() -> Namespace:
         "--strategy",
         type=str,
         default="ddp",
-        help="Parallelization strategy to use. Check `sharding.py` for more info",
+        help="Parallelization strategy to use. Options: ddp | simple mp | megatron",
     )
 
     parser.add_argument(
@@ -125,7 +137,7 @@ def parse_args() -> Namespace:
     parser.add_argument(
         "--save_dir",
         type=str,
-        default="/Users/neel/Documents/research/ReAct_Jax/ReAct/outputs/",
+        default="./outputs/",
         help="Save directory for checkpoints. Default: ./outputs/. Keep the slash at the end",
     )
 
@@ -165,6 +177,15 @@ def parse_args() -> Namespace:
     )
 
     parser.add_argument(
+        "--bench_task",
+        type=str,
+        default="lambada_openai,winogrande",
+        help="Comma-separated benchmark tasks (1-4). Supported: lambada_openai, "
+        "lambada_standard, winogrande, hellaswag, piqa, arc_easy, arc_challenge, "
+        "boolq, openbookqa. Default: lambada_openai,winogrande",
+    )
+
+    parser.add_argument(
         "--resume",
         nargs="?",
         default=False,
@@ -173,11 +194,19 @@ def parse_args() -> Namespace:
         'epoch & step number with a +. \nExample arg: "neel/ReAct_Jax/6ktmhalt/ + 0 + 200"',
     )
 
-    parser.add_argument(
+    model_group = parser.add_mutually_exclusive_group()
+    model_group.add_argument(
         "--baseline",
         action="store_true",
         default=False,
         help="Train baseline vanilla transformer model. Default: False",
+    )
+
+    model_group.add_argument(
+        "--naive",
+        action="store_true",
+        default=False,
+        help="Train naive UT (simplified ReAct). Default: False",
     )
 
     parser.add_argument(
@@ -209,10 +238,16 @@ def parse_args() -> Namespace:
     )
 
     args = parser.parse_args()
-    return args
+    # Convert namespace to dataclass
+    return from_namespace(args, TrainingArgs)
 
 
-def get_inference_args() -> Namespace:
+def get_inference_args() -> InferenceArgs:
+    """Parse command line arguments for inference.
+
+    Returns:
+        InferenceArgs: The parsed arguments as a structured dataclass.
+    """
     description = "Inference script for sampling from a trained model"
 
     parser = argparse.ArgumentParser(description=description)
@@ -258,11 +293,19 @@ def get_inference_args() -> Namespace:
         "--width", type=int, default=384, help="Width dimension. Default: 384"
     )
 
-    parser.add_argument(
+    model_group = parser.add_mutually_exclusive_group()
+    model_group.add_argument(
         "--baseline",
         action="store_true",
         default=False,
         help="Train baseline vanilla transformer model. Default: False",
+    )
+
+    model_group.add_argument(
+        "--naive",
+        action="store_true",
+        default=False,
+        help="Use naive UT (simplified ReAct). Default: False",
     )
 
     parser.add_argument(
@@ -312,6 +355,13 @@ def get_inference_args() -> Namespace:
     )
 
     parser.add_argument(
+        "--rank",
+        type=int,
+        default=64,
+        help="Rank for the adapters used in the UT. Default: 64",
+    )
+
+    parser.add_argument(
         "--repetition_penalty",
         type=float,
         default=1.2,
@@ -319,11 +369,16 @@ def get_inference_args() -> Namespace:
     )
 
     args = parser.parse_args()
+    # Convert namespace to dataclass
+    return from_namespace(args, InferenceArgs)
 
-    return args
 
+def get_evaluation_args() -> EvaluationArgs:
+    """Parse command line arguments for evaluation.
 
-def get_evaluation_args():
+    Returns:
+        EvaluationArgs: The parsed arguments as a structured dataclass.
+    """
     description = "Collects the arguments for evaluating the model on any task"
 
     parser = argparse.ArgumentParser(description=description)
@@ -369,11 +424,19 @@ def get_evaluation_args():
         "--width", type=int, default=384, help="Width dimension. Default: 384"
     )
 
-    parser.add_argument(
+    model_group = parser.add_mutually_exclusive_group()
+    model_group.add_argument(
         "--baseline",
         action="store_true",
         default=False,
         help="Train baseline vanilla transformer model. Default: False",
+    )
+
+    model_group.add_argument(
+        "--naive",
+        action="store_true",
+        default=False,
+        help="Use naive UT (simplified ReAct). Default: False",
     )
 
     parser.add_argument(
@@ -384,22 +447,31 @@ def get_evaluation_args():
     )
 
     parser.add_argument(
-        "--strategy",
-        type=str,
-        default="ddp",
-        help="Strategy to use when inferencing. DDP should be enough",
+        "--rank",
+        type=int,
+        default=64,
+        help="Rank for the adapters used in the UT. Default: 64",
     )
 
     parser.add_argument(
-        "--task",
+        "--strategy",
         type=str,
-        default="hellaswag",
-        help="Which task to evaluate on. See full list on the EAI LM Eval Harness' GitHub repo",
+        default="ddp",
+        help="Strategy to use when inferencing/evaluating. Options: ddp | simple mp | megatron",
+    )
+
+    parser.add_argument(
+        "--bench_task",
+        type=str,
+        default="lambada_openai,winogrande",
+        help="Comma-separated benchmark tasks (1-4). Supported: lambada_openai, "
+        "lambada_standard, winogrande, hellaswag, piqa, arc_easy, arc_challenge, "
+        "boolq, openbookqa. Default: lambada_openai,winogrande",
     )
 
     args = parser.parse_args()
 
-    return args
+    return from_namespace(args, EvaluationArgs)
 
 
 if __name__ == "__main__":

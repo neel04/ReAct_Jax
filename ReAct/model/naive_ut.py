@@ -10,10 +10,9 @@ from jaxtyping import Array, PRNGKeyArray, PyTree
 from ReAct.utils.sharding import Sharding
 
 from .blocks import (
-    AdaptableAttentionBlock,
+    AttentionBlock,
     FastEmbedding,
     LinearProj,
-    UnsharedBlock,
 )
 
 # ruff: noqa: E402, E731
@@ -28,7 +27,6 @@ class RecurrentModule(eqx.Module):
 
     attention_layers: List[PyTree]
     post_ln: eqx.nn.LayerNorm
-    unshared_layers: UnsharedBlock[LinearProj | LayerNorm]
 
     def __init__(
         self,
@@ -51,10 +49,8 @@ class RecurrentModule(eqx.Module):
 
         make_attn = lambda k: self.make_layer(
             self.sharding,
-            rank=rank,
             seqlen=seqlen,
             n_heads=n_heads,
-            num_layers=num_layers,
             drop_rate=drop_rate,
             bottleneck=bottleneck,
             max_iters=max_iters,
@@ -63,39 +59,21 @@ class RecurrentModule(eqx.Module):
 
         self.post_ln = eqx.nn.LayerNorm(bottleneck)
 
-        self.unshared_layers = UnsharedBlock(
-            layers={
-                "reshape_gate": partial(
-                    LinearProj,
-                    bottleneck * 2,
-                    bottleneck,
-                    strategy=self.sharding,
-                ),
-                "post_ln": LayerNorm(bottleneck),
-            },
-            num_repeats=max_iters,
-            key=key,
-        )
-
         self.attention_layers = [make_attn(k) for k in keys] # disable `scan`-over layers for now
 
     @staticmethod
     def make_layer(
         strategy: Sharding,
-        rank: int,
         seqlen: int,
         n_heads: int,
-        num_layers: int,
         drop_rate: float,
         bottleneck: int,
         max_iters: int,
         key: PRNGKeyArray,
-    ) -> AdaptableAttentionBlock:
-        return AdaptableAttentionBlock(
-            rank,
+    ) -> AttentionBlock:
+        return AttentionBlock(
             seqlen,
             n_heads,
-            num_layers,
             drop_rate,
             bottleneck,
             max_iters=max_iters,
@@ -110,38 +88,23 @@ class RecurrentModule(eqx.Module):
         pad_mask: Array,
         enable_dropout: bool,
         iteration_index: int,
-        stop_grad: bool,
         key: PRNGKeyArray,
     ) -> Array:
 
         keys = jax.random.split(key, self.num_layers * self.max_iters)
 
-        x = jnp.concatenate([prev_latent, input_arr], axis=-1)
-
-        x = self.unshared_layers.apply_layer(
-            "reshape_gate", iteration_index, (x,)
-        )  # downsample the concatenated array
-
-        x, pad_mask = self.sharding.cast((x, pad_mask))
+        x, pad_mask = self.sharding.cast((prev_latent, pad_mask))
 
         def scan_fn(
-            carry: Tuple[Array, int], layer: AdaptableAttentionBlock
+            carry: Tuple[Array, int], layer: AttentionBlock
         ) -> Tuple[Tuple[Array, int], Array]:
             x, idx = carry
 
-            blck_global_idx = idx + (self.max_iters * iteration_index)
-
             x = layer(
                 x,
-                iteration_index,
                 pad_mask,
                 enable_dropout,
-                stop_grad,
-                keys[blck_global_idx],
-            )
-
-            x = self.unshared_layers.apply_layer(
-                "post_ln", iteration_index, (x,), eqx.filter_vmap
+                keys[idx],
             )
 
             x = self.sharding.cast(x)
@@ -169,7 +132,6 @@ class React(eqx.Module):
     embed_layer: FastEmbedding
     embed_ln: eqx.nn.LayerNorm
     main_block: RecurrentModule
-    unshared_layers: UnsharedBlock[LayerNorm]
     unemb_ln: eqx.nn.LayerNorm
     out_head: LinearProj
 
@@ -207,15 +169,8 @@ class React(eqx.Module):
             self.sharding,
         )
 
-        self.unshared_layers = UnsharedBlock(
-            layers={
-                "post_ln": LayerNorm(width),
-            },
-            num_repeats=max_iters,
-            key=key,
-        )
-
         self.unemb_ln = eqx.nn.LayerNorm(width)
+
         self.out_head = LinearProj(width, vocab_size, key=key3, strategy=self.sharding)
 
     @eqx.filter_jit
@@ -226,7 +181,6 @@ class React(eqx.Module):
         mask: Array,
         iters_to_do: int,
         enable_dropout: bool,
-        stop_grad: bool,
         key: PRNGKeyArray,
     ) -> Array:
         
@@ -242,13 +196,8 @@ class React(eqx.Module):
                 mask,
                 enable_dropout,
                 idx,
-                stop_grad,
                 keys[idx],
             )  # (seqlen, width)
-
-            latent = self.unshared_layers.apply_layer(
-                "post_ln", idx, args=(latent,), modifier_fn=eqx.filter_vmap
-            )
 
             latent = self.sharding.cast(latent)
 
@@ -280,8 +229,6 @@ class React(eqx.Module):
 
         embed_fn = lambda x: self.embed_ln(self.embed_layer(x))
 
-        embed_fn = lambda x: self.embed_ln(self.embed_layer(x))
-
         if prev_thought:
             assert isinstance(input_arr, tuple), 'prev_thought is True, but input_arr is not a tuple'
             input_arr, interim_thought = input_arr
@@ -298,7 +245,6 @@ class React(eqx.Module):
             pad_mask,
             iters_to_do,
             is_training,
-            stop_grad,
             key,
         )  # (batch, seqlen, bottleneck)
 

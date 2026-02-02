@@ -178,3 +178,9 @@ devlog.md
 lm-evaluation-harness
 CLAUDE.md
 *db
+uv.lock
+profiles/
+.opencode
+OpenCode.md
+AGENTS.md
+.notes.md

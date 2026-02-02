@@ -9,7 +9,11 @@ from equinox.nn import LayerNorm
 from jaxtyping import Array, Float, Int, PRNGKeyArray
 from jmp import Policy
 
+from ReAct.model._attn import AdaptableMultiheadAttention
+from ReAct.utils.helpers import megatron_init
 from ReAct.utils.sharding import Sharding, get_strategy
+
+ArrayMap = Callable[[Array], Array]
 
 policy = Policy(
     compute_dtype=jnp.bfloat16, param_dtype=jnp.bfloat16, output_dtype=jnp.bfloat16
@@ -49,6 +53,16 @@ class NewGELU(eqx.Module):
         return self.sharding.shard_model_cast(output)
 
 
+def _init_weight(input_dim: int, output_dim: int, key: PRNGKeyArray) -> Array:
+    lim = 1 / math.sqrt(input_dim)
+
+    return jax.random.uniform(
+        key, (input_dim, output_dim), minval=-lim, maxval=lim
+    ) * math.sqrt(1 / (3 * input_dim))
+
+def _zero_init(input_dim: int, output_dim: int) -> Array:
+    return jnp.zeros((input_dim, output_dim))
+
 class LinearProj(eqx.Module):
     bias: jax.Array
     weight: jax.Array
@@ -66,9 +80,9 @@ class LinearProj(eqx.Module):
         use_bias=True,
         strategy: Sharding | None = None,
     ):
-        assert (
-            input_dim >= 1 or output_dim >= 1
-        ), f"input_dim: {input_dim} | output_dim: {output_dim} are too small"
+        assert input_dim >= 1 or output_dim >= 1, (
+            f"input_dim: {input_dim} | output_dim: {output_dim} are too small"
+        )
         assert strategy is not None, "No strategy provided."
 
         wkey, bkey = jax.random.split(key, 2)
@@ -137,16 +151,27 @@ class MLP(eqx.Module):
         self.dropout = eqx.nn.Dropout(p=p)
 
     @eqx.filter_jit
-    def __call__(self, x: Array, enable_dropout: bool, key: PRNGKeyArray):
+    def __call__(
+        self,
+        x: Array,
+        enable_dropout: bool,
+        *,
+        key: PRNGKeyArray,
+        proj_operator: Tuple[ArrayMap, ArrayMap] | None = None,
+    ):
+        proj_1, proj_2 = proj_operator or (None, None)
+
         x = self.sharding.shard_model_cast(x)
 
-        x = self.act(self.layer_1(x))
+        lat = self.act(self.layer_1(x))
+        lat = lat + proj_1(x) if proj_1 else lat
 
-        x = self.layer_2(x)
+        latent = self.layer_2(lat)
+        latent = latent + proj_2(lat) if proj_2 else latent
 
-        output = self.dropout(x, key=key, inference=enable_dropout)
+        output = self.act(self.dropout(latent, key=key, inference=enable_dropout))
 
-        return self.sharding.shard_model_cast(self.act(output))
+        return self.sharding.shard_model_cast(output)
 
 
 class AttentionBlock(eqx.Module):
@@ -240,8 +265,8 @@ class AttentionBlock(eqx.Module):
 
         inp += self.attn_gate(
             query=x,
-            key_=inp,
-            value=inp,
+            key_=x,
+            value=x,
             mask=self._make_self_attention_mask(mask),
             inference=enable_dropout,
             process_heads=self.process_heads,
@@ -279,10 +304,65 @@ class CopyGate(eqx.Module):
     def __call__(
         self, input: Array, key: PRNGKeyArray, enable_dropout: bool = True
     ) -> Array:
-        return jax.nn.sigmoid(self.gating_layer(input, enable_dropout, key))
+        return jax.nn.sigmoid(self.gating_layer(input, enable_dropout, key=key))
 
 
-L = TypeVar("L", bound=LinearProj | AttentionBlock | LayerNorm | CopyGate | Lerp)
+class ABBA(eqx.Module):
+    in_dim: float = eqx.field(static=True)
+    out_dim: float = eqx.field(static=True)
+    rank: float = eqx.field(static=True)
+    s_abb: float = eqx.field(static=True)  # scaling factor
+
+    A_1: Array
+    A_2: Array
+
+    B_1: Array
+    B_2: Array
+
+    def __init__(
+        self,
+        in_dim: int,
+        out_dim: int,
+        rank: int,
+        key: PRNGKeyArray,
+        strategy: Sharding,
+    ):
+        key1, key2, key3, key4 = jax.random.split(key, 4)
+
+        self.in_dim = in_dim
+        self.out_dim = out_dim
+        self.rank = rank
+        self.s_abb = 1 / rank
+
+        self.B_1 = megatron_init(input_dim=in_dim, output_dim=rank, key=key1)
+        self.A_1 = megatron_init(input_dim=rank, output_dim=out_dim, key=key2)
+
+        self.B_2 = _zero_init(in_dim, rank)
+        self.A_2 = megatron_init(input_dim=rank, output_dim=out_dim, key=key4)
+
+    def __call__(self, x: Float[Array, "... in_dim"]) -> Float[Array, "... out_dim"]:
+        A_kr: Float[Array, "r_1*r_2 out_dim"] = self.rowwise_khatri_rao(
+            self.A_1.T, self.A_2.T
+        ).T
+        B_kr: Float[Array, "in_dim r_1*r_2"] = self.rowwise_khatri_rao(
+            self.B_1, self.B_2
+        )
+
+        return self.s_abb * (x @ B_kr) @ A_kr
+
+    @staticmethod
+    def rowwise_khatri_rao(U: Array, V: Array) -> Array:
+        m, n = U.shape
+
+        U_exp = U[:, :, None]  # (m, n, 1)
+        V_exp = V[:, None, :]  # (m, 1, n)
+
+        # Elementwise multiply and reshape
+        out = (U_exp * V_exp).reshape(m, n * n)
+
+        return out
+
+L = TypeVar("L", bound=LinearProj | AttentionBlock | LayerNorm | CopyGate | Lerp | ABBA)
 
 
 class UnsharedBlock(eqx.Module, Generic[L]):
@@ -306,7 +386,10 @@ class UnsharedBlock(eqx.Module, Generic[L]):
         keys = jax.random.split(key, num_repeats)
 
         self.layers = {
-            name: tuple(self.init_layer(layer_init, keys, i) for i in range(num_repeats))
+            name: tuple(
+                self.init_layer(layer_init, keys, i)  # pyright: ignore[reportArgumentType]
+                for i in range(num_repeats)
+            )
             for name, layer_init in layers.items()
         }
         self.num_repeats = num_repeats
@@ -320,7 +403,7 @@ class UnsharedBlock(eqx.Module, Generic[L]):
     def apply_layer(
         self,
         name: str,
-        iteration_index: int | Array,
+        iteration_index: int,
         args: Tuple,
         modifier_fn: Callable = lambda x: x,
     ) -> Array:
@@ -340,10 +423,8 @@ class UnsharedBlock(eqx.Module, Generic[L]):
 
             return layer_apply
 
-        branches = tuple(apply_fn(i) for i in range(len(layers)))
-
-        return jax.lax.switch(iteration_index, branches, args)
-
+        with jax.ensure_compile_time_eval():
+            return eqx.filter_jit(apply_fn(iteration_index))(args)
 
 class NDRAttentionBlock(eqx.Module):
     """CopyGated Augmented block inspired by Csordas et al."""
@@ -368,7 +449,7 @@ class NDRAttentionBlock(eqx.Module):
         key: PRNGKeyArray,
         strategy: Sharding,
     ):
-        key1, key2, key3 = jax.random.split(key, 3)
+        key1, key2, _ = jax.random.split(key, 3)
 
         self.sharding = strategy(policy)
 
@@ -478,13 +559,14 @@ class AdaptableAttentionBlock(eqx.Module):
     seqlen: int = eqx.field(static=True)
     n_heads: int = eqx.field(static=True)
     in_dim: int = eqx.field(static=True)
+    rank: int = eqx.field(static=True)
 
-    unshared_layers: UnsharedBlock[LinearProj | LayerNorm]
+    unshared_layers: UnsharedBlock[LinearProj | ABBA]
     rope_embed: eqx.nn.RotaryPositionalEmbedding
-    attn_gate: eqx.nn.MultiheadAttention
+    attn_gate: AdaptableMultiheadAttention
     ln1: eqx.nn.LayerNorm
     ln2: eqx.nn.LayerNorm
-    mlp_lora_lerp: Lerp
+    act: NewGELU
     mlp: MLP
 
     def __init__(
@@ -502,16 +584,19 @@ class AdaptableAttentionBlock(eqx.Module):
         key1, key2 = jax.random.split(key, 2)
 
         self.sharding = strategy(policy)
+        self.act = NewGELU(strategy)
 
         self.seqlen = seqlen
         self.n_heads = n_heads
         self.in_dim = in_dim
+        self.rank = rank
 
         self.rope_embed = eqx.nn.RotaryPositionalEmbedding(
             embedding_size=in_dim // n_heads
         )
 
-        self.attn_gate = eqx.nn.MultiheadAttention(
+        self.attn_gate = AdaptableMultiheadAttention(
+            act=self.act,
             num_heads=n_heads,
             query_size=in_dim,
             use_query_bias=True,
@@ -519,19 +604,14 @@ class AdaptableAttentionBlock(eqx.Module):
             use_value_bias=True,
             use_output_bias=True,
             dropout_p=drop_rate,
+            qk_norm=True,
             key=key1,
         )
 
         self.unshared_layers = UnsharedBlock(
             layers={
-                "adapter_A": partial(LinearProj, in_dim, rank, strategy=self.sharding),
-                "adapter_B": partial(LinearProj, rank, in_dim, strategy=self.sharding),
-                "MLP_adapter_A": partial(
-                    LinearProj, in_dim, rank, strategy=self.sharding
-                ),
-                "MLP_adapter_B": partial(
-                    LinearProj, rank, in_dim, strategy=self.sharding
-                ),
+                "Attn_adapter_A": self._get_abba(),
+                "MLP_adapter_A": self._get_abba(),
             },
             num_repeats=max_iters,
             key=key,
@@ -541,7 +621,23 @@ class AdaptableAttentionBlock(eqx.Module):
         self.ln2 = eqx.nn.LayerNorm(self.in_dim)
 
         self.mlp = MLP(self.in_dim, self.in_dim, drop_rate, key2, strategy)
-        self.mlp_lora_lerp = Lerp(0.5)
+
+    def _get_proj(self, reverse: bool = False):
+        if reverse:
+            return partial(LinearProj, self.rank, self.in_dim, strategy=self.sharding)
+
+        return partial(LinearProj, self.in_dim, self.rank, strategy=self.sharding)
+
+    def _get_abba(
+        self, in_ff_mult: int = 1, out_ff_mult: int = 1, rank_mul: float = 1.0
+    ):
+        return partial(
+            ABBA,
+            self.in_dim * in_ff_mult,
+            self.in_dim * out_ff_mult,
+            int(self.rank * rank_mul),
+            strategy=self.sharding,
+        )
 
     def process_heads(
         self,
@@ -566,13 +662,31 @@ class AdaptableAttentionBlock(eqx.Module):
 
         return mask
 
+    def _apply_lora(
+        self, name: str, idx: int, stop_grad: bool = False
+    ) -> Callable[[Array], Array]:
+        """
+        Helper function that applies non-linear LoRA-like transformation
+        """
+
+        def _apply(x: Array) -> Array:
+            out = self.act(self.unshared_layers.apply_layer(name, idx, (x,)))
+
+            if stop_grad:
+                return out
+            else:
+                return jax.lax.stop_gradient(out)
+
+        return _apply
+
     @eqx.filter_jit
     def __call__(
         self,
         inp: Float[Array, "seqlen in_dim"],
-        it_idx: int,  # <=> iteration index
+        it_idx: int,  # iteration index
         mask: Array,
         enable_dropout: bool,
+        stop_grad: bool,
         key: PRNGKeyArray,
     ) -> Float[Array, "seqlen in_dim"]:
         key_1, key_2 = jax.random.split(key, 2)
@@ -581,29 +695,25 @@ class AdaptableAttentionBlock(eqx.Module):
 
         x = jax.vmap(self.ln1)(inp)
 
-        lora_lat = self.unshared_layers.apply_layer("adapter_A", it_idx, (x,))
-        lora_lat = self.unshared_layers.apply_layer("adapter_B", it_idx, (lora_lat,))
+        attn_lora = self._apply_lora("Attn_adapter_A", it_idx, stop_grad)(x)
 
         inp += self.attn_gate(
             query=x,
-            key_=inp,
-            value=inp,
+            key_=x,
+            value=x,
             mask=self._make_self_attention_mask(mask),
             inference=enable_dropout,
             process_heads=self.process_heads,
-            key=key_1,
+            key=key_1
         )
 
-        inp += lora_lat # inject adapter information in the residual. 
+        inp += attn_lora # mixing in adapter information
 
         x = jax.vmap(self.ln2)(inp)
 
-        mlp_lora = self.unshared_layers.apply_layer("MLP_adapter_A", it_idx, (x,))
-        mlp_lora = self.unshared_layers.apply_layer("MLP_adapter_B", it_idx, (mlp_lora,))
+        mlp_lora = self._apply_lora("MLP_adapter_A", it_idx, stop_grad)(x)
 
-        inp += self.mlp(x, enable_dropout=True, key=key_2)
-
-        inp = self.mlp_lora_lerp(inp, mlp_lora)
+        inp += self.mlp(x, enable_dropout=True, key=key_2) + mlp_lora
 
         return self.sharding.shard_model_cast(inp)
 

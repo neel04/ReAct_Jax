@@ -1,29 +1,39 @@
 FROM python:3.11
-
-# Set environment variables
 ENV jax_threefry_partitionable=1
 
-# Install base utilities
+SHELL ["/bin/bash", "-lc"]
+
 RUN apt-get update && \
-    apt-get install -y build-essential && \
-    apt-get install -y net-tools iproute2 procps ethtool && \
-    apt-get install -y wget && \
-    apt-get install -y git && \
-    apt-get install -y gcc && \
-    rm -rf /var/lib/apt/lists/*
+    apt-get install -y --no-install-recommends \
+      build-essential \
+      net-tools iproute2 procps ethtool \
+      wget git gcc \
+      neovim tmux \
+    && rm -rf /var/lib/apt/lists/*
 
-RUN pip3 install Ipython matplotlib
-RUN pip3 install numpy pandas scipy
+ENV VIRTUAL_ENV=/opt/venv
+RUN pip3 install --no-cache-dir uv && \
+    uv venv "$VIRTUAL_ENV" --python 3.11
+ENV PATH="$VIRTUAL_ENV/bin:$PATH"
 
-RUN pip3 install -U -q jax[tpu] -f https://storage.googleapis.com/jax-releases/libtpu_releases.html
-RUN pip3 install -q transformers datasets scalax tokenizers icecream wandb einops torch tqdm jaxtyping optax optuna equinox rich
-RUN pip3 install -U optuna-integration plotly lm-eval pdbpp
-RUN pip3 install git+https://github.com/deepmind/jmp
-RUN pip3 install git+https://github.com/Findus23/jax-array-info.git
-RUN pip3 install -q tensorboard-plugin-profile tensorboard etils importlib_resources "cloud-tpu-profiler>=2.3.0"
+RUN uv pip install -U --no-cache-dir "jax[cuda12]"
+
+RUN uv pip install -q --no-cache-dir \
+    transformers datasets scalax tokenizers icecream wandb einops torch tqdm jaxtyping optuna equinox rich
+
+RUN uv pip install -q --no-cache-dir -U optuna-integration plotly pdbpp
+
+RUN uv pip install --no-cache-dir \
+    git+https://github.com/neel04/lm-evaluation-harness.git@debug/mp
+
+RUN uv pip install --no-cache-dir \
+    git+https://github.com/google-deepmind/optax.git \
+    git+https://github.com/deepmind/jmp \
+    git+https://github.com/Findus23/jax-array-info.git
+
+RUN uv pip install -q --no-cache-dir \
+    tensorflow tensorboard-plugin-profile etils importlib_resources "cloud-tpu-profiler>=2.3.0"
 
 WORKDIR /ReAct_Jax
 
-# Set the entry point to bash 
-ENTRYPOINT ["/bin/bash"]
-
+CMD ["bash", "-lc", "tail -f /dev/null"]

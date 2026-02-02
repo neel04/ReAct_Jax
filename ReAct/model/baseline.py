@@ -2,14 +2,11 @@ from typing import Any, Optional
 
 import equinox as eqx
 import jax
-import jax.numpy as jnp
 from jaxtyping import Array, PRNGKeyArray, PyTree
 
 from ReAct.utils.sharding import Sharding
 
-from ReAct.utils.sharding import Sharding
-
-from .blocks import AttentionBlock, LinearProj
+from .blocks import AttentionBlock, FastEmbedding, LinearProj
 
 # ruff: noqa: E402, E731
 
@@ -52,7 +49,7 @@ class VanillaModule(eqx.Module):
         bottleneck: int,
         key: PRNGKeyArray,
     ) -> AttentionBlock:
-        return AttentionBlock(seqlen, n_heads, drop_rate, bottleneck, key, strategy)
+        return AttentionBlock(seqlen, n_heads, drop_rate, bottleneck, 0, key, strategy)
 
     def __call__(
         self,
@@ -65,7 +62,7 @@ class VanillaModule(eqx.Module):
 
         def scan_f(carry: Array, block: PyTree):
             carry = self.sharding.cast(carry)
-            output: Array = block(carry, carry, pad_mask, enable_dropout, key)
+            output: Array = block(carry, pad_mask, enable_dropout, key)
             output = self.sharding.cast(output)
 
             return output, None
@@ -85,7 +82,7 @@ class GPT(eqx.Module):
     __name__ = "GPT"
 
     sharding: Sharding = eqx.field(static=True)
-    embed_layer: eqx.nn.Embedding
+    embed_layer: FastEmbedding
     embed_ln: eqx.nn.LayerNorm
     main_block: VanillaModule
     out_head: LinearProj
@@ -104,13 +101,8 @@ class GPT(eqx.Module):
         self.sharding = strategy
         keys = jax.random.split(key, 3)
 
-        # Custom initialization for the Embedding Layer
-        embed_weights: Array = jax.random.normal(
-            key, (vocab_size, width), dtype=jnp.float32
-        ) * ((2 / (5 * width)) ** 0.5)
-
         self.embed_ln = eqx.nn.LayerNorm(width)
-        self.embed_layer = eqx.nn.Embedding(weight=embed_weights)
+        self.embed_layer = FastEmbedding(vocab_size, width, keys[0], strategy)
 
         self.main_block = VanillaModule(
             seqlen,
@@ -128,7 +120,13 @@ class GPT(eqx.Module):
 
     @eqx.filter_jit
     def __call__(
-        self, input_arr: Array, pad_mask: Array, enable_dropout: bool, key: PRNGKeyArray
+        self,
+        input_arr: Array,
+        pad_mask: Array,
+        enable_dropout: bool,
+        key: PRNGKeyArray,
+        *,
+        return_logits: bool = True,
     ) -> Array:
         embed_fn = lambda x: self.embed_ln(self.embed_layer(x))
 
@@ -140,4 +138,7 @@ class GPT(eqx.Module):
 
         output = self.main_block(input_arr, pad_mask, enable_dropout, key)
 
-        return self.out_head(output)
+        if return_logits:
+            return self.out_head(output)
+
+        return output

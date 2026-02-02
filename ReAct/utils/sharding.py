@@ -60,7 +60,7 @@ class Sharding(ABC):
     def get_devices(self):
         return mesh_utils.create_device_mesh(
             (jax.device_count() // self.model_axis, self.model_axis),
-            allow_split_physical_axes=True,
+            allow_split_physical_axes=True, # FIX: Look at disabling this
         )
 
     @staticmethod
@@ -84,7 +84,7 @@ def get_strategy(strategy: str | Sharding, *args) -> Sharding:
                 strat = SimpleMPSharding(*args)
 
             case "megatron":
-                strat = MegatronSharding(*args)
+                strat = MegatronFSDPSharding(*args)
 
             case _:
                 raise NotImplementedError(f"Strategy {strategy} does not exist.")
@@ -117,6 +117,56 @@ class DDPSharding(Sharding):
             return leaf
 
         sharding_ = NamedSharding(self.mesh, P())
+
+        return eqx.filter_shard(leaf, sharding_)
+
+class MegatronFSDPSharding(Sharding):
+    """
+    Megatron-style mesh with an FSDP-inspired model axis.
+
+    - Data remains split along the `data` axis.
+    - Model/optimizer states are sharded along a `model` axis, picking the largest
+      dimension per array when possible. If a dimension is not divisible by the
+      model axis size, the leaf is replicated to avoid shape errors.
+    """
+
+    def __init__(self, model_axis: int = 2) -> None:
+        super().__init__(model_axis)
+        self.mesh = self.get_mesh()
+        self.model_axis_size = self.mesh.shape["model"]
+
+    def get_mesh(self) -> Mesh:
+        return Mesh(self.get_devices(), axis_names=("data", "model"))
+
+    def shard_data(self, tree: PyTree | Array) -> PyTree | Array:
+        return eqx.filter_shard(tree, NamedSharding(self.mesh, P("data")))
+
+    def shard_model(self, tree: PyTree) -> PyTree:
+        return jtu.tree_map_with_path(self.megatron_sharding, tree)
+
+    def shard_one_hot(self, tree: PyTree) -> PyTree:
+        return self.shard_data(tree)
+
+    def megatron_sharding(
+        self, kp: Annotated[str, "DataclassInstance"], leaf: PyTree
+    ) -> PyTree:
+        if not eqx.is_array(leaf):
+            return leaf
+
+        # Default: replicate if we cannot safely shard.
+        sharding_ = NamedSharding(self.mesh, P())
+
+        if leaf.ndim == 0:
+            return eqx.filter_shard(leaf, sharding_)
+
+        p_spec = get_spec_on_larger_dim(leaf, key="model")
+        model_axis = p_spec.index("model")
+
+        # Only shard when the target dimension cleanly divides by the model axis size.
+        if leaf.shape[model_axis] % self.model_axis_size != 0:
+            return eqx.filter_shard(leaf, sharding_)
+
+        sharding_ = NamedSharding(self.mesh, P(*p_spec))
 
         return eqx.filter_shard(leaf, sharding_)
 
@@ -153,39 +203,6 @@ class SimpleMPSharding(Sharding):
             sharding_ = NamedSharding(self.mesh, P(None, "model"))
 
         return eqx.filter_shard(leaf, sharding_)
-
-
-class MegatronSharding(Sharding):
-    def __init__(self, model_axis: int = 2) -> None:
-        super().__init__(model_axis)
-        self.mesh = self.get_mesh()
-
-    def get_mesh(self) -> Mesh:
-        return Mesh(self.get_devices(), axis_names=("data", "model"))
-
-    def shard_data(self, tree: PyTree | Array) -> PyTree | Array:
-        return eqx.filter_shard(tree, NamedSharding(self.mesh, P("data")))
-
-    def shard_model(self, tree: PyTree) -> PyTree:
-        return jtu.tree_map_with_path(self.megatron_sharding, tree)
-
-    def shard_one_hot(self, tree: PyTree) -> PyTree:
-        return self.shard_data(tree)
-
-    def megatron_sharding(
-        self, kp: Annotated[str, "DataclassInstance"], leaf: PyTree
-    ) -> PyTree:
-        if not eqx.is_array(leaf):
-            return leaf
-
-        sharding_ = NamedSharding(self.mesh, P())
-
-        if leaf.ndim == 2:
-            p_spec = get_spec_on_larger_dim(leaf)
-            sharding_ = NamedSharding(self.mesh, P(*p_spec))
-
-        return eqx.filter_shard(leaf, sharding_)
-
 
 if __name__ == "__main__":
     # import sys

@@ -4,22 +4,30 @@ import subprocess
 import jax
 import optuna
 
-from ReAct.utils.helpers import download_artifact
+from ReAct.data.fineweb import FineWebDataset
+from ReAct.utils.helpers import (
+    download_artifact,
+    fetch_resume_progress,
+    sweep_prefixes,
+)
 
-if platform.processor() != "arm":
+if platform.processor() != "arm": # Nothing on Apple sillicon
     try:
         subprocess.check_output("nvidia-smi")
         print("Nvidia GPU detected!")
-        jax.distributed.initialize(
-            coordinator_address="127.0.0.1:4312", num_processes=1, process_id=0
-        )
+        # jax.distributed.initialize(
+        #     coordinator_address="127.0.0.1:4312", num_processes=1, process_id=0
+        # )
     except Exception:
-        print("No GPU - assuming TPU.")
-        jax.distributed.initialize()  # don't run on apple sillicon
+        if os.path.isdir("/home/tpu-runtime"):
+            print("No GPU - assuming TPU.")
+            jax.distributed.initialize()
+        else:
+            print("No GPU/TPU - assuming CPU.")
 
 from jax import config
+from jax.experimental import multihost_utils
 from jaxtyping import PRNGKeyArray
-from optuna.integration.wandb import WeightsAndBiasesCallback
 
 from ReAct.data.gh_code import GithubCodeDataset
 from ReAct.data.minipile import MiniPileDataset
@@ -54,6 +62,8 @@ def main(key: PRNGKeyArray):
             dataset = MiniPileDataset
         case "github":
             dataset = GithubCodeDataset
+        case "fineweb":
+            dataset = FineWebDataset
         case _:
             raise ValueError(
                 f"Unsupported dataset '{args.dataset}'. Supported datasets are 'tinystories', 'owt', 'minipile', 'github'."
@@ -64,56 +74,67 @@ def main(key: PRNGKeyArray):
     # ========= Training/Hypertuning =========
     init_hyperparams = [
         {
-            "lr": 6e-4,
-            "drop_rate": 0.01,
-            "weight_decay": 1e-5,
-            "warmup_steps": 200,
-            "beta_1": 0.9,
+            "lr": 2.5e-4,
+            "drop_rate": 0.00,
+            "weight_decay": 2e-3,
+            "warmup_steps": 300,
+            "beta_1": 0.65,
             "beta_2": 0.9,
-            "nesterov": True,
+            "nesterov": False,
         },
         {
-            "lr": 3e-4,
+            "lr": 4e-4,
             "drop_rate": 0.00,
-            "weight_decay": 7e-4,
-            "warmup_steps": 1000,
-            "beta_1": 0.75,
-            "beta_2": 0.75,
+            "weight_decay": 5e-3,
+            "warmup_steps": 500,
+            "beta_1": 0.65,
+            "beta_2": 0.8,
             "nesterov": False,
         },
     ]
 
+    # Don't log if not on process index 0
+    args.exp_logging = False if jax.process_index() != 0 else args.exp_logging
+
     if args.tune_hyperparams:
-        args.exp_logging = False if jax.process_index() != 0 else args.exp_logging
-
         # Rename the group to seperate sweeps from normal runs.
-        args.group = "Sweeps_base" if args.baseline else f"Sweeps_{args.max_iters}i"
-        args.group += args.sweep_metadata # append metadata on end
-
-        artifact_name = (
-            f"Sweeps_{args.max_iters}i{args.sweep_metadata}"
-            if not args.baseline
-            else f"Sweeps_baseline{args.sweep_metadata}"
+        group_prefix, artifact_prefix, optuna_prefix, study_prefix = sweep_prefixes(
+            args=args
         )
+
+        args.group = f"{group_prefix}{args.sweep_metadata}"
+        artifact_name = f"{artifact_prefix}{args.sweep_metadata}"
 
         if args.resume:
-            download_artifact("neel/ReAct_Jax/" + artifact_name + ":latest")
+            try:
+                print("Attempting to download artifact...")
+                download_artifact("neel/ReAct_Jax/" + artifact_name + ":latest")
+            except TypeError:
+                print(
+                    "\nEmpty W&B Artifact detected. Cannot resume from it. Continuing as normal..."
+                )
 
-        jax.experimental.multihost_utils.sync_global_devices("Sync up all nodes.")  # type: ignore
+        multihost_utils.sync_global_devices("Sync up all nodes.")  # type: ignore
         trainloader = dataset.create_dataloader(
-            split="train", slice=":10%", upload_to_hub=False
+            split="train", slice=":1%", upload_to_hub=False
         )
 
-        jax.experimental.multihost_utils.sync_global_devices("Sync up all nodes.")  # type: ignore
+        multihost_utils.sync_global_devices("Sync up all nodes.")  # type: ignore
         valloader = dataset.create_dataloader(
-            split="val", slice=":10%", upload_to_hub=False
+            split="val", slice=":1%", upload_to_hub=False
         )
 
         # Create optuna hypertununing study
-        storage = f"sqlite:///chkp_{args.max_iters}i_{args.num_blocks}L_{args.width}{args.sweep_metadata}.db"
+        storage = (
+            f"sqlite:///{optuna_prefix}_{args.num_blocks}L_"
+            f"{args.width}{args.sweep_metadata}.db"
+        )
 
         study = optuna.create_study(
-            study_name=f"Sweeps_{args.max_iters}i_{args.num_blocks}L_{args.width}{args.sweep_metadata}",
+            study_name=(
+                f"{study_prefix}_{args.num_blocks}L_{args.width}"
+                f"{args.sweep_metadata}"
+            ),
             direction="minimize",
             load_if_exists=True,
             storage=storage,
@@ -123,40 +144,29 @@ def main(key: PRNGKeyArray):
                 consider_endpoints=True,
                 multivariate=True,
                 warn_independent_sampling=True,
-                n_startup_trials=10,
+                n_startup_trials=15,
             ),
             pruner=optuna.pruners.PercentilePruner(
                 percentile=25.0, n_startup_trials=5, n_min_trials=5, n_warmup_steps=1500
             ),
         )
 
-        wandb_kwargs = {
-            "project": "ReAct_Jax",
-            "config": args,
-            "anonymous": "allow",
-            "entity": "neel",
-        }
-
         trainer_kwargs = {
             "args": args,
             "loaders": (trainloader, valloader),
             "decode_fn": dataset.tok.decode,
-            "key": key,
+            "key": key
         }
-
-        wandbc = WeightsAndBiasesCallback(
-            metric_name="Val/loss", wandb_kwargs=wandb_kwargs, as_multirun=True
-        )
 
         # enqueue a few handpicked hyperparams for trials
         [study.enqueue_trial(hyperparams) for hyperparams in init_hyperparams]
 
         study.optimize(
-            lambda trial: kickoff_optuna(
+            lambda trial: kickoff_optuna(  # pyright: ignore[reportArgumentType]
                 trial=trial, artifact_name=artifact_name, **trainer_kwargs
             ),
-            n_trials=100,
-            callbacks=[wandbc],
+            n_trials=50,
+            callbacks=None,
             gc_after_trial=True,
         )
 
@@ -167,29 +177,42 @@ def main(key: PRNGKeyArray):
         print(f"\nValue: {study.best_trial.value}\nParams: {study.best_trial.params}\n")
 
     else:
-        jax.experimental.multihost_utils.sync_global_devices("Sync up all nodes.")  # type: ignore
-        trainloader = dataset.create_dataloader(split="train", upload_to_hub=True)
+        start_step = 0
 
-        jax.experimental.multihost_utils.sync_global_devices("Sync up all nodes.")  # type: ignore
-        valloader = dataset.create_dataloader(split="test", upload_to_hub=True)
+        if args.resume and not args.tune_hyperparams:
+            try:
+                start_step, _ = fetch_resume_progress(
+                    args.resume, args.save_dir, chkp_type="checkpoint"
+                )
+            except Exception as e:
+                print(f"\nCouldn't fetch previous checkpoint... {e}")
+                start_step = 0  # continue fresh if things go wrong
 
         loggers = UnifiedLogger(level="DEBUG")
         my_logger, wandb_logger = loggers.my_logger(), loggers.wandb_logger(args)
 
+        multihost_utils.sync_global_devices("Sync up all nodes.")  # type: ignore
+
+        trainloader = dataset.create_dataloader(
+            split="train", upload_to_hub=True, start_step=start_step
+        )
+
+        multihost_utils.sync_global_devices("Sync up all nodes.")  # type: ignore
+        valloader = dataset.create_dataloader(split="test", upload_to_hub=True)
+
         trainer = Trainer(
             args,
             loggers=(my_logger, wandb_logger),
-            loaders=(trainloader, valloader),
+            loaders=(trainloader, valloader),  # pyright: ignore[reportArgumentType]
             decode_fn=dataset.tok.decode,
-            key=key,
+            key=key
         )
 
         my_logger.info(f"# of all devices: {jax.device_count()}")
         my_logger.info(f"# of hosts: {jax.process_count()}")
         my_logger.info(f"Host id: {jax.process_index()}")
 
-        with jax.spmd_mode("allow_all"):
-            trainer.train()
+        trainer.train()
 
 
 def kickoff_optuna(trial, artifact_name: str, **trainer_kwargs):
@@ -225,7 +248,10 @@ def kickoff_optuna(trial, artifact_name: str, **trainer_kwargs):
     args = trainer_kwargs["args"]
 
     # Store the optuna checkpoint progress
-    optuna_chkp_path = f"chkp_{args.max_iters}i_{args.num_blocks}L_{args.width}{args.sweep_metadata}.db"
+    _, _, optuna_prefix, _ = sweep_prefixes(args=args)
+    optuna_chkp_path = (
+        f"{optuna_prefix}_{args.num_blocks}L_{args.width}{args.sweep_metadata}.db"
+    )
 
     if os.path.isfile(optuna_chkp_path) and args.exp_logging:
         artifact = Artifact(name=artifact_name, type="OptunaCheckpoint")
@@ -246,8 +272,7 @@ def kickoff_optuna(trial, artifact_name: str, **trainer_kwargs):
     my_logger.info(f"# of hosts: {jax.process_count()}")
     my_logger.info(f"Host id: {jax.process_index()}")
 
-    with jax.spmd_mode("allow_all"):
-        output = trainer.train(trial)
+    output = trainer.train(trial)
 
     return jax.numpy.nan_to_num(output, nan=9e9)
 

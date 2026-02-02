@@ -1,27 +1,36 @@
+import gc
 import os
 from functools import partial
-from typing import Any, Callable, Optional, Tuple, Union
+from typing import Any, Callable, Optional, Tuple
 
 import equinox as eqx
 import jax
 import jax.numpy as jnp
 import optax
 import optuna
+import regex as re
+from datasets.arrow_dataset import Dataset
+from jax.experimental import multihost_utils
 from jaxtyping import Array, Int, PRNGKeyArray, PyTree
 from jmp import Policy
 from optax._src.base import GradientTransformation
 from tqdm.auto import tqdm
 
 import wandb
+from eval import Evaluator
 from inferencer import Inferencer
 from ReAct.model.baseline import GPT
 from ReAct.model.blocks import LinearProj
-from ReAct.model.react import React
+from ReAct.model.factory import Model, UTModel, build_model, resolve_model_kind
+from ReAct.utils.arg_types import TrainingArgs
 from ReAct.utils.helpers import (
+    BENCHMARK_CONFIG,
+    IterableDatasetWithLen,
     Profiler,
+    broadcast_batch,
     calc_performance_metrics,
+    chunked_histogram,
     count_params,
-    get_hist,
     get_weights,
     load_eqx_obj,
     megatron_init,
@@ -39,13 +48,17 @@ get_linear_weights = partial(get_weights, layer=LinearProj)
 half, full = jnp.bfloat16, jnp.float32
 policy = Policy(compute_dtype=half, param_dtype=half, output_dtype=half)
 
-# Stable CE (w/ z-loss) from PaLM
+# Assemble stable CE (w/ z-loss) from PaLM
 ce_loss = cross_entropy_with_logits
 ce_loss.defvjp(_cross_entropy_with_logits_fwd, _cross_entropy_with_logits_bwd)
 
-@eqx.filter_jit
-def iters_fwd(
-    model: React, input_arr: Array, pad_mask: Array, iters_to_do: int, key: PRNGKeyArray
+def _iters_fwd(
+    model: UTModel,
+    input_arr: Array,
+    pad_mask: Array,
+    iters_to_do: int,
+    stop_grad: bool,
+    key: PRNGKeyArray,
 ) -> Array:
     # Only n passes, but track the gradient
     output, _ = model(
@@ -54,36 +67,56 @@ def iters_fwd(
         pad_mask=pad_mask,
         prev_thought=False,
         is_training=True,
+        stop_grad=stop_grad,
         key=key,
     )
 
     return output
 
-@eqx.filter_jit
-def vanilla_fwd(
-    model: GPT, input_arr: Array, pad_mask: Array, iters_to_do: int, key: PRNGKeyArray
+def _vanilla_fwd(
+    model: GPT,
+    input_arr: Array,
+    pad_mask: Array,
+    iters_to_do: int,
+    stop_grad: bool,
+    key: PRNGKeyArray,
 ) -> Array:
     return model(input_arr, pad_mask, enable_dropout=True, key=key)
 
+
+@eqx.filter_jit
+def forward(model: Model, args: Tuple[Any, ...]) -> Array:
+    fwd_fn = _vanilla_fwd if isinstance(model, GPT) else _iters_fwd
+    return jax.vmap(fwd_fn, in_axes=(None, 0, 0, None, None, 0))(model, *args)
+
+
 @eqx.filter_jit
 def _compute_softmax_cross_entropy_loss(pred_y: Array, y_one_hot: Array) -> Array:
-    loss, _  = ce_loss(pred_y, y_one_hot) # (batch_size, seqlen)
+    if pred_y.ndim == 3: # baseline path
+        loss, _ = ce_loss(pred_y, y_one_hot)  # (batch_size, seqlen)
+        return loss.mean()
+
+    # UT path
+    assert pred_y.ndim == 4, "pred_y must have shape (batch, iters, seqlen, vocab)."
+
+    loss, _ = jax.vmap(ce_loss, in_axes=(1, None))(pred_y, y_one_hot)
+
+    loss = jnp.einsum("ijk,i -> jk", loss, jnp.asarray([0.2, 0.3, 0.5]))
 
     return loss.mean()
 
-@eqx.filter_jit
+@eqx.filter_jit(donate="all-except-first")
 def make_step(
-    keys: PRNGKeyArray,
-    model: Union[React, GPT],
+    static_inputs: Tuple[
+        PyTree, int, GradientTransformation, int, Model, bool, PRNGKeyArray
+    ],
     opt_state: PyTree,
-    filter_spec: PyTree,
-    x: Array,
-    y: Array,
-    pad_mask: Array,
-    iters_to_do: int,
-    optim: GradientTransformation,
-    num_classes: int,
-):
+    batch_inputs: Tuple[Array, Array, Array],  # x, y, mask, key
+) -> Tuple[Array, Tuple[Model, PyTree], PyTree, PyTree]:
+
+    filter_spec, iters_to_do, optim, num_classes, model, stop_grad, keys = static_inputs
+    x, y, pad_mask = batch_inputs
+
     x, y, pad_mask = strategy.shard_cast((x, y, pad_mask))
     model, opt_state = strategy.shard_model((model, opt_state))
     dynamic_model = eqx.filter(model, eqx.is_inexact_array)
@@ -91,24 +124,20 @@ def make_step(
     @eqx.filter_jit
     @eqx.filter_value_and_grad
     def compute_loss(
-        model: React | GPT,
+        model: Model,
         x: Array,
         y: Array,
         pad_mask: Array,
         iters_to_do: int,
+        stop_grad: bool,
         num_classes: int,
         keys: PRNGKeyArray,
     ) -> Array:
         """
         Computes the loss of the model w.r.t the input.
         """
-        if model.__name__ == "ReAct":
-            forward = iters_fwd
-        else:
-            forward = vanilla_fwd
-
-        pred_y = jax.vmap(forward, in_axes=(None, 0, 0, None, 0))(
-            model, x, pad_mask, iters_to_do, keys
+        pred_y = forward(
+            model, args=(x, pad_mask, iters_to_do, stop_grad, keys)
         )  # (batch_size, seqlen, num_classes)
 
         y_one_hot = jax.nn.one_hot(
@@ -119,7 +148,9 @@ def make_step(
 
         return loss
 
-    loss, grads = compute_loss(model, x, y, pad_mask, iters_to_do, num_classes, keys)
+    loss, grads = compute_loss(
+        model, x, y, pad_mask, iters_to_do, stop_grad, num_classes, keys
+    )
     grads = strategy.shard_model_cast(grads)  # cast to bfloat16
     updates, opt_state = optim.update(grads, opt_state, dynamic_model)
     updates = strategy.shard_model(updates)
@@ -128,15 +159,15 @@ def make_step(
     # shard the updated state as well
     model, opt_state = strategy.shard_model((model, opt_state))
 
-    return loss, model, opt_state, grads, updates
+    return loss, (model, opt_state), grads, updates
 
 
 class Trainer:
     def __init__(
         self,
-        args: Any,
+        args: TrainingArgs,
         loggers: Tuple,
-        loaders: Tuple,
+        loaders: Tuple[Dataset | IterableDatasetWithLen, ...],
         decode_fn: Callable,
         dataset_size: Optional[int] = None,
         key: PRNGKeyArray = jax.random.PRNGKey(69),
@@ -162,7 +193,7 @@ class Trainer:
 
     def evaluate_acc(
         self,
-        model: Union[React, GPT],
+        model: Model,
         is_baseline: bool,
         loader: Any,
         eval_iters: int,
@@ -174,8 +205,12 @@ class Trainer:
         metrics_sum = jnp.zeros(3)  # [acc, loss, ppl]
         num_batches = len(loader)
 
-        for _, batch in tqdm(enumerate(loader), total=len(loader), desc='Validating'):
-            seq, label, pad_mask = jnp.asarray(batch['text'])
+        for _, batch in tqdm(
+            enumerate(broadcast_batch(loader, self.args.batch_size, self.args.seqlen)),
+            total=num_batches,
+            desc="Validating",
+        ):
+            seq, label, pad_mask = batch["text"]
             seq, label, pad_mask = policy.cast_to_compute((seq, label, pad_mask))
             seq, label, pad_mask = strategy.shard_cast((seq, label, pad_mask))
 
@@ -222,7 +257,6 @@ class Trainer:
                     adam_b1=self.args.beta_1,
                     adam_b2=self.args.beta_2,
                     nesterov=self.args.nesterov,
-                    adaptive=self.args.muon_adaptive,
                 )
 
             case _:
@@ -263,40 +297,25 @@ class Trainer:
 
         return filter_spec
 
-    def init_model(self, key: PRNGKeyArray) -> Tuple[PyTree, Union[React, GPT]]:
+    def init_model(self, key: PRNGKeyArray) -> Tuple[PyTree, Model]:
+        model_kind = resolve_model_kind(
+            baseline=self.args.baseline,
+            naive=self.args.naive,
+        )
+        if model_kind == "baseline":
+            self.max_iters = 1  # baseline model only does one pass
 
-        if self.args.baseline:
-            self.max_iters = 1 # baseline model only does one pass
-
-            model = GPT(
-                self.args.n_heads,
-                self.args.seqlen,
-                self.args.num_blocks,
-                self.args.width,
-                self.args.drop_rate,
-                self.args.num_classes,
-                key,
-                strategy
-            )
-        else:
-            model = React(
-                self.args.rank,
-                self.args.n_heads,
-                self.args.seqlen,
-                self.args.max_iters,
-                self.args.num_blocks,
-                self.args.width,
-                self.args.drop_rate,
-                self.args.num_classes,
-                key,
-                strategy
-            )
+        model = build_model(
+            args=self.args,
+            key=key,
+            strategy=strategy,
+        )
 
         # custom weight init
         weights = get_linear_weights(model)
 
         new_weights = [
-            megatron_init(weight, subkey)
+            megatron_init(weight, key=subkey)
             for weight, subkey in zip(weights, jax.random.split(key, len(weights)))
         ]
 
@@ -317,39 +336,44 @@ class Trainer:
     def resume_training(
         self, model: PyTree, opt_state: eqx.Module
     ) -> tuple[PyTree, PyTree, int, int]:
-        if isinstance(self.args.resume, str):
-            run_path, epoch, step = self.args.resume.split("+")
-            run_path, epoch, step = run_path.strip(), int(epoch.strip()), int(step.strip())
+        """
+        Resume from the latest local checkpoint in `save_dir`.
+        Does not perform any remote downloads; assumes artifacts (if any)
+        were already fetched by the caller before training starts.
+        """
+        if not isinstance(self.args.resume, str):
+            return model, opt_state, 0, 0
 
-            base_path = "https://api.wandb.ai/files/"
-            model_path = f'{base_path}{run_path}/model_{epoch}_{step}.eqx'
+        files = [
+            os.path.join(self.args.save_dir, file)
+            for file in os.listdir(self.args.save_dir)
+            if file.endswith("eqx")
+        ]
 
-            # wget both files to ReAct/outputs/, if those files don't exist
-            if not os.path.exists(f'{self.args.save_dir}model_{epoch}_{step}.eqx'):
-                os.system(f'wget -O {self.args.save_dir}model_{epoch}_{step}.eqx {model_path}')
-        else:
-            # get the model with max step & epoch number living in `save_dir`
-            files = [
-                os.path.join(self.args.save_dir, file)
-                for file in os.listdir(self.args.save_dir)
-                if file.endswith("eqx")
-            ]
+        if len(files) == 0:
+            # Nothing local to resume from
+            return model, opt_state, 0, 0
 
-            get_info = lambda idx: os.path.basename(latest_file).split(".")[0].split("_")[idx]  # noqa: E731
-            latest_file = max(files, key=os.path.getctime)
-            step, epoch = int(get_info(-1)), int(get_info(-2))
+        epoch, step = max(
+            [re.findall(r"\d+", file) for file in files],
+            key=lambda x: (int(x[0]), int(x[1])),
+        )
 
-        model, opt_state = load_eqx_obj( f"{self.args.save_dir}model_{epoch}_{step}.eqx", (model, opt_state) )
+        model, opt_state = load_eqx_obj(
+            f"{self.args.save_dir}model_{epoch}_{step}.eqx", (model, opt_state)
+        )
 
-        self.my_logger.info(f'\n-------- Resuming training from step {step} ---------\n')
+        self.my_logger.info(
+            f"\n-------- Resuming training from step {step} ---------\n"
+        )
 
-        return model, opt_state, step, epoch
+        return model, opt_state, int(step), int(epoch)
 
     @eqx.filter_jit
     def compute_metrics(
         self,
         keys: PRNGKeyArray,
-        model: eqx.Module,
+        model: Model,
         is_baseline: bool,
         input_arr: Array,
         label: Array,
@@ -364,21 +388,26 @@ class Trainer:
         model = strategy.shard_model(model)
         input_arr, label, pad_mask = strategy.shard_cast((input_arr, label, pad_mask))
 
-        keys = keys[:input_arr.shape[0], ...] # take a batch_size sized slice of the keys
-
         if is_baseline:
-            pred_y = jax.vmap(model, in_axes=(0, 0, None, 0))(input_arr, pad_mask, False, keys) # type: ignore
+            assert isinstance(model, GPT), (
+                f"Requested `baseline`, however provided type: {type(model)} object"
+            )
+            pred_y = jax.vmap(model, in_axes=(0, 0, None, 0))(input_arr, pad_mask, False, keys)
         else:
             pred_y = jax.vmap(model, in_axes=(0, None, 0, None, None, 0))(input_arr, eval_iters, pad_mask, False, False, keys)[0] # type:ignore
 
         y_hat = jax.nn.softmax(pred_y, axis=-1).argmax(-1)
 
-        # compute accuracy
-        accuracy = jnp.mean(y_hat == label)
+        if is_baseline:
+            # y_hat: (batch, seqlen)
+            accuracy = jnp.mean(y_hat == label)
+        else:
+            # (batch, iters, seqlen) -> (batch, seqlen)
+            accuracy = jnp.mean(y_hat[:, -1, ...] == label)
 
         # compute loss
         y_one_hot = jax.nn.one_hot(label, num_classes=num_classes) # (batch_size, seqlen, num_classes)
-        loss = ce_loss(pred_y, y_one_hot)[0].mean()
+        loss = _compute_softmax_cross_entropy_loss(pred_y, y_one_hot)
 
         # compute perplexity
         perplexity = jnp.exp(loss)
@@ -407,45 +436,77 @@ class Trainer:
         optim, _, _ = self.set_optim_and_scheduler(model)
         filter_spec = self.get_filterspec(model)
 
-        if self.args.resume is True and self.args.tune_hyperparams is False:
+        if (
+            self.args.resume or isinstance(self.args.resume, str)
+        ) and self.args.tune_hyperparams is False:
             model, opt_state, step_done, epoch_done = self.resume_training(
                 model, opt_state
             )
 
+            self.my_logger.warn(f" +++ Skipping {step_done} steps +++")
+
         print(f"Model: {model}")
+
+        evaluator = Evaluator(
+            self.args,  # pyright: ignore[reportArgumentType]
+            task=self.args.bench_task,
+            model=model,
+            key=self.key,
+        )
+
+        self.my_logger.info("\nBeginning Training...")
 
         for epoch in range(epoch_done, self.args.epochs):
             train_acc, train_loss, train_ppl = [], [], []
 
-            epoch_key = jnp.array([epoch, epoch + 1]).astype(jnp.uint32)
-            keys = jax.random.split(epoch_key, self.args.batch_size)
+            keys = jax.random.split(
+                jax.random.fold_in(jax.random.PRNGKey(0), epoch), self.args.batch_size
+            )
 
-            for step, batch in tqdm(enumerate(self.trainloader), total=self.dataset_length, desc=f'Epoch {epoch}'):
+            for step, batch in tqdm(
+                enumerate(
+                    broadcast_batch(
+                        self.trainloader, self.args.batch_size, self.args.seqlen
+                    )
+                ),
+                total=self.dataset_length,
+                desc=f"Epoch {epoch}",
+            ):
                 step += step_done  # for multiple epochs
                 prof.start_prof(step)
+                stop_grad = step >= 15_000
+                step_keys = jax.vmap(lambda x: jax.random.fold_in(x, step))(keys)
 
-                seq, label, pad_mask = jnp.asarray(batch["text"])
+                seq, label, pad_mask = batch["text"]
                 seq, label, pad_mask = policy.cast_to_compute((seq, label, pad_mask))
                 seq, label, pad_mask = strategy.shard_cast((seq, label, pad_mask))
 
-                loss, model, opt_state, grads, updates = make_step(
-                    keys=keys,
-                    model=model,
-                    opt_state=opt_state,
-                    filter_spec=filter_spec,
-                    x=seq,
-                    y=label,
-                    pad_mask=pad_mask,
-                    iters_to_do=self.args.max_iters,
-                    optim=optim,
-                    num_classes=self.args.num_classes,
+                loss, (model, opt_state), grads, updates = make_step(
+                    (
+                        filter_spec,
+                        self.args.max_iters,
+                        optim,
+                        self.args.num_classes,
+                        model,
+                        stop_grad,
+                        step_keys,
+                    ),
+                    opt_state,
+                    (seq, label, pad_mask),
                 )
 
-                loss = prof.stop_prof(loss, step)  # end trace if profiled
+                loss = prof.stop_prof(
+                    self.wandb_logger, loss, step
+                )  # end trace if profiled
 
                 if step % 100 == 0:
+                    # Re-obtain batch since we `donate`-ed it
+                    seq, label, pad_mask = batch["text"]
+                    seq, label, pad_mask = policy.cast_to_compute((seq, label, pad_mask))
+                    seq, label, pad_mask = strategy.shard_cast((seq, label, pad_mask))
+
                     accuracy, loss, perplexity = self.compute_metrics(
-                        keys=keys,
+                        keys=step_keys,
                         model=model,
                         is_baseline=self.args.baseline,
                         input_arr=seq,
@@ -464,7 +525,7 @@ class Trainer:
                     self.wandb_logger.log(
                         {
                             "Train/loss": loss,
-                            "Train/Lr": self.schedule_fn(epoch + 1 * step).item(),  # type: ignore
+                            "Train/Lr": self.schedule_fn(epoch + 1 * step).item(),
                             "Train/tokens": step * self.args.batch_size * self.args.seqlen,
                         },
                         step=step,
@@ -475,6 +536,8 @@ class Trainer:
                         self.wandb_logger.finish()
                         return loss
 
+                    gc.collect()
+
                 if step % self.args.log_interval == 0 and len(train_acc) > 0:
                     # Compute cumulatives
                     cum_train_acc = sum(train_acc) / len(train_acc)
@@ -482,7 +545,39 @@ class Trainer:
                     cum_train_ppl = sum(train_ppl) / len(train_ppl)
 
                     # clear the metrics
-                    train_acc, train_loss, train_ppl = [], [], []
+                    _ = train_acc.clear(), train_loss.clear(), train_ppl.clear()
+
+                    # Eval on benchmark
+                    eval_results = evaluator.run_lm_evaluation(model)
+
+                    # Dynamically extract metrics for all configured benchmark tasks
+                    bench_tasks = [t.strip() for t in self.args.bench_task.split(",")]
+
+                    bench_metrics: dict[str, float | None] = {}
+
+                    for task in bench_tasks:
+                        if task not in BENCHMARK_CONFIG:
+                            self.my_logger.warning(
+                                f"Unknown benchmark task '{task}', skipping. "
+                                f"Add it to BENCHMARK_CONFIG in trainer.py"
+                            )
+                            continue
+
+                        config = BENCHMARK_CONFIG[task]
+                        task_results = eval_results.get(task, {})
+
+                        # Extract metric and stderr, handling None for failed evals
+                        metric_val = task_results.get(config["metric"])
+                        stderr_val = task_results.get(config["stderr"])
+
+                        bench_metrics[f"Bench/{config['label']}"] = metric_val
+                        bench_metrics[f"Bench/{config['label_stderr']}"] = stderr_val
+
+                        # Log each benchmark result
+                        metric_type = "ppl" if "ppl" in config["label"] else "acc"
+                        self.my_logger.info(
+                            f"{task} {metric_type}: {metric_val} | stderr: {stderr_val}"
+                        )
 
                     ## Validation
                     (val_acc, val_loss, val_ppl), val_sample = self.evaluate_acc(
@@ -490,7 +585,7 @@ class Trainer:
                         self.args.baseline,
                         self.valloader,
                         self.args.max_iters,
-                        keys,
+                        step_keys,
                     )
 
                     self.wandb_logger.log(
@@ -501,9 +596,16 @@ class Trainer:
                             "Val/acc": val_acc,
                             "Val/loss": val_loss,
                             "Val/ppl": val_ppl,
-                            "Gradients": wandb.Histogram(np_histogram=get_hist(grads)),
-                            "Updates": wandb.Histogram(np_histogram=get_hist(updates)),
-                            "Weights": wandb.Histogram(np_histogram=get_hist(model)),
+                            **bench_metrics,  # Dynamic benchmark metrics
+                            "Misc/Gradients": wandb.Histogram(
+                                np_histogram=chunked_histogram(step_keys[0], grads)  # pyright: ignore[reportArgumentType]
+                            ),
+                            "Misc/Updates": wandb.Histogram(
+                                np_histogram=chunked_histogram(step_keys[1], updates)  # pyright: ignore[reportArgumentType]
+                            ),
+                            "Misc/Weights": wandb.Histogram(
+                                np_histogram=chunked_histogram(step_keys[2], model)  # pyright: ignore[reportArgumentType]
+                            ),
                         },
                         step=step,
                     )
@@ -535,9 +637,7 @@ class Trainer:
                         max_new_tokens=64,
                     )
 
-                    jax.experimental.multihost_utils.sync_global_devices(  # type: ignore
-                        "Sync up all nodes after inference."
-                    )
+                    multihost_utils.sync_global_devices("post-val sync")
 
                 if not self.args.tune_hyperparams and (step + 1) % self.args.save_interval == 0:
                     filepath = f"{self.args.save_dir}model_{epoch}_{step}.eqx"
@@ -545,7 +645,17 @@ class Trainer:
                     save_eqx_obj(self.args.save_dir, filepath, (model, opt_state))
 
                     self.my_logger.info(f"Model saved at {filepath}")
-                    self.wandb_logger.save(filepath)
+
+                    if jax.process_index() == 0:
+                        artifact = wandb.Artifact(
+                            self.args.resume
+                            if isinstance(self.args.resume, str)
+                            else "run_chkp",
+                            type="checkpoint",
+                        )
+
+                        artifact.add_file(filepath)
+                        self.wandb_logger.log_artifact(artifact)
 
             step_done = step  # type: ignore
             self.optuna_log(trial, (val_loss, step))  # type: ignore

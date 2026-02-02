@@ -7,9 +7,13 @@ import jax
 import numpy as np
 from datasets.arrow_dataset import Dataset
 from datasets.dataset_dict import DatasetDict
+from datasets.exceptions import DatasetNotFoundError
 from datasets.load import load_dataset, load_from_disk
 from jaxtyping import Array
 from numpy._typing import NDArray
+from torch.utils.data import DataLoader
+
+from ReAct.utils.helpers import IterableDatasetWithLen
 
 from .tokenizer import Tok
 
@@ -19,6 +23,8 @@ class ParentDataset:
         self,
         hf_username: str,
         hf_dataset: str,
+        hf_subset_name: str | None = None,
+        *,
         tgt_hf_repo: str,
         max_length: int,
         bsz: int,
@@ -37,6 +43,7 @@ class ParentDataset:
         self.max_length = max_length + 1
         self.hf_username = hf_username
         self.hf_dataset = hf_dataset
+        self.hf_subset_name = hf_subset_name
         self.tgt_hf_repo = tgt_hf_repo
         self.col_name = col_name
         self.bsz = bsz
@@ -163,8 +170,13 @@ class ParentDataset:
         raise NotImplementedError
 
     def create_dataloader(
-        self, split: str, slice: str | None = None, upload_to_hub: bool = False
-    ):
+        self,
+        split: str,
+        slice: str | None = None,
+        upload_to_hub: bool = False,
+        streaming: bool = False,
+        start_step: int = 0,
+    ) -> Dataset | DatasetDict | DataLoader | IterableDatasetWithLen:
         data_path = Path(f"{os.getenv('DISK_PATH')}/cached_data/owt_{split}.data")
 
         split, slice = self.produce_splits(split, slice)
@@ -172,6 +184,7 @@ class ParentDataset:
         try:
             dataset = load_dataset(
                 f"{self.hf_username}/{self.hf_dataset}-processed_{self.bsz}",
+                name=self.hf_subset_name,
                 split=f"{split}[{slice}]",
                 verification_mode="no_checks",
                 keep_in_memory=False,
@@ -185,12 +198,12 @@ class ParentDataset:
             dataset.set_format(type="numpy")
 
             return dataset
-        except (FileNotFoundError, ValueError):
+        except (FileNotFoundError, DatasetNotFoundError):
             try:
                 print(f"Loading dataset from {data_path}...")
                 dataset = self.load_data(data_path)
                 return dataset
-            except ValueError:
+            except FileNotFoundError:
                 print(
                     f"Building dataset from scratch... [split: {split}] | [bsz: {self.bsz}]"
                 )
@@ -202,6 +215,7 @@ class ParentDataset:
                     trust_remote_code=True,
                     keep_in_memory=False,
                     num_proc=None,
+                    streaming=streaming
                 ).select_columns(self.col_name)
 
                 dataset = self.take_subset(split, dataset, 2_000)

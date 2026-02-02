@@ -1,4 +1,4 @@
-import argparse
+from collections import defaultdict
 import os
 from typing import Any, List
 
@@ -13,52 +13,309 @@ from tqdm import tqdm
 
 from inferencer import Tok
 from ReAct.model.baseline import GPT
+from ReAct.model.factory import Model, build_model
+from ReAct.model.naive_ut import React as NaiveReact
 from ReAct.model.react import React
 from ReAct.utils.arg_parser import get_evaluation_args
+from ReAct.utils.arg_types import EvaluationArgs
 from ReAct.utils.helpers import load_eqx_obj
 from ReAct.utils.logger import UnifiedLogger
 from ReAct.utils.sharding import get_strategy
 
 
+class MyLM(TemplateLM):
+    def __init__(
+        self,
+        model: eqx.Module,
+        encode_fn: Any,
+        decode_fn: Any,
+        args: EvaluationArgs,
+    ):
+        super().__init__()
+
+        self.model = eqx.nn.inference_mode(model)
+        self.encode_fn = encode_fn
+        self.decode_fn = decode_fn
+        self.args = args
+
+    @property
+    def eot_token_id(self) -> Any:
+        return 50257
+
+    def tok_encode(self, string: str, **kwargs) -> list[int]:
+        encoded: Array = self.encode_fn(string, obey_maxlen=False)
+        encoded = jnp.asarray([i for i in encoded if i != self.eot_token_id])
+
+        return encoded.tolist()
+
+    def _calc_ll(self, seq: Array, lengths: tuple[int, int], target: Array) -> Array:
+        arrlen, tgtlen = lengths
+        pad_mask = jnp.where(seq == self.eot_token_id, 0, 1)
+        key = jax.random.PRNGKey(0)
+
+        def fwd(seq: Array, pad_mask: Array, key: PRNGKeyArray) -> Array:
+            if self.args.baseline:
+                logits = self.model(seq, pad_mask, False, key)
+            else:
+                logits = self.model(
+                    input_arr=seq,
+                    iters_to_do=self.args.max_iters,
+                    pad_mask=pad_mask,
+                    prev_thought=False,
+                    is_training=False,
+                    key=key,
+                )[0][-1]
+
+            return jax.nn.log_softmax(logits, axis=-1)
+
+        probs = fwd(seq, pad_mask, key)
+
+        target_log_probs = jnp.take_along_axis(
+            probs[arrlen - 1 : arrlen + tgtlen - 1,], target.reshape(-1, 1), -1
+        )
+
+        # Mask out padding target tokens - if any.
+        target_mask = jnp.where(target == self.eot_token_id, 0, 1)
+
+        return (target_log_probs.T * target_mask).sum() / target_mask.sum()
+
+    def _loglikelihood_tokens(
+        self, requests: List, **kwargs
+    ) -> list[tuple[float, bool]]:
+        output = []
+
+        for request in tqdm(requests):
+            context, target = request[-2], request[-1]
+
+            arr, target = (
+                jnp.asarray(context).astype(int),
+                jnp.asarray(target).astype(int),
+            )
+            arrlen, tgtlen = len(arr), len(target)
+
+            seq = jnp.concat([arr, target])[-self.args.seqlen :]
+            seq = jnp.pad(
+                seq,
+                (0, self.args.seqlen - seq.shape[0]),
+                constant_values=self.eot_token_id,
+            )
+
+            ll = self._calc_ll(seq, (arrlen, tgtlen), target)
+            output.append((ll.item(), 1))
+
+        return output
+
+    def loglikelihood_rolling(
+        self, requests, disable_tqdm: bool = False
+    ) -> list[float]:
+        """
+        Compute rolling log-likelihood for each request by:
+        1. Breaking input into appropriate chunks based on max context length
+        2. Computing log-likelihood for each chunk with maximum possible context
+        3. Ensuring each token is predicted exactly once
+
+        Args:
+            requests: List of request tuples containing (context,) strings
+            disable_tqdm: Whether to disable progress bar
+
+        Returns:
+            List of log-likelihood scores for each request
+        """
+        output = []
+
+        for request in tqdm(requests, disable=disable_tqdm):
+            context = request.arguments[0]
+
+            # Encode full context
+            tokens = []
+
+            for chunk in range((len(context) // 4096) + 1):
+                tokens.extend(
+                    self.tok_encode(context[chunk * 4096 : (chunk + 1) * 4096])
+                )
+
+            tokens = jnp.asarray(tokens)
+
+            # For longer contexts, process in chunks with maximum context
+            total_ll = 0.0
+            chunk_size = self.args.seqlen
+
+            # Process full chunks first
+            for i in range(len(tokens) // chunk_size + 1):
+                # If context fits in one window, process it directly
+                chunk = tokens[i * chunk_size : (i + 1) * chunk_size + 1]
+
+                if len(chunk) < self.args.seqlen:
+                    # Pad sequence to model's expected length
+                    seq = jnp.pad(
+                        chunk,
+                        (0, self.args.seqlen - len(chunk) + 1),
+                        constant_values=self.eot_token_id,
+                    )
+                    # Calculate log-likelihood for the whole sequence
+                    ll = self._calc_ll(
+                        seq[:-1],
+                        (0, len(chunk)),
+                        jnp.roll(seq, -1)[:-1],
+                    )
+
+                    total_ll += ll.item()
+                else:
+                    ll = self._calc_ll(
+                        chunk[:-1],
+                        (0, chunk_size),
+                        jnp.roll(chunk, -1)[:-1],
+                    )
+
+                    total_ll += ll.item()
+
+            output.append(total_ll)
+
+        return output
+
+    def generate_until(self, requests, disable_tqdm: bool = False) -> list[str]:
+        results: list[str] = []
+
+        for request in tqdm(requests, disable=disable_tqdm):
+            context, gen_kwargs = request.args
+
+            assert isinstance(gen_kwargs, dict), "generate_until kwargs must be a dict"
+            allowed = {"until", "max_gen_toks", "do_sample", "temperature"}
+            unexpected = set(gen_kwargs) - allowed
+            assert not unexpected, f"Unsupported generation kwargs: {unexpected}"
+
+            do_sample = bool(gen_kwargs.get("do_sample", False))
+            assert not do_sample, "Sampling kwargs are unsupported"
+
+            temperature = gen_kwargs.get("temperature", None)
+            if temperature is not None:
+                assert float(temperature) in {0.0, 1.0}, (
+                    "Only deterministic temperatures supported"
+                )
+
+            until_value = gen_kwargs.get("until", [])
+
+            if isinstance(until_value, str):
+                until = [until_value]
+            elif until_value is None:
+                until = []
+            else:
+                until = list(until_value)
+
+            eos_decoded = self.decode_fn([self.eot_token_id])
+            if eos_decoded and eos_decoded not in until:
+                until.append(eos_decoded)
+
+            max_gen_toks = int(gen_kwargs.get("max_gen_toks", self.args.num_tokens))
+
+            context_tokens = jnp.asarray(self.tok_encode(context), dtype=jnp.int32)
+            if context_tokens.size == 0:
+                context_tokens = jnp.asarray([self.prefix_token_id], dtype=jnp.int32)
+
+            generated_tokens: list[int] = []
+            current_tokens = context_tokens
+            output_text = ""
+
+            for _ in range(max_gen_toks):
+                seq_len = int(current_tokens.shape[0])
+
+                if seq_len >= self.args.seqlen:
+                    input_seq = current_tokens[-self.args.seqlen :]
+                    pad_mask = jnp.ones(self.args.seqlen, dtype=jnp.int32)
+                    last_index = self.args.seqlen - 1
+                else:
+                    pad_len = self.args.seqlen - seq_len
+                    input_seq = jnp.pad(
+                        current_tokens,
+                        (0, pad_len),
+                        constant_values=self.eot_token_id,
+                    )
+                    pad_mask = jnp.concatenate([
+                        jnp.ones(seq_len, dtype=jnp.int32),
+                        jnp.zeros(pad_len, dtype=jnp.int32),
+                    ])
+                    last_index = max(seq_len - 1, 0)
+
+                forward_key = jax.random.PRNGKey(0)
+                if self.args.baseline:
+                    logits = self.model(input_seq, pad_mask, False, forward_key)
+                else:
+                    logits = self.model(
+                        input_seq,
+                        self.args.max_iters,
+                        pad_mask,
+                        False,
+                        False,
+                        forward_key,
+                    )[0]
+
+                logits = logits[last_index, :]
+                next_token = int(jnp.argmax(logits))
+
+                if next_token == self.eot_token_id:
+                    break
+
+                generated_tokens.append(next_token)
+                current_tokens = jnp.concatenate([
+                    current_tokens,
+                    jnp.asarray([next_token], dtype=jnp.int32),
+                ])
+
+                decoded = self.decode_fn(generated_tokens)
+                trimmed = decoded
+                stop_hit = False
+                for term in until:
+                    if term and term in trimmed:
+                        trimmed = trimmed.split(term)[0]
+                        stop_hit = True
+                        break
+
+                output_text = trimmed
+
+                if stop_hit:
+                    break
+
+            if generated_tokens and not output_text:
+                final_decoded = self.decode_fn(generated_tokens)
+                for term in until:
+                    if term:
+                        final_decoded = final_decoded.split(term)[0]
+                output_text = final_decoded
+
+            results.append(output_text)
+
+        return results
+
+
 class Evaluator:
-    def __init__(self, args: argparse.Namespace, key: PRNGKeyArray):
+    def __init__(
+        self,
+        args: EvaluationArgs,
+        task: str,
+        model: str | Model | None = None,
+        *,
+        key: PRNGKeyArray,
+    ):
         self.pad_token = 50257
         self.key = key
         self.args = args
+        self.strategy = get_strategy(self.args.strategy)
+        self.task = task or args.bench_task
 
         tok = Tok(vocab_dir=None, max_length=512)
 
         self.decode_fn = tok.decode
         self.encode_fn = tok.encode
 
-        self.strategy = get_strategy(self.args.strategy)
+        self.model = self.skeleton_model() if model is None else model
 
-    def skeleton_model(self, is_baseline: bool) -> GPT | React:
-        if not is_baseline:
-            model = React(
-                n_heads=self.args.n_heads,
-                seqlen=self.args.seqlen,
-                max_iters=self.args.max_iters,
-                num_blocks=self.args.num_blocks,
-                width=self.args.width,
-                drop_rate=0.0,
-                vocab_size=self.args.num_classes,
-                key=self.key,
-                strategy=self.strategy,
-            )
-        else:
-            model = GPT(
-                n_heads=self.args.n_heads,
-                seqlen=self.args.seqlen,
-                num_blocks=self.args.num_blocks,
-                width=self.args.width,
-                drop_rate=0.0,
-                vocab_size=self.args.num_classes,
-                key=self.key,
-                strategy=self.strategy,
-            )
-
-        return model
+    def skeleton_model(self) -> Model:
+        return build_model(
+            args=self.args,
+            key=self.key,
+            strategy=self.strategy,
+            drop_rate=0.0,
+        )
 
     def encode_input(self, my_input: str, obey_maxlen: bool = True) -> Array:
         encoded = self.encode_fn(my_input, obey_maxlen=obey_maxlen)["input_ids"]
@@ -66,165 +323,13 @@ class Evaluator:
 
         return encoded
 
-    def run_lm_evaluation(self):
-        model = self.skeleton_model(self.args.baseline)
-        model = load_eqx_obj(
-            self.args.checkpoint_path,
-            model if self.args.baseline else eqx.filter(model, eqx.is_array),
-        )
+    def run_lm_evaluation(self, _model: Model | None = None):
+        match _model:
+            case React() | NaiveReact() | GPT():
+                model = _model
 
-        class MyLM(TemplateLM):
-            def __init__(
-                self,
-                model: eqx.Module,
-                encode_fn: Any,
-                decode_fn: Any,
-                args: argparse.Namespace,
-            ):
-                super().__init__()
-
-                self.model = eqx.nn.inference_mode(model)
-                self.encode_fn = encode_fn
-                self.decode_fn = decode_fn
-                self.args = args
-
-            @property
-            def eot_token_id(self) -> Any:
-                return 50304
-
-            def tok_encode(self, string: str, **kwargs) -> list[int]:
-                encoded: Array = self.encode_fn(string, obey_maxlen=False)
-                encoded = jnp.asarray([i for i in encoded if i != self.eot_token_id])
-
-                return encoded.tolist()
-
-            def _calc_ll(
-                self, seq: Array, lengths: tuple[int, int], target: Array
-            ) -> Array:
-                arrlen, tgtlen = lengths
-                pad_mask = jnp.where(seq == self.eot_token_id, 0, 1)
-                key = jax.random.PRNGKey(0)
-
-                def fwd(seq: Array, pad_mask: Array, key: PRNGKeyArray) -> Array:
-                    if self.args.baseline:
-                        logits = self.model(seq, pad_mask, False, key)
-                    else:
-                        logits = self.model(
-                            seq,
-                            self.args.max_iters,
-                            jnp.ones_like(seq),
-                            False,
-                            False,
-                            key,
-                        )[0]
-
-                    return jax.nn.log_softmax(logits, axis=-1)
-
-                probs = fwd(seq, pad_mask, key)
-
-                target_log_probs = (
-                    probs[jnp.arange(arrlen, arrlen + tgtlen), target[:tgtlen]]
-                    * pad_mask[:tgtlen]
-                )
-
-                return target_log_probs.sum()
-
-            def _loglikelihood_tokens(
-                self, requests: List, **kwargs
-            ) -> list[tuple[float, bool]]:
-                output = []
-
-                for request in tqdm(requests):
-                    context, target = request[-2], request[-1]
-
-                    arr, target = (
-                        jnp.asarray(context).astype(int),
-                        jnp.asarray(target).astype(int),
-                    )
-                    arrlen, tgtlen = len(arr), len(target)
-
-                    seq = jnp.concat([arr, target])[-self.args.seqlen :]
-                    seq = jnp.pad(
-                        seq,
-                        (0, self.args.seqlen - seq.shape[0]),
-                        constant_values=self.eot_token_id,
-                    )
-
-                    ll = self._calc_ll(seq, (arrlen, tgtlen), target)
-                    output.append((ll.item(), 1))
-
-                return output
-
-            def loglikelihood_rolling(
-                self, requests, disable_tqdm: bool = False
-            ) -> list[float]:
-                """
-                Compute rolling log-likelihood for each request by:
-                1. Breaking input into appropriate chunks based on max context length
-                2. Computing log-likelihood for each chunk with maximum possible context
-                3. Ensuring each token is predicted exactly once
-
-                Args:
-                    requests: List of request tuples containing (context,) strings
-                    disable_tqdm: Whether to disable progress bar
-
-                Returns:
-                    List of log-likelihood scores for each request
-                """
-                output = []
-
-                for request in tqdm(requests, disable=disable_tqdm):
-                    context = request.arguments[0]
-
-                    # Encode full context
-                    tokens = []
-
-                    for chunk in range((len(context) // 4096) + 1):
-                        tokens.extend(
-                            self.tok_encode(context[chunk * 4096 : (chunk + 1) * 4096])
-                        )
-
-                    tokens = jnp.asarray(tokens)
-
-                    # For longer contexts, process in chunks with maximum context
-                    total_ll = 0.0
-                    chunk_size = self.args.seqlen
-
-                    # Process full chunks first
-                    for i in range(len(tokens) // chunk_size + 1):
-                        # If context fits in one window, process it directly
-                        chunk = tokens[i * chunk_size : (i + 1) * chunk_size + 1]
-
-                        if len(chunk) < self.args.seqlen:
-                            # Pad sequence to model's expected length
-                            seq = jnp.pad(
-                                chunk,
-                                (0, self.args.seqlen - len(chunk) + 1),
-                                constant_values=self.eot_token_id,
-                            )
-                            # Calculate log-likelihood for the whole sequence
-                            ll = self._calc_ll(
-                                seq[:-1],
-                                (0, len(chunk)),
-                                jnp.roll(seq, -1)[:-1],
-                            )
-
-                            total_ll += ll.item()
-                        else:
-                            ll = self._calc_ll(
-                                chunk[:-1],
-                                (0, chunk_size),
-                                jnp.roll(chunk, -1)[:-1],
-                            )
-
-                            total_ll += ll.item()
-
-                    output.append(total_ll)
-
-                return output
-
-            def generate_until(self, requests, disable_tqdm: bool = False) -> list[str]:
-                raise NotImplementedError
+            case None:
+                model: Model = load_eqx_obj(self.args.checkpoint_path, self.model)
 
         lm_obj = MyLM(
             model=model,
@@ -235,12 +340,18 @@ class Evaluator:
 
         task_manager = TaskManager()
 
-        results = lm_eval.simple_evaluate(
-            model=lm_obj,
-            tasks=[self.args.task],
-            num_fewshot=None,
-            task_manager=task_manager,
-        )
+        try:
+            results = lm_eval.simple_evaluate(
+                model=lm_obj,
+                tasks=self.args.bench_task.split(","),
+                num_fewshot=None,
+                task_manager=task_manager,
+            )
+        except OverflowError:
+            print("\n :=== Overflow error detected in eval harness. Continuing... :===\n")
+            results = defaultdict(
+                lambda: defaultdict(lambda: defaultdict(lambda: None))
+            )
 
         return results["results"]  # type: ignore
 
@@ -249,13 +360,15 @@ if __name__ == "__main__":
     key = jax.random.PRNGKey(0)
 
     args = get_evaluation_args()
-    logger = UnifiedLogger(args, level="DEBUG")
+    logger = UnifiedLogger(level="DEBUG")
     my_logger = logger.my_logger()
 
     my_logger.warning(
         "Make sure to provide the correct args per the model configuration - as it cant be autodetected!"
     )
-    my_logger.warning("These are: max_iters| baseline | num_blocks | width | n_heads")
+    my_logger.warning(
+        "These are: max_iters | baseline | naive | num_blocks | width | n_heads"
+    )
     print(f"{'-' * 50}\n")
 
     assert args.checkpoint_path is not None, "Please provide a checkpoint path"
@@ -263,7 +376,7 @@ if __name__ == "__main__":
         "Please provide a valid checkpoint path | File does not exist"
     )
 
-    evaluator = Evaluator(args, key)
+    evaluator = Evaluator(args, None, key=key)
 
     # Run LM evaluation
     eval_results = evaluator.run_lm_evaluation()
